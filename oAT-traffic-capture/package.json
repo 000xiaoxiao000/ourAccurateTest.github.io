@@ -1,0 +1,73 @@
+{
+  "name": "ai-requirement-verification-traffic-capture",
+  "version": "1.0.0",
+  "description": "AI 需求一致性验证平台的流量采集与覆盖率中继桌面工具",
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev:vite": "vite",
+    "dev:electron": "cross-env NODE_ENV=development node scripts/run-electron.cjs .",
+    "build:electron": "tsc -p tsconfig.electron.json && cp electron/preload.cjs dist-electron/preload.cjs",
+    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development node scripts/run-electron.cjs .\"",
+    "build": "vue-tsc --noEmit && vite build && npm run build:electron",
+    "start": "npm run build && node scripts/run-electron.cjs .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "exceljs": "^4.3.0",
+    "http-mitm-proxy": "^0.9.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-router": "^4.3.0",
+    "better-sqlite3": "^9.4.3",
+    "@grpc/grpc-js": "1.12.0",
+    "mqtt": "5.10.1",
+    "node-forge": "^1.3.1",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.8",
+    "@types/node": "^20.12.0",
+    "@types/node-forge": "^1.3.11",
+    "@types/ws": "^8.5.10",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "electron": "^30.0.1",
+    "electron-builder": "^24.13.3",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.8",
+    "vite-plugin-electron": "^0.28.6",
+    "vue-tsc": "^2.0.14",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.oat.traffic-capture",
+    "productName": "AI 需求验证流量采集器",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/",
+        "to": "resources/",
+        "filter": ["**/*"]
+      }
+    ],
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

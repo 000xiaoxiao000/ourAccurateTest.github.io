@@ -1,0 +1,40 @@
+{
+  "properties": [
+    {
+      "name": "spring.datasource.druid.initial-size",
+      "type": "java.lang.Integer",
+      "description": "Initial size of Druid connection pool.",
+      "defaultValue": 2
+    },
+    {
+      "name": "spring.datasource.druid.min-idle",
+      "type": "java.lang.Integer",
+      "description": "Minimum number of idle connections in Druid pool.",
+      "defaultValue": 2
+    },
+    {
+      "name": "spring.datasource.druid.max-active",
+      "type": "java.lang.Integer",
+      "description": "Maximum number of active connections in Druid pool.",
+      "defaultValue": 20
+    },
+    {
+      "name": "spring.datasource.druid.max-wait",
+      "type": "java.lang.Long",
+      "description": "Maximum wait time in milliseconds to get a connection from Druid pool.",
+      "defaultValue": 60000
+    },
+    {
+      "name": "oat.storage.large-payload.path",
+      "type": "java.lang.String",
+      "description": "File system path for storing large payload data that exceeds inline threshold.",
+      "defaultValue": "${user.home}/oAT/codeData/large-payload/"
+    },
+    {
+      "name": "oat.storage.static-source.inline-threshold-bytes",
+      "type": "java.lang.Long",
+      "description": "Threshold in bytes for storing static source code inline in database versus file system. Data smaller than this threshold is stored inline in DB.",
+      "defaultValue": 8192
+    }
+  ]
+}

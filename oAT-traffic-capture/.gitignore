@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-electron
+release
+*.log
+.DS_Store
+.vscode
+.idea
+*.local
+.http-mitm-proxy

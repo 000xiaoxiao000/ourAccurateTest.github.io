@@ -1,0 +1,68 @@
+# maven ignore
+target/
+target/**
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.war
+*.zip
+*.tar
+*.tar.gz
+
+# eclipse ignore
+.settings/
+.project
+.classpath
+.apt_generated
+.factorypath
+.settings
+.springBeans
+.sts4-cache
+
+# idea ignore
+.idea
+.idea/**
+*.ipr
+*.iml
+*.iws
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+.vscode/**
+
+# temp ignore
+*.log
+log/**
+*.cache
+*.diff
+*.patch
+*.tmp
+
+### Mac OS ###
+.DS_Store
+**/.DS_Store
+
+# system ignore
+Thumbs.db
+*.orig`
+Logs
+build.gradle
+.gradle
+/**/dependency-reduced-pom.xml
+**/gitRepo/**
+/oAT-web-frontend/node_modules/
+/oAT-web-frontend/dist/
