@@ -131,5 +131,3 @@ public class MyCustomTool {
 - AI 分析质量依赖平台数据完整性，快照、链路、覆盖率和静态源码需要先入库。
 - 语义缓存依赖 Redis；Redis 不可用时会跳过缓存，不影响正常对话。
 - 本地 Ollama 响应可能较慢，建议把 `ai.llm.timeout` 设置为 300 秒或更高。
-- `oAT-relay` 不直接依赖本模块，它只转发 HTTP 请求。
-

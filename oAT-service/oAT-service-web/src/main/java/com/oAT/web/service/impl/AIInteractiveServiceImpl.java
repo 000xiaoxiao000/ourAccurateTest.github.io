@@ -172,11 +172,7 @@ public class AIInteractiveServiceImpl implements AIInteractiveService {
     }
 
     private List<AppVo> loadApps(String projectId) {
-        List<AppVo> apps = appService.getAppList(projectId);
-        for (AppVo app : apps) {
-            app.setOnlineCount(clientSessionService.getOnlineSessionsByAppId(app.getId()).size());
-        }
-        return apps;
+        return appService.getAppList(projectId);
     }
 
     private String normalizePageContext(String pageContext) {

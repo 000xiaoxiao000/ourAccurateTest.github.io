@@ -43,7 +43,13 @@ mvn clean package
 
 ```bash
 cd oAT-service-web
-java -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
+./start.sh
+```
+
+如果必须手工执行 `java -jar`，需要带上 JDK native access 参数，避免新版 JDK 对 Tomcat Native/APR 的限制预警：
+
+```bash
+java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
 详细数据库初始化、配置项和启动说明见：
@@ -55,4 +61,3 @@ java -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 
 - 服务端统一使用 JDK 17+。
 - `oAT-ai` 必须先安装到本地 Maven 仓库，`oAT-service-web` 才能单独构建成功。
-- `oAT-relay` 是独立模块，不属于 `oAT-service` 聚合构建。

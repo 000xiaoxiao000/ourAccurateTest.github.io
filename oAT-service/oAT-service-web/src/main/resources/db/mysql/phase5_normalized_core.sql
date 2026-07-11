@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS `oat_app` (
   `project_id` VARCHAR(64),
   `range_type` VARCHAR(32),
   `src_name` VARCHAR(256),
+  `language` VARCHAR(32),
+  `language_config_json` JSON,
   `app_describe` TEXT,
   `properties_text` TEXT,
   `current_version` VARCHAR(128),

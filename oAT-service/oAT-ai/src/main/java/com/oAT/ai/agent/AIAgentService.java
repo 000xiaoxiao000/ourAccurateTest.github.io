@@ -179,11 +179,8 @@ public class AIAgentService {
         registerTool(codeRelationTool);
         registerTool(performanceTool);
         registerTool(defectTool);
-        registerTool(testcaseTool);
-        registerTool(codeQualityTool);
         registerTool(bugDetectTool);
         registerTool(callChainAnalysisTool);
-        registerTool(callChainCompareTool);
 
         return tools;
     }

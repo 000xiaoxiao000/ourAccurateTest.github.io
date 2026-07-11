@@ -16,4 +16,11 @@ public class ApiExceptionHandler {
         result.setErrorMessage("AUTH_REQUIRED");
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(result);
     }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ResultNotified<Object>> handleBadRequest(IllegalArgumentException e) {
+        ResultNotified<Object> result = new ResultNotified<>(false, e.getMessage() == null ? "请求参数不合法" : e.getMessage());
+        result.setErrorMessage("BAD_REQUEST");
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
+    }
 }

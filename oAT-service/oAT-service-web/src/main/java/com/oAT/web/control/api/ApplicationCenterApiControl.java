@@ -55,7 +55,7 @@ public class ApplicationCenterApiControl {
         payload.setSources(sources);
         payload.setTotal(sources.size());
         payload.setCurrentUserRole(resolveUserRole(projectId, user));
-        return new ResultNotified<>(true, "获取采集源健康度成功", payload);
+        return new ResultNotified<>(true, "获取采集源状态成功", payload);
     }
 
     @GetMapping("/apps/{appId}/settings")

@@ -1,1 +1,0 @@
--- static_source_info 索引已按计划迁移到 phase5_normalized_core.sql 中的 oat_static_source_class。

@@ -56,7 +56,12 @@ phase2_version_center.sql
 phase3_case_center.sql
 phase4_static_source_info.sql
 phase5_normalized_core.sql
+phase6_ai_verification.sql
 ```
+
+`phase6_ai_verification.sql` 提供联邦式 AI 需求一致性验证所需的轻量数据表，仅保存外部资产快照、分析基线、AC 投影、追溯边、AI 发现、人工审核状态和质量门禁结果；需求、用例、Bug、执行计划等事实源仍保留在外部平台。
+
+已有数据库升级时，如果曾执行过早期 `phase6_ai_verification.sql`，需按脚本顶部的 `Upgrade note` 为 `oat_verification_baseline` 补充执行证据和覆盖率证据列。
 
 ## 关键配置
 
@@ -70,12 +75,6 @@ src/main/resources/application.properties
 
 ```properties
 server.port=8899
-```
-
-如通过 `oAT-relay` 暴露服务，保持本服务端口不变，在 relay 中配置：
-
-```properties
-oat.relay.target-base-url=http://127.0.0.1:8899
 ```
 
 ### MySQL
@@ -117,13 +116,19 @@ oat.usecase.prd-link-template=https://prd.example.com/doc/{id}
 ## 启动
 
 ```bash
-java -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
+./start.sh
 ```
 
 后台启动示例：
 
 ```bash
-nohup java -jar target/oAT-service-web-1.0.0-SNAPSHOT.war > oat.log 2>&1 &
+nohup ./start.sh > oat.log 2>&1 &
+```
+
+如果必须手工执行 `java -jar`，需要带上 JDK native access 参数，避免新版 JDK 对 Tomcat Native/APR 的限制预警：
+
+```bash
+java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
 外部 Tomcat 部署时需使用 Tomcat 10+，以匹配 Spring Boot 3.x 的 Servlet 版本要求。
@@ -136,10 +141,18 @@ nohup java -jar target/oAT-service-web-1.0.0-SNAPSHOT.war > oat.log 2>&1 &
 | `UsecaseService` | 用例目录、详情和关联 |
 | `ApiEndpointAnalysisService` | API 端点识别 |
 | `AIInteractiveService` | AI 对话、上下文路由和流式输出 |
+| `VerificationService` | AI 需求一致性验证、快照基线、追溯矩阵、证据审核和质量门禁 |
+
+## AI 需求一致性验证接入
+
+验证平台支持三类轻量接入：
+
+- 文件或粘贴：需求、用例、源码、执行报告和覆盖率报告都保存为一次性分析快照。
+- Git 源码快照：通过应用已有仓库配置或手填仓库地址，按分支/Commit 拉取源码并抽取 Java 文件摘要作为 SOURCE 证据。
+- 外部回写链接：在没有 Jira、禅道、TAPD 等真实连接器时，使用 `link-only` 模式记录外部 Bug、任务或评论链接，并保存回写审计。
 
 ## 注意事项
 
 - MySQL 应先于本服务启动。
 - 首次部署执行全部 SQL；升级时只执行新增 phase。
 - `oat.data.path` 会自动创建，但磁盘空间和权限需要提前确认。
-- `oAT-relay` 只是转发层，不替代本服务的数据库或 AI 配置。

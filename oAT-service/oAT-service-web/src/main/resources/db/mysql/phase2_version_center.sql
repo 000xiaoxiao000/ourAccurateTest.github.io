@@ -1,1 +1,0 @@
--- version_center 索引已按计划拆分到 phase5_normalized_core.sql 中的 oat_version/oat_version_compare_report。

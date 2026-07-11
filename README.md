@@ -18,9 +18,7 @@ AIRequirementVerification/
 ├── oAT-service/
 │   ├── oAT-ai/           # LangChain4j AI 分析模块
 │   └── oAT-service-web/  # 平台后端主服务
-├── oAT-relay/            # HTTP 转发中继
 ├── oAT-web-frontend/     # Web 前端
-├── oAT-traffic-capture/  # Electron 桌面流量采集器
 └── docs/                 # 文档与图片资源
 ```
 
@@ -33,10 +31,6 @@ oAT-service-web
   └─ oAT-ai：AI 工具编排与 LLM 调用
        ▼
   oAT-web-frontend
-
-可选入口：
-  oAT-relay：在隔离网络中转发前端请求
-  oAT-traffic-capture：采集桌面流量
 ```
 
 ## 核心能力
@@ -54,7 +48,6 @@ oAT-service-web
 | AI | LangChain4j 1.12.2，支持 OpenAI / DeepSeek / Ollama / 兼容 OpenAI 协议接口 |
 | 存储 | MySQL 5.7+/8.x |
 | 前端 | Vue 3、TypeScript、Vite 7、Pinia、Vue Router |
-| 桌面端 | Electron 30、Vue 3、Vite 5、SQLite、http-mitm-proxy |
 
 ## 环境要求
 
@@ -62,7 +55,7 @@ oAT-service-web
 |---|---|---|
 | JDK | 17+ | Java 模块构建与运行 |
 | Maven | 3.8+ | Java 模块构建 |
-| Node.js | 18+ | 前端和桌面端构建 |
+| Node.js | 18+ | 前端构建 |
 | MySQL | 5.7+ / 8.x | 结构化数据 |
 
 ## 构建顺序
@@ -78,17 +71,8 @@ mvn clean install
 cd ../oAT-service-web
 mvn clean package
 
-# 3. 构建 HTTP 中继，可选
-cd ../../oAT-relay
-mvn clean package
-
-# 4. 构建 Web 前端，可选
-cd ../oAT-web-frontend
-npm install
-npm run build
-
-# 5. 构建桌面流量采集器，可选
-cd ../oAT-traffic-capture
+# 3. 构建 Web 前端
+cd ../../oAT-web-frontend
 npm install
 npm run build
 ```
@@ -98,15 +82,11 @@ npm run build
 1. 启动 MySQL。
 2. 初始化 MySQL 表结构，脚本位于 `oAT-service/oAT-service-web/src/main/resources/db/mysql/`。
 3. 启动 `oAT-service-web`。
-4. 按需启动 `oAT-relay`。
-5. 启动 `oAT-web-frontend` 或部署前端静态资源。
-6. 按需启动 `oAT-traffic-capture` 采集流量。
+4. 启动 `oAT-web-frontend` 或部署前端静态资源。
 
 ## 模块文档
 
 - [oAT-service](oAT-service/README.md)
 - [oAT-service-web](oAT-service/oAT-service-web/README.md)
 - [oAT-ai](oAT-service/oAT-ai/README.md)
-- [oAT-relay](oAT-relay/README.md)
 - [oAT-web-frontend](oAT-web-frontend/README.md)
-- [oAT-traffic-capture](oAT-traffic-capture/README.md)

@@ -22,10 +22,9 @@ public class AIInteractiveNavigationService {
     public List<AIQuickLinkVo> buildQuickLinks(String projectId, List<AppVo> apps, RouteContext routeContext) {
         List<AIQuickLinkVo> links = new ArrayList<>();
         links.add(new AIQuickLinkVo("项目主页", "回到项目整体概况", "/p/" + projectId + "/home"));
-        links.add(new AIQuickLinkVo("在线实例", "查看当前在线应用实例", "/p/" + projectId + "/apps/online"));
         links.add(new AIQuickLinkVo("搜索中心", "搜索用例和项目内容", "/p/" + projectId + "/search"));
         if (isRoute(routeContext, "trace", "trace.recent", "trace.detail", "trace.app")) {
-            links.add(new AIQuickLinkVo("链路地图", "查看调用关系与链路分布", "/p/" + projectId + "/map/home"));
+            links.add(new AIQuickLinkVo("链路地图", "查看需求、用例、Bug、源码的双向追溯", "/p/" + projectId + "/map/home"));
         }
         AppVo targetApp = findTargetApp(apps, "");
         if (targetApp != null && StringUtils.hasText(targetApp.getId())) {
@@ -55,8 +54,6 @@ public class AIInteractiveNavigationService {
             actions.add(buildAutoNavigateAction("打开 AI 工作台", "/p/" + projectId + "/ai"));
         } else if (containsAny(questionText, "应用中心", "应用列表")) {
             actions.add(buildAutoNavigateAction("打开应用中心", "/p/" + projectId + "/apps"));
-        } else if (containsAny(questionText, "在线应用")) {
-            actions.add(buildAutoNavigateAction("打开在线应用", "/p/" + projectId + "/apps/online"));
         } else if (containsAny(questionText, "添加应用", "新增应用", "创建应用")) {
             actions.add(buildAutoNavigateAction("打开添加应用", "/p/" + projectId + "/apps?create=1"));
         } else if (containsAny(questionText, "创建新项目", "新建项目", "创建项目")) {
