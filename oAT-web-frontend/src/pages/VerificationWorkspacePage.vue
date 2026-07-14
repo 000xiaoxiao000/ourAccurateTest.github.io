@@ -1686,7 +1686,7 @@ button,
 }
 
 .writeback-intro span {
-  color: var(--oat-muted);
+  color: var(--oat-text-muted);
   font-size: 13px;
 }
 

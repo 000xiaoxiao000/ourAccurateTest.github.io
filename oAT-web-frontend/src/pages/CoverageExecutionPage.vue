@@ -177,7 +177,7 @@ function msg(e: unknown) { return e instanceof Error ? e.message : '操作失败
 .metric-value.bad { color:var(--oat-danger); }
 .metric-card small { font-size:11px;color:var(--oat-text-muted); }
 .metric-bar { height:6px;border-radius:999px;background:rgba(15,23,42,.08);overflow:hidden; }
-.metric-fill { height:100%;border-radius:999px;background:var(--color,var(--oat-primary));transition:width .3s ease; }
+.metric-fill { --color: var(--oat-primary);height:100%;border-radius:999px;background:var(--color);transition:width .3s ease; }
 .coverage-notice { padding:14px 16px;border:1px solid var(--oat-border);border-radius:12px;background:var(--oat-surface-soft); }
 .coverage-notice h3 { margin:0 0 8px;font-size:14px; }
 .coverage-notice ul { margin:0;padding-left:18px;display:grid;gap:5px; }

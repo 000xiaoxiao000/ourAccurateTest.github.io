@@ -2,8 +2,6 @@ package com.oAT.web.verification.connector;
 
 import com.oAT.web.verification.model.VerificationModels.*;
 
-import java.util.List;
-
 /**
  * Connector SPI — all external platform adapters implement this interface.
  * Only read capabilities are mandatory; write-back is optional and gated by configuration.
