@@ -35,6 +35,10 @@ public class VerificationSchemaInitializer {
             ensureColumn("oat_app", "language_config_json", "ALTER TABLE oat_app ADD COLUMN language_config_json JSON NULL AFTER language");
             ensureColumn("oat_verification_baseline", "execution_asset_id", "ALTER TABLE oat_verification_baseline ADD COLUMN execution_asset_id VARCHAR(64) NULL AFTER source_asset_id");
             ensureColumn("oat_verification_baseline", "coverage_asset_id", "ALTER TABLE oat_verification_baseline ADD COLUMN coverage_asset_id VARCHAR(64) NULL AFTER execution_asset_id");
+            ensureColumn("oat_verification_asset", "storage_type", "ALTER TABLE oat_verification_asset ADD COLUMN storage_type VARCHAR(32) NOT NULL DEFAULT 'MYSQL' AFTER content_text");
+            ensureColumn("oat_verification_asset", "storage_key", "ALTER TABLE oat_verification_asset ADD COLUMN storage_key VARCHAR(512) NULL AFTER storage_type");
+            ensureColumn("oat_verification_asset", "content_size", "ALTER TABLE oat_verification_asset ADD COLUMN content_size BIGINT NOT NULL DEFAULT 0 AFTER storage_key");
+            ensureColumn("oat_verification_asset", "content_preview", "ALTER TABLE oat_verification_asset ADD COLUMN content_preview TEXT NULL AFTER content_size");
             logger.info("Database schema initialized");
         } catch (Exception e) {
             logger.warn("Database schema initialization skipped or failed: {}", e.getMessage());

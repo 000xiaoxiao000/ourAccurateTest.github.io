@@ -4,324 +4,446 @@
       <div>
         <div class="eyebrow">AI Requirement Verification</div>
         <h1>AI 需求一致性验证</h1>
-        <p class="subtext">按基线冻结需求、用例、源码和运行证据，生成可审核的双向追溯矩阵。</p>
+        <p class="subtext">围绕需求、测试用例、源码和证据建立可追溯的 AI 分析闭环。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="secondary-button" :disabled="loading" @click="loadOverview">刷新</button>
-        <button type="button" class="secondary-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
-        <button type="button" class="primary-button" :disabled="!selectedBaselineId || analyzing" @click="runAnalysis">
-          {{ analyzing ? '分析中...' : '运行 AI 分析' }}
-        </button>
+        <button type="button" class="primary-button" @click="activeWorkspace = 'library'">导入资料</button>
       </div>
     </header>
 
     <div v-if="error" class="notice danger">{{ error }}</div>
 
-    <section class="workspace-grid">
-      <aside class="control-panel">
-        <section class="panel-section">
-          <div class="section-head">
-            <h2>1. 接入快照</h2>
-            <span>文件 / 粘贴 / 标准视图</span>
-          </div>
-          <div class="asset-import-grid">
-            <article v-for="asset in assetInputs" :key="asset.type" class="asset-import">
-              <div class="asset-title">
+    <nav class="workspace-tabs" aria-label="AI 验证工作区">
+      <button
+        v-for="item in workspaceTabs"
+        :key="item.key"
+        type="button"
+        :class="{ active: activeWorkspace === item.key }"
+        @click="activeWorkspace = item.key"
+      >
+        <strong>{{ item.label }}</strong>
+        <span>{{ item.description }}</span>
+      </button>
+    </nav>
+
+    <section v-if="activeWorkspace === 'library'" class="workspace-section two-column">
+      <section class="panel-section">
+        <div class="section-head">
+          <h2>导入分析资料</h2>
+          <span>新增资料版本</span>
+        </div>
+        <p class="section-tip">
+          这里只负责新增资料。导入成功后会进入右侧资料库，创建分析基线时再选择具体版本。
+        </p>
+
+        <div class="asset-import-grid">
+          <article v-for="asset in assetInputs" :key="asset.type" class="asset-import" :class="{ collapsed: !isImportExpanded(asset.type) }">
+            <button type="button" class="asset-toggle" @click="toggleImport(asset.type)">
+              <span>
                 <strong>{{ asset.label }}</strong>
-                <span>{{ asset.hint }}</span>
-              </div>
-              <input type="file" @change="onFileChange(asset.type, $event)" />
+                <small>{{ asset.hint }} · 已导入 {{ importedCountByType(asset.type) }} 条</small>
+              </span>
+              <em>{{ isImportExpanded(asset.type) ? '收起' : '展开' }}</em>
+            </button>
+            <div v-if="isImportExpanded(asset.type)" class="asset-import-body">
+              <input type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
               <textarea v-model="pasteInputs[asset.type]" :placeholder="asset.placeholder"></textarea>
               <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号（可选）" />
               <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
-                {{ importing === asset.type ? '导入中...' : '导入快照' }}
+                {{ importing === asset.type ? '导入中...' : `导入${asset.label}` }}
               </button>
-            </article>
-          </div>
-          <div class="git-import">
-            <div class="section-head">
-              <h3>Git 源码快照</h3>
-              <span>应用仓库或手填仓库</span>
+              <div v-if="asset.type === 'SOURCE'" class="source-import-divider">
+                <span>或</span>
+              </div>
+              <div v-if="asset.type === 'SOURCE'" class="git-source-panel">
+                <div class="section-head compact-head">
+                  <h3>从源码工程导入</h3>
+                  <span>复用仓库配置</span>
+                </div>
+                <label>
+                  <span>源码工程</span>
+                  <select v-model="gitForm.appId">
+                    <option value="">请选择已配置仓库的源码工程</option>
+                    <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
+                  </select>
+                </label>
+                <p class="field-help">
+                  仓库地址、用户名和 Token 统一在“源码工程 / 仓库配置”维护，这里只拉取一版源码资料给 AI 分析。
+                  <RouterLink v-if="gitForm.appId" :to="`/p/${projectId}/apps/${gitForm.appId}/repository`">去仓库配置</RouterLink>
+                </p>
+                <div class="inline-grid">
+                  <label>
+                    <span>分支</span>
+                    <input v-model.trim="gitForm.branch" type="text" placeholder="留空取默认分支最新" />
+                  </label>
+                  <label>
+                    <span>Commit</span>
+                    <input v-model.trim="gitForm.commit" type="text" placeholder="留空取分支最新" />
+                  </label>
+                  <label>
+                    <span>最大源码文件数</span>
+                    <input v-model.number="gitForm.maxFiles" type="number" min="1" max="500" />
+                  </label>
+                </div>
+                <button type="button" class="secondary-button full" :disabled="gitImporting" @click="importGitSource">
+                  {{ gitImporting ? '拉取中...' : '从源码工程导入源码' }}
+                </button>
+              </div>
             </div>
-            <div class="inline-grid">
-              <label>
-                <span>应用</span>
-                <select v-model="gitForm.appId">
-                  <option value="">不使用应用配置</option>
-                  <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
-                </select>
-              </label>
-              <label>
-                <span>分支</span>
-                <input v-model.trim="gitForm.branch" type="text" placeholder="main / release" />
-              </label>
-            </div>
-            <label>
-              <span>仓库地址</span>
-              <input v-model.trim="gitForm.repositoryUrl" type="text" placeholder="未选择应用时填写 Git URL" />
-            </label>
-            <div class="inline-grid">
-              <label>
-                <span>用户名</span>
-                <input v-model.trim="gitForm.username" type="text" autocomplete="off" />
-              </label>
-              <label>
-                <span>密码 / Token</span>
-                <input v-model.trim="gitForm.password" type="password" autocomplete="off" />
-              </label>
-            </div>
-            <div class="inline-grid">
-              <label>
-                <span>Commit</span>
-                <input v-model.trim="gitForm.commit" type="text" placeholder="留空取分支最新" />
-              </label>
-              <label>
-                <span>最大 Java 文件数</span>
-                <input v-model.number="gitForm.maxFiles" type="number" min="1" max="500" />
-              </label>
-            </div>
-            <button type="button" class="secondary-button full" :disabled="gitImporting" @click="importGitSource">
-              {{ gitImporting ? '拉取中...' : '导入 Git 源码快照' }}
-            </button>
-          </div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-head">
-            <h2>2. 冻结基线</h2>
-            <span>不可变分析输入</span>
-          </div>
-          <div class="form-stack">
-            <label>
-              <span>基线名称</span>
-              <input v-model.trim="baselineForm.name" type="text" placeholder="例如：登录模块 V2.0 发布前验证" />
-            </label>
-            <label>
-              <span>需求快照</span>
-              <select v-model="baselineForm.requirementAssetId">
-                <option value="">请选择</option>
-                <option v-for="asset in overview.requirements" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
-              </select>
-            </label>
-            <label>
-              <span>用例快照</span>
-              <select v-model="baselineForm.testcaseAssetId">
-                <option value="">请选择</option>
-                <option v-for="asset in overview.testcases" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
-              </select>
-            </label>
-            <label>
-              <span>源码快照（可选）</span>
-              <select v-model="baselineForm.sourceAssetId">
-                <option value="">使用应用静态索引或暂不选择</option>
-                <option v-for="asset in overview.sources" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
-              </select>
-            </label>
-            <label>
-              <span>应用静态索引（可选）</span>
-              <select v-model="baselineForm.sourceAppId">
-                <option value="">不绑定应用</option>
-                <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
-              </select>
-            </label>
-            <div class="inline-grid">
-              <label>
-                <span>执行证据</span>
-                <select v-model="baselineForm.executionAssetId">
-                  <option value="">未选择</option>
-                  <option v-for="asset in overview.executions" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
-                </select>
-              </label>
-              <label>
-                <span>覆盖率证据</span>
-                <select v-model="baselineForm.coverageAssetId">
-                  <option value="">未选择</option>
-                  <option v-for="asset in overview.coverages" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
-                </select>
-              </label>
-            </div>
-            <div class="inline-grid">
-              <label>
-                <span>分支</span>
-                <input v-model.trim="baselineForm.sourceBranch" type="text" placeholder="main / release-2.0" />
-              </label>
-              <label>
-                <span>Commit</span>
-                <input v-model.trim="baselineForm.sourceCommit" type="text" placeholder="完整 commit SHA" />
-              </label>
-            </div>
-            <button type="button" class="primary-button full" :disabled="creatingBaseline" @click="createBaseline">
-              {{ creatingBaseline ? '创建中...' : '创建分析基线' }}
-            </button>
-          </div>
-        </section>
-
-        <section class="panel-section baseline-list">
-          <div class="section-head">
-            <h2>分析基线</h2>
-            <span>{{ overview.baselines.length }} 个</span>
-          </div>
-          <button
-            v-for="baseline in overview.baselines"
-            :key="baseline.id"
-            type="button"
-            class="baseline-item"
-            :class="{ active: baseline.id === selectedBaselineId }"
-            @click="selectBaseline(baseline.id)"
-          >
-            <strong>{{ baseline.name }}</strong>
-            <span>{{ baseline.status }} · {{ baseline.freshness }} · {{ formatTime(baseline.createTime) }}</span>
-          </button>
-        </section>
-      </aside>
-
-      <main class="result-panel">
-        <div v-if="!detail" class="empty-state">
-          <strong>选择或创建一个分析基线</strong>
-          <span>平台只保存分析快照、证据、AI 发现和人工裁决；需求、用例和 Bug 仍回到外部事实源处理。</span>
+          </article>
         </div>
-        <template v-else>
-          <section class="metrics-strip">
-            <article>
-              <span>AC 总数</span>
-              <strong>{{ detail.metrics.totalCriteria }}</strong>
+      </section>
+
+      <section class="panel-section imported-assets">
+        <div class="section-head">
+          <h2>资料库</h2>
+          <span>{{ importedAssetCount }} 条</span>
+        </div>
+        <p class="section-tip">这里仅查看已导入资料。点击资料可把它预选到“分析基线”。</p>
+        <div v-if="!importedAssetCount" class="empty-state compact">
+          <strong>还没有导入资料</strong>
+          <span>至少导入需求和测试用例后，才能创建分析基线。</span>
+        </div>
+        <div v-else class="asset-library">
+          <article v-for="group in visibleAssetGroups" :key="group.key" class="asset-group">
+            <div class="asset-group-head">
+              <strong>{{ group.label }}</strong>
+              <span>{{ group.items.length }} 条</span>
+            </div>
+            <article v-for="asset in group.items" :key="asset.id" class="asset-record">
+              <button type="button" class="record-main" :title="asset.id" @click="selectAssetForBaseline(group.key, asset.id)">
+                <strong>{{ assetDisplayName(asset) }}</strong>
+                <span>{{ sourceTypeText(asset.sourceType) }} · {{ storageText(asset.storageType) }} · {{ formatBytes(asset.contentSize) }} · {{ formatTime(asset.capturedAt) }}</span>
+                <small v-if="asset.contentPreview">{{ asset.contentPreview }}</small>
+              </button>
+              <div class="record-actions">
+                <button type="button" @click="startEditAsset(asset)">编辑</button>
+                <button type="button" class="danger-button" @click="deleteAsset(asset)">删除</button>
+              </div>
             </article>
-            <article>
-              <span>用例覆盖</span>
-              <strong>{{ percent(detail.metrics.testcaseCoverageRate) }}</strong>
-            </article>
-            <article>
-              <span>实现证据</span>
-              <strong>{{ percent(detail.metrics.implementationCoverageRate) }}</strong>
-            </article>
-            <article>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="editingAsset" class="panel-section edit-panel">
+        <div class="section-head">
+          <h2>编辑资料</h2>
+          <span>{{ assetTypeLabel(editingAsset.assetType) }}</span>
+        </div>
+        <div class="form-stack">
+          <label>
+            <span>显示名称</span>
+            <input v-model.trim="assetEditForm.fileName" type="text" placeholder="资料名称" />
+          </label>
+          <label>
+            <span>版本号 / Commit / 批次号</span>
+            <input v-model.trim="assetEditForm.sourceVersion" type="text" placeholder="可选" />
+          </label>
+          <label>
+            <span>资料内容</span>
+            <textarea v-model="assetEditForm.content" class="large-textarea" placeholder="资料内容"></textarea>
+          </label>
+          <div class="inline-actions">
+            <button type="button" class="secondary-button" @click="cancelEditAsset">取消</button>
+            <button type="button" class="primary-button" :disabled="assetUpdating" @click="saveAssetEdit">
+              {{ assetUpdating ? '保存中...' : '保存资料' }}
+            </button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section v-else-if="activeWorkspace === 'baseline'" class="workspace-section two-column">
+      <section class="panel-section">
+        <div class="section-head">
+          <h2>{{ editingBaselineId ? '编辑分析基线' : '创建分析基线' }}</h2>
+          <span>锁定本次输入</span>
+        </div>
+        <p class="section-tip">
+          基线是一组不可变分析输入。这里只负责创建和选择基线，不展示 AI 审核结果。
+        </p>
+        <div class="form-stack">
+          <label>
+            <span>基线名称</span>
+            <input v-model.trim="baselineForm.name" type="text" placeholder="例如：登录模块 V2.0 发布前验证" />
+          </label>
+          <label>
+            <span>选择需求资料版本</span>
+            <select v-model="baselineForm.requirementAssetId">
+              <option value="">请选择</option>
+              <option v-for="asset in overview.requirements" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
+            </select>
+          </label>
+          <label>
+            <span>选择测试用例资料版本</span>
+            <select v-model="baselineForm.testcaseAssetId">
+              <option value="">请选择</option>
+              <option v-for="asset in overview.testcases" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
+            </select>
+          </label>
+          <label>
+            <span>选择源码资料版本（可选）</span>
+            <select v-model="baselineForm.sourceAssetId">
+              <option value="">使用应用静态索引或暂不选择</option>
+              <option v-for="asset in overview.sources" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
+            </select>
+          </label>
+          <label>
+            <span>应用静态索引（可选）</span>
+            <select v-model="baselineForm.sourceAppId">
+              <option value="">不绑定应用</option>
+              <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
+            </select>
+          </label>
+          <div class="inline-grid">
+            <label>
               <span>执行证据</span>
-              <strong>{{ percent(detail.metrics.executionEvidenceRate) }}</strong>
-            </article>
-            <article>
-              <span>运行覆盖</span>
-              <strong>{{ percent(detail.metrics.runtimeCoverageRate) }}</strong>
-            </article>
-            <article>
-              <span>开放问题</span>
-              <strong>{{ detail.metrics.openFindings }}</strong>
-            </article>
-          </section>
+              <select v-model="baselineForm.executionAssetId">
+                <option value="">未选择</option>
+                <option v-for="asset in overview.executions" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
+              </select>
+            </label>
+            <label>
+              <span>覆盖率证据</span>
+              <select v-model="baselineForm.coverageAssetId">
+                <option value="">未选择</option>
+                <option v-for="asset in overview.coverages" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="inline-grid">
+            <label>
+              <span>分支</span>
+              <input v-model.trim="baselineForm.sourceBranch" type="text" placeholder="main / release-2.0" />
+            </label>
+            <label>
+              <span>Commit</span>
+              <input v-model.trim="baselineForm.sourceCommit" type="text" placeholder="完整 commit SHA" />
+            </label>
+          </div>
+          <div class="inline-actions">
+            <button v-if="editingBaselineId" type="button" class="secondary-button" @click="cancelEditBaseline">取消编辑</button>
+            <button type="button" class="primary-button full" :disabled="creatingBaseline" @click="saveBaseline">
+              {{ creatingBaseline ? '保存中...' : editingBaselineId ? '保存基线修改' : '创建分析基线' }}
+            </button>
+          </div>
+        </div>
+      </section>
 
-          <section class="gate-band" :class="gateResult?.status.toLowerCase()">
+      <section class="panel-section baseline-list">
+        <div class="section-head">
+          <h2>分析基线列表</h2>
+          <span>{{ overview.baselines.length }} 个</span>
+        </div>
+        <p class="section-tip">选择一个基线后进入“分析结果”查看追溯矩阵和 AI 发现。</p>
+        <article
+          v-for="baseline in overview.baselines"
+          :key="baseline.id"
+          class="baseline-item"
+          :class="{ active: baseline.id === selectedBaselineId }"
+        >
+          <button type="button" class="record-main" @click="openBaseline(baseline.id)">
+            <strong>{{ baseline.name }}</strong>
+            <span>{{ baselineStatusText(baseline.status) }} · {{ freshnessText(baseline.freshness) }} · {{ formatTime(baseline.createTime) }}</span>
+          </button>
+          <div class="record-actions">
+            <button type="button" @click="startEditBaseline(baseline)">编辑</button>
+            <button type="button" class="danger-button" @click="deleteBaseline(baseline)">删除</button>
+          </div>
+        </article>
+        <div v-if="!overview.baselines.length" class="empty-state compact">
+          <strong>还没有分析基线</strong>
+          <span>先选择需求资料和测试用例资料，再创建基线。</span>
+        </div>
+      </section>
+    </section>
+
+    <section v-else class="workspace-section">
+      <section v-if="!detail" class="panel-section empty-state">
+        <strong>还没有选择分析基线</strong>
+        <span>请先到“分析基线”选择或创建一个基线。</span>
+      </section>
+      <template v-else>
+        <section class="result-toolbar">
+          <div>
+            <strong>{{ detail.baseline.name }}</strong>
+            <span>{{ baselineStatusText(detail.baseline.status) }} · {{ freshnessText(detail.baseline.freshness) }} · {{ formatTime(detail.baseline.updateTime) }}</span>
+            <small v-if="analysisJob">{{ analysisJobStatusText(analysisJob.status) }} · {{ analysisJob.message || '-' }}</small>
+          </div>
+          <div class="header-actions">
+            <button type="button" class="secondary-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
+            <button type="button" class="primary-button" :disabled="!selectedBaselineId || analyzing" @click="runAnalysis">
+              {{ analyzing ? '分析中...' : '运行 AI 分析' }}
+            </button>
+          </div>
+        </section>
+
+        <section class="metrics-strip">
+          <article>
+            <span class="with-help" :title="helpText.ac">验收标准数</span>
+            <strong>{{ detail.metrics.totalCriteria }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :title="helpText.testcaseCoverage">用例覆盖</span>
+            <strong>{{ percent(detail.metrics.testcaseCoverageRate) }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :title="helpText.implementationEvidence">实现证据</span>
+            <strong>{{ percent(detail.metrics.implementationCoverageRate) }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :title="helpText.executionEvidence">执行证据</span>
+            <strong>{{ percent(detail.metrics.executionEvidenceRate) }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :title="helpText.runtimeCoverage">运行覆盖</span>
+            <strong>{{ percent(detail.metrics.runtimeCoverageRate) }}</strong>
+          </article>
+          <article>
+            <span>开放问题</span>
+            <strong>{{ detail.metrics.openFindings }}</strong>
+          </article>
+        </section>
+
+        <nav class="tabs" aria-label="验证视图">
+          <button v-for="tab in tabs" :key="tab.key" type="button" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
+            {{ tab.label }}
+          </button>
+        </nav>
+
+        <section v-if="activeTab === 'matrix'" class="matrix-table">
+          <div class="table-row table-head">
+            <span>验收标准</span>
+            <span>测试用例</span>
+            <span>代码/运行证据</span>
+            <span>结论</span>
+          </div>
+          <article v-for="row in matrix" :key="row.criterion.id" class="table-row">
             <div>
-              <strong>质量门禁：{{ gateResult?.status || '未计算' }}</strong>
-              <span v-if="gateResult?.reasons.length">{{ gateResult.reasons.join('；') }}</span>
-              <span v-else>默认门禁要求核心 AC 用例与静态实现闭环，高风险问题为 0；动态证据作为可选增强。</span>
+              <strong>{{ row.criterion.requirementKey }} / {{ row.criterion.acKey }}</strong>
+              <p>{{ row.criterion.content }}</p>
             </div>
-            <button type="button" class="secondary-button" :disabled="gating" @click="evaluateGate">
-              {{ gating ? '计算中...' : '计算门禁' }}
-            </button>
-          </section>
-
-          <nav class="tabs" aria-label="验证视图">
-            <button v-for="tab in tabs" :key="tab.key" type="button" :class="{ active: activeTab === tab.key }" @click="activeTab = tab.key">
-              {{ tab.label }}
-            </button>
-          </nav>
-
-          <section v-if="activeTab === 'matrix'" class="matrix-table">
-            <div class="table-row table-head">
-              <span>验收标准</span>
-              <span>测试用例</span>
-              <span>代码/运行证据</span>
-              <span>结论</span>
+            <div class="chips">
+              <span v-for="testcase in row.testcases" :key="testcase.id">{{ testcase.externalKey }}</span>
+              <em v-if="!row.testcases.length">未覆盖</em>
             </div>
-            <article v-for="row in matrix" :key="row.criterion.id" class="table-row">
-              <div>
-                <strong>{{ row.criterion.requirementKey }} / {{ row.criterion.acKey }}</strong>
-                <p>{{ row.criterion.content }}</p>
-              </div>
-              <div class="chips">
-                <span v-for="testcase in row.testcases" :key="testcase.id">{{ testcase.externalKey }}</span>
-                <em v-if="!row.testcases.length">未覆盖</em>
-              </div>
-              <div class="trace-list">
-                <button
-                  v-for="link in evidenceLinks(row.criterion.id)"
-                  :key="link.id"
-                  type="button"
-                  :title="JSON.stringify(link.evidence || {})"
-                  @click="confirmTrace(link.id)"
-                >
-                  {{ link.targetType }} · {{ link.evidenceLevel }} · {{ link.reviewStatus }}
+            <div class="trace-list">
+              <button
+                v-for="link in evidenceLinks(row.criterion.id)"
+                :key="link.id"
+                type="button"
+                :title="JSON.stringify(link.evidence || {})"
+                @click="confirmTrace(link.id)"
+              >
+                  {{ traceTargetText(link.targetType) }} · {{ evidenceLevelText(link.evidenceLevel) }} · {{ reviewStatusText(link.reviewStatus) }}
                 </button>
               </div>
               <div>
                 <span class="verdict" :class="row.verdict.toLowerCase()">{{ verdictText(row.verdict) }}</span>
-                <small>{{ row.evidenceLevel }}</small>
+              <small class="with-help" :title="evidenceLevelHelp(row.evidenceLevel)">{{ evidenceLevelText(row.evidenceLevel) }}</small>
               </div>
-            </article>
-          </section>
+          </article>
+        </section>
 
-          <section v-else-if="activeTab === 'findings'" class="finding-list">
-            <div class="finding-toolbar">
-              <select v-model="findingPerspective">
-                <option value="">全部视角</option>
-                <option value="PRODUCT">产品</option>
-                <option value="TEST">测试</option>
-                <option value="DEVELOPMENT">开发</option>
-                <option value="CROSS">交叉</option>
-              </select>
+        <section v-else-if="activeTab === 'findings'" class="finding-list">
+          <div class="finding-toolbar">
+            <select v-model="findingPerspective">
+              <option value="">全部视角</option>
+              <option value="PRODUCT">产品</option>
+              <option value="TEST">测试</option>
+              <option value="DEVELOPMENT">开发</option>
+              <option value="CROSS">交叉</option>
+            </select>
+          </div>
+          <article v-for="finding in filteredFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
+            <div class="finding-main">
+              <span>{{ finding.perspective }} · {{ finding.severity }} · {{ finding.reviewStatus }}</span>
+              <h3>{{ finding.title }}</h3>
+              <p>{{ finding.description }}</p>
+              <small v-if="finding.suggestion">建议：{{ finding.suggestion }}</small>
+              <a v-if="finding.externalWorkItemUrl" :href="finding.externalWorkItemUrl" target="_blank" rel="noreferrer">外部事项</a>
             </div>
-            <article v-for="finding in filteredFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
-              <div class="finding-main">
-                <span>{{ finding.perspective }} · {{ finding.severity }} · {{ finding.reviewStatus }}</span>
-                <h3>{{ finding.title }}</h3>
-                <p>{{ finding.description }}</p>
-                <small v-if="finding.suggestion">建议：{{ finding.suggestion }}</small>
-                <a v-if="finding.externalWorkItemUrl" :href="finding.externalWorkItemUrl" target="_blank" rel="noreferrer">外部事项</a>
+            <div class="finding-actions">
+              <button type="button" @click="reviewFinding(finding.id, 'CONFIRMED')">确认</button>
+              <button type="button" @click="reviewFinding(finding.id, 'REJECTED')">驳回</button>
+              <button type="button" @click="reviewFinding(finding.id, 'EXEMPTED')">豁免</button>
+              <button type="button" @click="startWriteBack(finding.id)">AI 生成回写</button>
+            </div>
+            <form v-if="writeBackFindingId === finding.id" class="writeback-form" @submit.prevent="writeBackFinding(finding.id)">
+              <div class="writeback-intro">
+                <strong>让 AI 生成对方可直接处理的内容</strong>
+                <span>AI 会结合该问题、证据、关联验收标准和测试用例，生成外部 Bug / 任务 / 评论可直接使用的说明。</span>
               </div>
-              <div class="finding-actions">
-                <button type="button" @click="reviewFinding(finding.id, 'CONFIRMED')">确认</button>
-                <button type="button" @click="reviewFinding(finding.id, 'REJECTED')">驳回</button>
-                <button type="button" @click="reviewFinding(finding.id, 'EXEMPTED')">豁免</button>
-                <button type="button" @click="writeBackFinding(finding.id)">标记回写</button>
+              <label>
+                <span>接收方</span>
+                <select v-model="writeBackTargetRole">
+                  <option value="CROSS">综合协同</option>
+                  <option value="PRODUCT">产品处理</option>
+                  <option value="TEST">测试处理</option>
+                  <option value="DEVELOPMENT">开发处理</option>
+                </select>
+              </label>
+              <label>
+                <span>外部 Bug / 任务 / 评论链接（可选）</span>
+                <input v-model.trim="writeBackUrl" type="url" placeholder="已有外部事项时填写 https://..." autocomplete="off" />
+              </label>
+              <label>
+                <span>补充说明（可选）</span>
+                <textarea v-model.trim="writeBackNote" rows="3" placeholder="例如：希望生成给开发的修复说明，或说明对方平台的任务背景..." />
+              </label>
+              <div class="writeback-actions">
+                <button type="button" class="secondary-button" @click="cancelWriteBack">取消</button>
+                <button type="submit" class="primary-button" :disabled="writeBackSubmitting">
+                  {{ writeBackSubmitting ? 'AI 生成中...' : '生成并记录' }}
+                </button>
               </div>
-            </article>
-            <div v-if="!filteredFindings.length" class="empty-state compact">当前筛选下没有问题。</div>
-          </section>
+            </form>
+          </article>
+          <div v-if="!filteredFindings.length" class="empty-state compact">当前筛选下没有问题。</div>
+        </section>
 
-          <section v-else class="evidence-panel">
-            <article>
-              <strong>输入新鲜度</strong>
-              <span>{{ detail.baseline.freshness }} · {{ detail.baseline.analyzerVersion }}</span>
-            </article>
-            <article>
-              <strong>源代码版本</strong>
-              <span>{{ detail.baseline.sourceBranch || '-' }} / {{ detail.baseline.sourceCommit || '-' }}</span>
-            </article>
-            <article>
-              <strong>结论口径</strong>
-              <span>未接入执行或覆盖率证据时，只能输出 STATICALLY_CONSISTENT，不能宣称 SATISFIED。</span>
-            </article>
-            <article v-for="action in writeBacks" :key="action.id">
-              <strong>回写记录：{{ action.connectorType }} / {{ action.status }}</strong>
-              <span>{{ action.message || '-' }} · {{ formatTime(action.createTime) }}</span>
-              <a v-if="action.externalUrl" :href="action.externalUrl" target="_blank" rel="noreferrer">{{ action.externalUrl }}</a>
-            </article>
-          </section>
-        </template>
-      </main>
+        <section v-else class="evidence-panel">
+          <article>
+            <strong>输入新鲜度</strong>
+              <span>{{ freshnessText(detail.baseline.freshness) }} · 分析器 {{ detail.baseline.analyzerVersion }}</span>
+          </article>
+          <article>
+            <strong>源代码版本</strong>
+            <span>{{ detail.baseline.sourceBranch || '-' }} / {{ detail.baseline.sourceCommit || '-' }}</span>
+          </article>
+          <article>
+              <strong class="with-help" :title="helpText.conclusionScope">结论口径</strong>
+              <span>没有测试执行或覆盖率证据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
+          </article>
+          <article v-for="action in writeBacks" :key="action.id">
+            <div class="evidence-heading">
+              <strong>AI 回写记录：{{ writeBackStatusText(action.status) }}</strong>
+              <button type="button" class="ghost-button" @click="copyWriteBack(action.message || '')">复制内容</button>
+            </div>
+            <span>{{ action.connectorType }} · {{ formatTime(action.createTime) }}</span>
+            <a v-if="action.externalUrl" :href="action.externalUrl" target="_blank" rel="noreferrer">{{ action.externalUrl }}</a>
+            <pre v-if="action.message" class="writeback-message">{{ action.message }}</pre>
+          </article>
+        </section>
+      </template>
     </section>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
   analyzeBaseline,
   createVerificationBaseline,
-  evaluateQualityGate,
+  deleteVerificationAsset,
+  deleteVerificationBaseline,
   fetchWriteBackActions,
+  fetchAnalysisJob,
   fetchBaselineDetail,
+  fetchLatestAnalysisJob,
   fetchTraceMatrix,
   fetchVerificationOverview,
   importGitSourceAsset,
@@ -329,42 +451,59 @@ import {
   markVerificationBaselineStale,
   reviewTraceLink,
   reviewVerificationFinding,
+  updateVerificationAsset,
+  updateVerificationBaseline,
   writeBackVerificationFinding,
+  type AnalysisJob,
   type AssetType,
   type BaselineDetail,
-  type GateResult,
   type MatrixRow,
   type ReviewStatus,
   type TraceLink,
   type VerificationAsset,
+  type VerificationBaseline,
   type VerificationOverview,
   type Verdict,
   type WriteBackAction,
 } from '@/api/verification'
+import { useDialog } from '@/composables/useDialog'
 import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
 
+type WorkspaceKey = 'library' | 'baseline' | 'result'
+
 const route = useRoute()
 const toast = useToast()
+const dialog = useDialog()
 const projectStore = useProjectStore()
 const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
 
-const emptyOverview: VerificationOverview = { requirements: [], testcases: [], sources: [], executions: [], coverages: [], baselines: [] }
+const emptyOverview: VerificationOverview = { requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] }
 const overview = ref<VerificationOverview>(emptyOverview)
 const detail = ref<BaselineDetail | null>(null)
 const matrix = ref<MatrixRow[]>([])
-const gateResult = ref<GateResult | null>(null)
 const writeBacks = ref<WriteBackAction[]>([])
+const analysisJob = ref<AnalysisJob | null>(null)
+const activeWorkspace = ref<WorkspaceKey>('library')
 const selectedBaselineId = ref('')
 const activeTab = ref<'matrix' | 'findings' | 'evidence'>('matrix')
 const findingPerspective = ref('')
 const loading = ref(false)
 const analyzing = ref(false)
-const gating = ref(false)
 const creatingBaseline = ref(false)
 const importing = ref<AssetType | ''>('')
 const gitImporting = ref(false)
+const assetUpdating = ref(false)
+const expandedImportTypes = ref<AssetType[]>(['REQUIREMENT', 'TESTCASE'])
+const editingAsset = ref<VerificationAsset | null>(null)
+const editingBaselineId = ref('')
+const writeBackFindingId = ref('')
+const writeBackUrl = ref('')
+const writeBackNote = ref('')
+const writeBackTargetRole = ref<'PRODUCT' | 'TEST' | 'DEVELOPMENT' | 'CROSS'>('CROSS')
+const writeBackSubmitting = ref(false)
+let analysisPollTimer: ReturnType<typeof setTimeout> | null = null
 const error = ref('')
 const files = reactive<Partial<Record<AssetType, File>>>({})
 const pasteInputs = reactive<Record<AssetType, string>>({ REQUIREMENT: '', TESTCASE: '', SOURCE: '', EXECUTION: '', COVERAGE: '', DEFECT: '' })
@@ -380,22 +519,31 @@ const baselineForm = reactive({
   sourceBranch: '',
   sourceCommit: '',
 })
+const assetEditForm = reactive({
+  fileName: '',
+  sourceVersion: '',
+  content: '',
+})
 const gitForm = reactive({
   appId: '',
-  repositoryUrl: '',
-  username: '',
-  password: '',
   branch: '',
   commit: '',
   maxFiles: 120,
 })
 
+const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: string }> = [
+  { key: 'library', label: '资料库', description: '导入 / 查看资料' },
+  { key: 'baseline', label: '分析基线', description: '选择资料并创建基线' },
+  { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 证据' },
+]
+
 const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeholder: string }> = [
-  { type: 'REQUIREMENT', label: '需求', hint: 'Markdown / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },
-  { type: 'TESTCASE', label: '测试用例', hint: 'Excel / CSV / JSON', placeholder: '粘贴用例ID、步骤、预期结果...' },
-  { type: 'SOURCE', label: '源码', hint: '源码片段 / 静态快照', placeholder: '粘贴 Controller / Service / 核心逻辑...' },
-  { type: 'EXECUTION', label: '执行报告', hint: '可选', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
-  { type: 'COVERAGE', label: '覆盖率', hint: '可选', placeholder: '粘贴 JaCoCo / Istanbul / CI 覆盖率摘要...' },
+  { type: 'REQUIREMENT', label: '需求', hint: 'Word / Markdown / Excel / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },
+  { type: 'TESTCASE', label: '测试用例', hint: 'XMind脑图 / Excel / CSV / JSON / 文本', placeholder: '粘贴用例ID、步骤、预期结果...' },
+  { type: 'SOURCE', label: '源码', hint: '上传源码包 / 粘贴源码 / 从源码工程导入', placeholder: '粘贴 Controller / Service / 核心逻辑...' },
+  { type: 'DEFECT', label: '缺陷 / Bug', hint: 'Excel / CSV / JSON / 文本，可选', placeholder: '粘贴 Bug、缺陷、生产问题或外部任务摘要...' },
+  { type: 'EXECUTION', label: '执行报告', hint: 'Excel / CSV / JSON / 文本，可选', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
+  { type: 'COVERAGE', label: '覆盖率', hint: 'JaCoCo / Istanbul / LCOV / Cobertura / Go / Python 等', placeholder: '粘贴多语言覆盖率报告摘要...' },
 ]
 
 const tabs = [
@@ -404,14 +552,39 @@ const tabs = [
   { key: 'evidence', label: '证据与口径' },
 ] as const
 
+const helpText = {
+  ac: 'AC 是 Acceptance Criteria，指需求中的可验收标准。平台会按这些标准检查用例和代码是否覆盖。',
+  testcaseCoverage: '有多少验收标准找到了对应测试用例。低于 100% 说明测试用例需要补充。',
+  implementationEvidence: '有多少验收标准在源码中找到了对应实现证据。找不到不一定代表没实现，但需要开发确认或补充关联。',
+  executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
+  runtimeCoverage: '有多少验收标准有覆盖率证据支撑，例如 JaCoCo、Istanbul 或流水线覆盖率。',
+  conclusionScope: '结论口径用于防止误判。只有静态证据时只能说“静态一致”，不能说线上一定满足需求。',
+}
+
 const filteredFindings = computed(() => {
   const findings = detail.value?.findings || []
   return findings.filter((finding) => !findingPerspective.value || finding.perspective === findingPerspective.value)
 })
 
+const assetGroups = computed<Array<{ key: AssetType; label: string; items: VerificationAsset[] }>>(() => [
+  { key: 'REQUIREMENT', label: '需求资料', items: overview.value.requirements },
+  { key: 'TESTCASE', label: '测试用例资料', items: overview.value.testcases },
+  { key: 'SOURCE', label: '源码资料', items: overview.value.sources },
+  { key: 'DEFECT', label: '缺陷资料', items: overview.value.defects },
+  { key: 'EXECUTION', label: '执行证据', items: overview.value.executions },
+  { key: 'COVERAGE', label: '覆盖率证据', items: overview.value.coverages },
+])
+
+const importedAssetCount = computed(() => assetGroups.value.reduce((total, group) => total + group.items.length, 0))
+const visibleAssetGroups = computed(() => assetGroups.value.filter((group) => group.items.length > 0))
+
 onMounted(async () => {
   await projectStore.loadProjectContext(projectId.value).catch(() => undefined)
   await loadOverview()
+})
+
+onBeforeUnmount(() => {
+  clearAnalysisPoll()
 })
 
 async function loadOverview() {
@@ -422,6 +595,7 @@ async function loadOverview() {
     overview.value = await fetchVerificationOverview(projectId.value)
     if (!selectedBaselineId.value && overview.value.baselines[0]) {
       await selectBaseline(overview.value.baselines[0].id)
+      activeWorkspace.value = 'result'
     }
   } catch (err) {
     error.value = messageOf(err)
@@ -441,6 +615,40 @@ function hasImportInput(type: AssetType) {
   return !!files[type] || !!pasteInputs[type]?.trim()
 }
 
+function isImportExpanded(type: AssetType) {
+  return expandedImportTypes.value.includes(type)
+}
+
+function toggleImport(type: AssetType) {
+  if (isImportExpanded(type)) {
+    expandedImportTypes.value = expandedImportTypes.value.filter((item) => item !== type)
+  } else {
+    expandedImportTypes.value = [...expandedImportTypes.value, type]
+  }
+}
+
+function importedCountByType(type: AssetType) {
+  if (type === 'REQUIREMENT') return overview.value.requirements.length
+  if (type === 'TESTCASE') return overview.value.testcases.length
+  if (type === 'SOURCE') return overview.value.sources.length
+  if (type === 'DEFECT') return overview.value.defects.length
+  if (type === 'EXECUTION') return overview.value.executions.length
+  if (type === 'COVERAGE') return overview.value.coverages.length
+  return 0
+}
+
+function assetAccept(type: AssetType) {
+  const map: Record<AssetType, string> = {
+    REQUIREMENT: '.doc,.docx,.md,.markdown,.txt,.csv,.tsv,.xls,.xlsx,.json',
+    TESTCASE: '.xmind,.mm,.opml,.xls,.xlsx,.csv,.tsv,.json,.txt,.md,.markdown',
+    SOURCE: '.zip,.jar,.java,.kt,.js,.jsx,.ts,.tsx,.vue,.py,.go,.rs,.cs,.php,.rb,.xml,.yaml,.yml,.json,.properties',
+    DEFECT: '.xls,.xlsx,.csv,.tsv,.json,.txt,.md,.markdown,.doc,.docx',
+    EXECUTION: '.xls,.xlsx,.csv,.tsv,.json,.txt,.md,.markdown,.xml',
+    COVERAGE: '.zip,.xml,.json,.info,.lcov,.out,.cov,.coverage,.csv,.tsv,.txt',
+  }
+  return map[type]
+}
+
 async function importAsset(type: AssetType) {
   if (!hasImportInput(type)) {
     toast.warning('请先选择文件或粘贴内容')
@@ -450,10 +658,12 @@ async function importAsset(type: AssetType) {
   error.value = ''
   try {
     const asset = await importVerificationAsset(projectId.value, type, files[type], pasteInputs[type], sourceVersions[type])
-    toast.success(`${asset.assetType} 快照已导入`)
+    selectAssetForBaseline(type, asset.id, false)
+    toast.success(`${assetTypeLabel(type)}已导入，可在资料库查看`)
     pasteInputs[type] = ''
     files[type] = undefined
     await loadOverview()
+    activeWorkspace.value = 'library'
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
@@ -462,18 +672,23 @@ async function importAsset(type: AssetType) {
   }
 }
 
-async function createBaseline() {
+async function saveBaseline() {
   if (!baselineForm.requirementAssetId || !baselineForm.testcaseAssetId) {
-    toast.warning('需求快照和用例快照不能为空')
+    toast.warning('需求资料和测试用例资料不能为空')
     return
   }
   creatingBaseline.value = true
   try {
-    const baseline = await createVerificationBaseline(projectId.value, { ...baselineForm })
+    const updating = !!editingBaselineId.value
+    const baseline = editingBaselineId.value
+      ? await updateVerificationBaseline(projectId.value, editingBaselineId.value, { ...baselineForm })
+      : await createVerificationBaseline(projectId.value, { ...baselineForm })
     selectedBaselineId.value = baseline.id
-    toast.success('分析基线已创建')
+    editingBaselineId.value = ''
+    toast.success(updating ? '分析基线已更新' : '分析基线已创建')
     await loadOverview()
     await selectBaseline(baseline.id)
+    activeWorkspace.value = 'result'
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
@@ -482,21 +697,129 @@ async function createBaseline() {
   }
 }
 
+function startEditAsset(asset: VerificationAsset) {
+  editingAsset.value = asset
+  assetEditForm.fileName = asset.fileName || asset.externalId || ''
+  assetEditForm.sourceVersion = asset.sourceVersion || ''
+  assetEditForm.content = ''
+}
+
+function cancelEditAsset() {
+  editingAsset.value = null
+  assetEditForm.fileName = ''
+  assetEditForm.sourceVersion = ''
+  assetEditForm.content = ''
+}
+
+async function saveAssetEdit() {
+  if (!editingAsset.value) return
+  assetUpdating.value = true
+  try {
+    await updateVerificationAsset(projectId.value, editingAsset.value.id, {
+      fileName: assetEditForm.fileName,
+      sourceVersion: assetEditForm.sourceVersion,
+      content: assetEditForm.content || undefined,
+    })
+    toast.success('资料已更新')
+    cancelEditAsset()
+    await loadOverview()
+  } catch (err) {
+    toast.error(messageOf(err))
+  } finally {
+    assetUpdating.value = false
+  }
+}
+
+async function deleteAsset(asset: VerificationAsset) {
+  const confirmed = await dialog.confirm({
+    title: '删除资料',
+    message: `确认删除“${assetDisplayName(asset)}”？已被分析基线引用的资料不能删除。`,
+    confirmText: '删除',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  try {
+    await deleteVerificationAsset(projectId.value, asset.id)
+    if (editingAsset.value?.id === asset.id) cancelEditAsset()
+    toast.success('资料已删除')
+    await loadOverview()
+  } catch (err) {
+    toast.error(messageOf(err))
+  }
+}
+
+function startEditBaseline(baseline: VerificationBaseline) {
+  editingBaselineId.value = baseline.id
+  baselineForm.name = baseline.name || ''
+  baselineForm.requirementAssetId = baseline.requirementAssetId || ''
+  baselineForm.testcaseAssetId = baseline.testcaseAssetId || ''
+  baselineForm.sourceAssetId = baseline.sourceAssetId || ''
+  baselineForm.executionAssetId = baseline.executionAssetId || ''
+  baselineForm.coverageAssetId = baseline.coverageAssetId || ''
+  baselineForm.sourceAppId = baseline.sourceAppId || ''
+  baselineForm.sourceBranch = baseline.sourceBranch || ''
+  baselineForm.sourceCommit = baseline.sourceCommit || ''
+}
+
+function cancelEditBaseline() {
+  editingBaselineId.value = ''
+  baselineForm.name = ''
+  baselineForm.requirementAssetId = ''
+  baselineForm.testcaseAssetId = ''
+  baselineForm.sourceAssetId = ''
+  baselineForm.executionAssetId = ''
+  baselineForm.coverageAssetId = ''
+  baselineForm.sourceAppId = ''
+  baselineForm.sourceBranch = ''
+  baselineForm.sourceCommit = ''
+}
+
+async function deleteBaseline(baseline: VerificationBaseline) {
+  const confirmed = await dialog.confirm({
+    title: '删除分析基线',
+    message: `确认删除“${baseline.name}”？相关分析结果、门禁结果和回写记录会一起删除。`,
+    confirmText: '删除',
+    tone: 'danger',
+  })
+  if (!confirmed) return
+  try {
+    await deleteVerificationBaseline(projectId.value, baseline.id)
+    if (selectedBaselineId.value === baseline.id) {
+      selectedBaselineId.value = ''
+      detail.value = null
+      matrix.value = []
+      writeBacks.value = []
+    }
+    if (editingBaselineId.value === baseline.id) cancelEditBaseline()
+    toast.success('分析基线已删除')
+    await loadOverview()
+  } catch (err) {
+    toast.error(messageOf(err))
+  }
+}
+
 async function importGitSource() {
-  if (!gitForm.appId && !gitForm.repositoryUrl) {
-    toast.warning('请选择应用或填写仓库地址')
+  if (!gitForm.appId) {
+    toast.warning('请先选择已配置仓库的源码工程')
     return
   }
   gitImporting.value = true
   error.value = ''
   try {
-    const asset = await importGitSourceAsset(projectId.value, { ...gitForm, maxBytes: 300000 })
+    const asset = await importGitSourceAsset(projectId.value, {
+      appId: gitForm.appId,
+      branch: gitForm.branch,
+      commit: gitForm.commit,
+      maxFiles: gitForm.maxFiles,
+      maxBytes: 300000,
+    })
     baselineForm.sourceAssetId = asset.id
     if (gitForm.appId) baselineForm.sourceAppId = gitForm.appId
     baselineForm.sourceBranch = gitForm.branch
     baselineForm.sourceCommit = asset.sourceVersion || gitForm.commit
-    toast.success('Git 源码快照已导入')
+    toast.success('Git 源码已导入，可在资料库查看')
     await loadOverview()
+    activeWorkspace.value = 'library'
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
@@ -505,41 +828,94 @@ async function importGitSource() {
   }
 }
 
+async function openBaseline(id: string) {
+  await selectBaseline(id)
+  activeWorkspace.value = 'result'
+}
+
 async function selectBaseline(id: string) {
+  clearAnalysisPoll()
   selectedBaselineId.value = id
-  gateResult.value = null
   detail.value = await fetchBaselineDetail(projectId.value, id)
   matrix.value = await fetchTraceMatrix(projectId.value, id)
   writeBacks.value = await fetchWriteBackActions(projectId.value, id)
+  if (detail.value.baseline.status === 'ANALYZING') {
+    await resumeAnalysisPolling(id)
+  }
 }
 
 async function runAnalysis() {
   if (!selectedBaselineId.value) return
   analyzing.value = true
   try {
-    detail.value = await analyzeBaseline(projectId.value, selectedBaselineId.value)
-    matrix.value = await fetchTraceMatrix(projectId.value, selectedBaselineId.value)
+    analysisJob.value = await analyzeBaseline(projectId.value, selectedBaselineId.value)
     await loadOverview()
-    toast.success('AI 一致性分析完成')
+    activeWorkspace.value = 'result'
+    toast.success('AI 分析任务已创建，完成后会自动刷新结果')
+    pollAnalysisJob(analysisJob.value.id)
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
-  } finally {
     analyzing.value = false
   }
 }
 
-async function evaluateGate() {
-  if (!selectedBaselineId.value) return
-  gating.value = true
+function pollAnalysisJob(jobId: string) {
+  clearAnalysisPoll()
+  analysisPollTimer = setTimeout(async () => {
+    try {
+      const job = await fetchAnalysisJob(projectId.value, jobId)
+      analysisJob.value = job
+      if (job.status === 'SUCCEEDED') {
+        analyzing.value = false
+        toast.success('AI 一致性分析完成')
+        await selectBaseline(job.baselineId)
+        await loadOverview()
+        return
+      }
+      if (job.status === 'FAILED') {
+        analyzing.value = false
+        toast.error(job.message || 'AI 分析失败')
+        await loadOverview()
+        if (selectedBaselineId.value) await selectBaseline(selectedBaselineId.value)
+        return
+      }
+      pollAnalysisJob(jobId)
+    } catch (err) {
+      analyzing.value = false
+      toast.error(messageOf(err))
+    }
+  }, 2000)
+}
+
+async function resumeAnalysisPolling(baselineId: string) {
   try {
-    gateResult.value = await evaluateQualityGate(projectId.value, selectedBaselineId.value)
-  } catch (err) {
-    error.value = messageOf(err)
-    toast.error(error.value)
-  } finally {
-    gating.value = false
+    const job = await fetchLatestAnalysisJob(projectId.value, baselineId)
+    analysisJob.value = job
+    if (job.status === 'QUEUED' || job.status === 'RUNNING') {
+      analyzing.value = true
+      pollAnalysisJob(job.id)
+    }
+  } catch {
+    analysisJob.value = null
   }
+}
+
+function clearAnalysisPoll() {
+  if (analysisPollTimer) {
+    clearTimeout(analysisPollTimer)
+    analysisPollTimer = null
+  }
+}
+
+function analysisJobStatusText(value?: string) {
+  const map: Record<string, string> = {
+    QUEUED: 'AI 分析排队中',
+    RUNNING: 'AI 分析执行中',
+    SUCCEEDED: 'AI 分析完成',
+    FAILED: 'AI 分析失败',
+  }
+  return value ? map[value] || value : '-'
 }
 
 async function markStale() {
@@ -556,16 +932,57 @@ async function reviewFinding(id: string, status: ReviewStatus) {
   await selectBaseline(selectedBaselineId.value)
 }
 
+function startWriteBack(id: string) {
+  writeBackFindingId.value = id
+  writeBackUrl.value = ''
+  writeBackNote.value = ''
+  writeBackTargetRole.value = 'CROSS'
+}
+
+function cancelWriteBack() {
+  writeBackFindingId.value = ''
+  writeBackUrl.value = ''
+  writeBackNote.value = ''
+  writeBackTargetRole.value = 'CROSS'
+}
+
 async function writeBackFinding(id: string) {
-  const externalWorkItemUrl = window.prompt('外部 Bug/任务/评论链接')
-  if (!externalWorkItemUrl) return
-  await writeBackVerificationFinding(projectId.value, id, {
-    connectorType: 'link-only',
-    externalUrl: externalWorkItemUrl,
-    message: '已在外部事实源处理',
-  })
-  toast.success('已记录外部回写链接')
-  await selectBaseline(selectedBaselineId.value)
+  writeBackSubmitting.value = true
+  try {
+    await writeBackVerificationFinding(projectId.value, id, {
+      connectorType: 'ai-writeback',
+      externalUrl: writeBackUrl.value || undefined,
+      message: writeBackNote.value || undefined,
+      targetRole: writeBackTargetRole.value,
+    })
+    toast.success('AI 回写内容已生成，可在证据页复制给对方处理')
+    cancelWriteBack()
+    await selectBaseline(selectedBaselineId.value)
+    activeTab.value = 'evidence'
+  } catch (err) {
+    toast.error(messageOf(err))
+  } finally {
+    writeBackSubmitting.value = false
+  }
+}
+
+async function copyWriteBack(message: string) {
+  if (!message) {
+    toast.warning('没有可复制的回写内容')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(message)
+    toast.success('回写内容已复制')
+  } catch {
+    toast.error('浏览器禁止直接复制，请手动选中内容复制')
+  }
+}
+
+function writeBackStatusText(status: string) {
+  if (status === 'AI_GENERATED') return 'AI 已生成'
+  if (status === 'RECORDED') return '已记录'
+  return status || '-'
 }
 
 async function confirmTrace(id: string) {
@@ -579,7 +996,40 @@ function evidenceLinks(acId: string): TraceLink[] {
 }
 
 function assetLabel(asset: VerificationAsset) {
-  return `${asset.fileName || asset.externalId || asset.id.slice(0, 8)} · ${asset.freshness} · ${asset.sourceVersion || asset.contentHash.slice(0, 8)}`
+  return `${assetDisplayName(asset)} · ${asset.sourceType} · ${asset.sourceVersion || asset.contentHash.slice(0, 8)}`
+}
+
+function assetDisplayName(asset: VerificationAsset) {
+  return asset.fileName || asset.externalId || `${assetTypeLabel(asset.assetType)} ${asset.id.slice(0, 8)}`
+}
+
+function assetTypeLabel(type: AssetType) {
+  const map: Record<AssetType, string> = {
+    REQUIREMENT: '需求资料',
+    TESTCASE: '测试用例资料',
+    SOURCE: '源码资料',
+    EXECUTION: '执行证据',
+    COVERAGE: '覆盖率证据',
+    DEFECT: '缺陷资料',
+  }
+  return map[type] || type
+}
+
+function selectAssetForBaseline(type: AssetType, assetId: string, notify = true) {
+  if (type === 'REQUIREMENT') baselineForm.requirementAssetId = assetId
+  else if (type === 'TESTCASE') baselineForm.testcaseAssetId = assetId
+  else if (type === 'SOURCE') baselineForm.sourceAssetId = assetId
+  else if (type === 'EXECUTION') baselineForm.executionAssetId = assetId
+  else if (type === 'COVERAGE') baselineForm.coverageAssetId = assetId
+  else if (type === 'DEFECT') {
+    if (notify) toast.success('缺陷资料已进入 AI 分析证据池，无需在基线中单独选择')
+    return
+  } else return
+
+  if (notify) {
+    activeWorkspace.value = 'baseline'
+    toast.success(`已选择${assetTypeLabel(type)}用于分析基线`)
+  }
 }
 
 function percent(value: number) {
@@ -588,6 +1038,102 @@ function percent(value: number) {
 
 function formatTime(value?: string) {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'
+}
+
+function baselineStatusText(value?: string) {
+  const map: Record<string, string> = {
+    CREATED: '待分析',
+    ANALYZING: '分析中',
+    WAITING_REVIEW: '待审核',
+    COMPLETED: '已完成',
+    FAILED: '分析失败',
+    STALE: '已过期',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function freshnessText(value?: string) {
+  const map: Record<string, string> = {
+    LIVE: '实时同步',
+    SNAPSHOT: '固定版本',
+    MANUAL: '人工导入',
+    STALE: '已过期',
+    UNKNOWN: '未知',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function sourceTypeText(value?: string) {
+  const map: Record<string, string> = {
+    FILE: '文件导入',
+    GIT: '源码工程',
+    API: '接口同步',
+    AGENT: '代理采集',
+    PASTE: '粘贴导入',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function storageText(value?: string) {
+  const map: Record<string, string> = {
+    MYSQL: 'MySQL 存储',
+    FILE: '文件存储',
+    OBJECT: '对象存储',
+  }
+  return value ? map[value] || value : '存储未标记'
+}
+
+function formatBytes(value?: number) {
+  const size = value || 0
+  if (size <= 0) return '大小未知'
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`
+  return `${Math.round(size / 1024 / 102.4) / 10} MB`
+}
+
+function reviewStatusText(value?: string) {
+  const map: Record<string, string> = {
+    PENDING: '待确认',
+    CONFIRMED: '已确认',
+    REJECTED: '已驳回',
+    WRITTEN_BACK: '已回写',
+    STALE: '已过期',
+    EXEMPTED: '已豁免',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function traceTargetText(value?: string) {
+  const map: Record<string, string> = {
+    TESTCASE: '测试用例',
+    SOURCE_SYMBOL: '源码证据',
+    EXECUTION: '执行证据',
+    COVERAGE: '覆盖率证据',
+    DEFECT: '缺陷证据',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function evidenceLevelText(value?: string) {
+  const map: Record<string, string> = {
+    E0: '无证据',
+    E1: '用例证据',
+    E2: '代码证据',
+    E3: '执行证据',
+    E4: '覆盖率证据',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function evidenceLevelHelp(value?: string) {
+  const map: Record<string, string> = {
+    E0: '没有找到可验证该验收标准的证据，需要补充测试用例、源码关联或执行记录。',
+    E1: '找到了测试用例证据，但还没有代码或运行证据。',
+    E2: '找到了代码实现证据，可判断静态一致性。',
+    E3: '找到了测试执行证据，说明相关用例实际运行过。',
+    E4: '找到了覆盖率证据，证明相关代码路径被运行覆盖。',
+  }
+  return value ? map[value] || value : ''
 }
 
 function verdictText(value: Verdict) {
@@ -613,14 +1159,15 @@ function messageOf(err: unknown) {
 .verification-page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .verification-header,
 .header-actions,
 .section-head,
 .gate-band,
-.finding-toolbar {
+.finding-toolbar,
+.result-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -631,35 +1178,61 @@ function messageOf(err: unknown) {
   flex-wrap: wrap;
 }
 
-.workspace-grid {
+.workspace-tabs {
   display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.control-panel,
-.result-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.panel-section,
-.result-panel,
-.notice,
-.empty-state,
-.gate-band {
+.workspace-tabs button {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  text-align: left;
   border: 1px solid var(--oat-border);
-  border-radius: 8px;
+  border-radius: 12px;
+  padding: 12px;
   background: rgba(255, 255, 255, .92);
 }
 
+.workspace-tabs button.active {
+  border-color: rgba(var(--oat-primary-rgb), .55);
+  background: rgba(var(--oat-primary-rgb), .09);
+  color: var(--oat-primary-dark);
+}
+
+.workspace-tabs span,
+.section-head span,
+.asset-group-head span,
+.asset-record span,
+.baseline-item span,
+.empty-state span,
+.gate-band span,
+.result-toolbar span,
+.finding-card small,
+.evidence-panel span {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+}
+
+.workspace-section {
+  display: grid;
+  gap: 14px;
+}
+
+.two-column {
+  grid-template-columns: minmax(360px, .95fr) minmax(420px, 1.05fr);
+  align-items: start;
+}
+
 .panel-section,
-.result-panel,
 .notice,
 .empty-state,
-.gate-band {
+.gate-band,
+.result-toolbar {
+  border: 1px solid var(--oat-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .94);
   padding: 14px;
 }
 
@@ -668,18 +1241,28 @@ function messageOf(err: unknown) {
   font-size: 16px;
 }
 
-.section-head span,
-.asset-title span,
-.baseline-item span,
-.empty-state span,
-.gate-band span,
-.finding-card small,
-.evidence-panel span {
+.section-tip {
+  margin: 8px 0 12px;
+  color: var(--oat-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.field-help {
+  margin: 0;
   color: var(--oat-text-muted);
   font-size: 12px;
+  line-height: 1.6;
+}
+
+.field-help a {
+  margin-left: 6px;
+  color: var(--oat-primary-dark);
+  font-weight: 800;
 }
 
 .asset-import-grid,
+.asset-library,
 .form-stack,
 .baseline-list,
 .finding-list,
@@ -688,19 +1271,163 @@ function messageOf(err: unknown) {
   gap: 10px;
 }
 
-.asset-import {
+.imported-assets {
+  background: linear-gradient(180deg, rgba(var(--oat-primary-rgb), .04), rgba(255, 255, 255, .94));
+}
+
+.asset-group,
+.asset-import,
+.metrics-strip article,
+.evidence-panel article {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   padding: 10px;
   border: 1px solid rgba(15, 23, 42, .08);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--oat-surface-soft);
 }
 
-.asset-title {
+.asset-group {
+  background: #fff;
+}
+
+.asset-import.collapsed {
+  background: #fff;
+}
+
+.asset-group-head,
+.asset-toggle {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.asset-toggle {
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.asset-record {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-color: rgba(15, 23, 42, .08);
+  background: var(--oat-surface-soft);
+}
+
+.record-main,
+.asset-toggle {
+  border: 0;
+  background: transparent;
+}
+
+.asset-toggle span,
+.record-main strong,
+.record-main span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.record-main {
+  display: grid;
+  gap: 3px;
+  min-height: auto;
+  padding: 0;
+  text-align: left;
+}
+
+.record-actions,
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.record-actions button {
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.danger-button {
+  border-color: rgba(220, 38, 38, .25);
+  color: var(--oat-danger);
+  background: rgba(220, 38, 38, .06);
+}
+
+.edit-panel {
+  grid-column: 1 / -1;
+}
+
+.large-textarea {
+  min-height: 180px;
+}
+
+.asset-toggle span {
+  display: grid;
+  gap: 2px;
+}
+
+.asset-toggle small {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.asset-toggle em {
+  flex: 0 0 auto;
+  color: var(--oat-primary-dark);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.asset-import-body {
+  display: grid;
+  gap: 8px;
+}
+
+.source-import-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--oat-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.source-import-divider::before,
+.source-import-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: var(--oat-border);
+}
+
+.git-source-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed rgba(var(--oat-primary-rgb), .28);
+  border-radius: 12px;
+  background: rgba(var(--oat-primary-rgb), .04);
+}
+
+.compact-head {
+  margin: 0;
+}
+
+.compact-head h3 {
+  margin: 0;
+  font-size: 15px;
 }
 
 textarea,
@@ -758,6 +1485,14 @@ button,
   background: var(--oat-surface-soft);
 }
 
+.ghost-button {
+  min-height: 30px;
+  border-color: transparent;
+  background: rgba(var(--oat-primary-rgb), .08);
+  color: var(--oat-primary);
+  font-size: 12px;
+}
+
 .full {
   width: 100%;
 }
@@ -779,16 +1514,6 @@ button,
   gap: 8px;
 }
 
-.metrics-strip article,
-.evidence-panel article {
-  display: grid;
-  gap: 3px;
-  padding: 10px;
-  border: 1px solid rgba(15, 23, 42, .08);
-  border-radius: 8px;
-  background: var(--oat-surface-soft);
-}
-
 .metrics-strip span {
   color: var(--oat-text-muted);
   font-size: 12px;
@@ -796,6 +1521,12 @@ button,
 
 .metrics-strip strong {
   font-size: 20px;
+}
+
+.with-help {
+  cursor: help;
+  text-decoration: underline dotted rgba(15, 118, 110, .45);
+  text-underline-offset: 3px;
 }
 
 .gate-band.warning {
@@ -834,7 +1565,7 @@ button,
   display: grid;
   gap: 0;
   border: 1px solid var(--oat-border);
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
 }
 
@@ -911,7 +1642,7 @@ button,
   padding: 12px;
   border: 1px solid var(--oat-border);
   border-left: 4px solid var(--oat-warning);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -935,6 +1666,58 @@ button,
   max-width: 220px;
 }
 
+.writeback-form {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(var(--oat-primary-rgb), .18);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(var(--oat-primary-rgb), .06), rgba(255, 255, 255, .92));
+}
+
+.writeback-intro {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(var(--oat-primary-rgb), .08);
+  color: var(--oat-text);
+}
+
+.writeback-intro span {
+  color: var(--oat-muted);
+  font-size: 13px;
+}
+
+.writeback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.evidence-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.writeback-message {
+  overflow: auto;
+  max-height: 360px;
+  margin: 10px 0 0;
+  padding: 12px;
+  border: 1px solid var(--oat-border);
+  border-radius: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
 .notice.danger {
   border-color: rgba(220, 38, 38, .25);
   color: var(--oat-danger);
@@ -954,7 +1737,8 @@ button,
 }
 
 @media (max-width: 1100px) {
-  .workspace-grid {
+  .two-column,
+  .workspace-tabs {
     grid-template-columns: 1fr;
   }
 
@@ -967,7 +1751,8 @@ button,
 @media (max-width: 720px) {
   .verification-header,
   .gate-band,
-  .finding-card {
+  .finding-card,
+  .result-toolbar {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;

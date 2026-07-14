@@ -6,6 +6,7 @@ export function useProjectAiAnchors(
   activeMessages: Ref<AiSessionMessage[]> | { value: AiSessionMessage[] },
   anchorFilterMode: Ref<'all' | 'pending'>,
   anchorSearch: Ref<string>,
+  onCopyFailed?: () => void,
 ) {
   const activeAnchorId = ref('')
   const previewAnchorId = ref('')
@@ -125,7 +126,7 @@ export function useProjectAiAnchors(
     try {
       await navigator.clipboard?.writeText(url)
     } catch {
-      window.prompt('复制问答锚点链接', url)
+      onCopyFailed?.()
     }
   }
 

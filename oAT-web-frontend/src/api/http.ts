@@ -105,6 +105,21 @@ export function apiPost<T>(input: string, body?: BodyInit | null, contentType?: 
   })
 }
 
+export function apiPut<T>(input: string, body?: BodyInit | null, contentType?: string): Promise<T> {
+  const headers = contentType ? { 'Content-Type': contentType } : undefined
+  return request<T>(input, {
+    method: 'PUT',
+    body,
+    headers,
+  })
+}
+
+export function apiDelete<T>(input: string): Promise<T> {
+  return request<T>(input, {
+    method: 'DELETE',
+  })
+}
+
 export function apiGetRaw<T>(input: string): Promise<T> {
   return requestRawJson<T>(input)
 }

@@ -94,6 +94,14 @@ public class GitRemoteSupportService {
             }
 
             Collection<org.eclipse.jgit.lib.Ref> refs = lsRemoteCommand.call();
+            if (!StringUtils.hasText(finalBranch)) {
+                selectDefaultHead(refs);
+                if (StringUtils.hasText(commitId)) {
+                    checkCommitIdExists(normalizedRepoUrl, username, password, commitId);
+                }
+                return;
+            }
+
             boolean branchFound = false;
             String branchRef = "refs/heads/" + finalBranch;
 
@@ -136,6 +144,9 @@ public class GitRemoteSupportService {
             }
 
             Collection<org.eclipse.jgit.lib.Ref> refs = lsRemoteCommand.call();
+            if (!StringUtils.hasText(finalBranch)) {
+                return selectDefaultHead(refs).getObjectId().name();
+            }
             for (org.eclipse.jgit.lib.Ref ref : refs) {
                 String name = ref.getName();
                 if (name.equals("refs/heads/" + finalBranch)) {
@@ -147,6 +158,37 @@ public class GitRemoteSupportService {
             logger.error("Failed to get commit id: {}", e.getMessage(), e);
             throw new RuntimeException("获取 CommitID失败: " + friendlyError(e));
         }
+    }
+
+    private org.eclipse.jgit.lib.Ref selectDefaultHead(Collection<org.eclipse.jgit.lib.Ref> refs) {
+        if (refs == null || refs.isEmpty()) {
+            throw new RuntimeException("仓库没有可用分支");
+        }
+        org.eclipse.jgit.lib.Ref firstHead = null;
+        for (org.eclipse.jgit.lib.Ref ref : refs) {
+            if (ref == null || ref.getObjectId() == null) {
+                continue;
+            }
+            String name = ref.getName();
+            if ("refs/heads/main".equals(name)) {
+                return ref;
+            }
+            if (firstHead == null && name != null && name.startsWith("refs/heads/")) {
+                firstHead = ref;
+            }
+        }
+        for (org.eclipse.jgit.lib.Ref ref : refs) {
+            if (ref == null || ref.getObjectId() == null) {
+                continue;
+            }
+            if ("refs/heads/master".equals(ref.getName())) {
+                return ref;
+            }
+        }
+        if (firstHead != null) {
+            return firstHead;
+        }
+        throw new RuntimeException("仓库没有可用分支");
     }
 
     public List<GitCommitOptionVo> getRecentCommits(String repoUrl, String username, String password, String branch, int limit) {

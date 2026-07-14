@@ -355,7 +355,7 @@ function testcaseFromFindingEvidence(finding: VerificationFinding, testcasesByEx
 }
 
 function emptyOverview(): VerificationOverview {
-  return { requirements: [], testcases: [], sources: [], executions: [], coverages: [], baselines: [] }
+  return { requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] }
 }
 
 function severityText(value: VerificationFinding['severity']) {

@@ -139,12 +139,14 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { backendApiUrl } from '@/api/http'
 import AppPagination from '@/components/AppPagination.vue'
 import { useDialog } from '@/composables/useDialog'
+import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()
 const router = useRouter()
 const projectStore = useProjectStore()
 const dialog = useDialog()
+const toast = useToast()
 const projectId = computed(() => String(route.params.projectId || ''))
 const payload = computed(() => projectStore.usecaseListByProjectId[projectId.value])
 const currentDirectory = computed(() => String(route.query.directory || 'root'))
@@ -303,7 +305,7 @@ async function handleImportFile(event: Event) {
   try {
     const result = await projectStore.importUsecases(projectId.value, currentDirectory.value, file)
     const successCount = result?.successCount ?? 0
-    await dialog.alert({ title: '用例上传成功', message: `已导入 ${successCount} 条用例。`, tone: 'success' })
+    toast.success(`用例上传成功，已导入 ${successCount} 条用例`)
     await load()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '用例上传失败'
@@ -327,7 +329,7 @@ async function rebuildSearchData() {
   error.value = ''
   try {
     const updated = await projectStore.rebuildUsecaseSearch(projectId.value)
-    await dialog.alert({ title: '检索数据已重建', message: `已回填用例检索数据，更新数量：${updated}。`, tone: 'success' })
+    toast.success(`检索数据已重建，更新数量：${updated}`)
     await load()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '重建检索数据失败'

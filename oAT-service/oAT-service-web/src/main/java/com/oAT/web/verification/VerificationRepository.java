@@ -26,11 +26,13 @@ public class VerificationRepository {
         jdbc.update("""
                 INSERT INTO oat_verification_asset
                 (id, project_id, asset_type, source_type, external_id, external_url, source_version,
-                 file_name, content_hash, content_text, metadata_json, freshness, imported_by, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
+                 file_name, content_hash, content_text, storage_type, storage_key, content_size,
+                 content_preview, metadata_json, freshness, imported_by, captured_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
                 """, asset.id(), asset.projectId(), asset.assetType().name(), asset.sourceType().name(),
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
-                asset.content(), json(asset.metadata()), asset.freshness().name(), asset.importedBy(), ts(asset.capturedAt()));
+                asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(), asset.contentPreview(),
+                json(asset.metadata()), asset.freshness().name(), asset.importedBy(), ts(asset.capturedAt()));
     }
 
     public Optional<AssetSnapshot> findAsset(String projectId, String id) {
@@ -41,6 +43,35 @@ public class VerificationRepository {
     public List<AssetSnapshot> findAssets(String projectId, AssetType type) {
         return jdbc.query("SELECT * FROM oat_verification_asset WHERE project_id = ? AND asset_type = ? ORDER BY create_time DESC",
                 this::asset, projectId, type.name());
+    }
+
+    public boolean updateAsset(AssetSnapshot asset) {
+        int updated = jdbc.update("""
+                UPDATE oat_verification_asset
+                SET external_id = ?, external_url = ?, source_version = ?, file_name = ?,
+                    content_hash = ?, content_text = ?, storage_type = ?, storage_key = ?,
+                    content_size = ?, content_preview = ?, metadata_json = CAST(? AS JSON), freshness = ?
+                WHERE project_id = ? AND id = ?
+                """, asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(),
+                asset.contentHash(), asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(),
+                asset.contentPreview(), json(asset.metadata()), asset.freshness().name(),
+                asset.projectId(), asset.id());
+        return updated == 1;
+    }
+
+    public boolean deleteAsset(String projectId, String assetId) {
+        int updated = jdbc.update("DELETE FROM oat_verification_asset WHERE project_id = ? AND id = ?", projectId, assetId);
+        return updated == 1;
+    }
+
+    public boolean isAssetReferenced(String projectId, String assetId) {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*) FROM oat_verification_baseline
+                WHERE project_id = ?
+                  AND (requirement_asset_id = ? OR testcase_asset_id = ? OR source_asset_id = ?
+                       OR execution_asset_id = ? OR coverage_asset_id = ?)
+                """, Integer.class, projectId, assetId, assetId, assetId, assetId, assetId);
+        return count != null && count > 0;
     }
 
     public void saveBaseline(Baseline baseline) {
@@ -81,13 +112,45 @@ public class VerificationRepository {
                 this::baseline, projectId);
     }
 
+    public boolean updateBaseline(Baseline baseline) {
+        int updated = jdbc.update("""
+                UPDATE oat_verification_baseline
+                SET name = ?, requirement_asset_id = ?, testcase_asset_id = ?, source_asset_id = ?,
+                    execution_asset_id = ?, coverage_asset_id = ?, source_app_id = ?,
+                    repository_url = ?, source_branch = ?, source_commit = ?,
+                    status = ?, freshness = ?, update_time = ?
+                WHERE project_id = ? AND id = ?
+                """, baseline.name(), baseline.requirementAssetId(), baseline.testcaseAssetId(), baseline.sourceAssetId(),
+                baseline.executionAssetId(), baseline.coverageAssetId(), baseline.sourceAppId(),
+                baseline.repositoryUrl(), baseline.sourceBranch(), baseline.sourceCommit(),
+                baseline.status().name(), baseline.freshness().name(), ts(baseline.updateTime()),
+                baseline.projectId(), baseline.id());
+        return updated == 1;
+    }
+
     @Transactional
-    public void replaceAnalysis(String baselineId, List<AcceptanceCriterion> criteria,
-                                List<TestcaseProjection> testcases, List<TraceLink> links, List<Finding> findings) {
+    public boolean deleteBaseline(String projectId, String baselineId) {
+        Baseline baseline = findBaseline(projectId, baselineId).orElse(null);
+        if (baseline == null) {
+            return false;
+        }
+        deleteAnalysis(baselineId);
+        jdbc.update("DELETE FROM oat_verification_baseline WHERE project_id = ? AND id = ?", projectId, baselineId);
+        return true;
+    }
+
+    public void deleteAnalysis(String baselineId) {
+        jdbc.update("DELETE FROM oat_verification_writeback_action WHERE baseline_id = ?", baselineId);
         jdbc.update("DELETE FROM oat_verification_finding WHERE baseline_id = ?", baselineId);
         jdbc.update("DELETE FROM oat_verification_trace_link WHERE baseline_id = ?", baselineId);
         jdbc.update("DELETE FROM oat_verification_ac WHERE baseline_id = ?", baselineId);
         jdbc.update("DELETE FROM oat_verification_testcase WHERE baseline_id = ?", baselineId);
+    }
+
+    @Transactional
+    public void replaceAnalysis(String baselineId, List<AcceptanceCriterion> criteria,
+                                List<TestcaseProjection> testcases, List<TraceLink> links, List<Finding> findings) {
+        deleteAnalysis(baselineId);
         criteria.forEach(this::saveCriterion);
         testcases.forEach(this::saveTestcase);
         links.forEach(this::saveTraceLink);
@@ -136,15 +199,6 @@ public class VerificationRepository {
         return updated == 1;
     }
 
-    public void saveGateResult(GateResult result) {
-        jdbc.update("""
-                INSERT INTO oat_verification_gate_result
-                (id, baseline_id, status, policy_json, metrics_json, reasons_json, create_time)
-                VALUES (?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), ?)
-                """, result.id(), result.baselineId(), result.status().name(), json(result.policy()),
-                json(result.metrics()), json(result.reasons()), ts(result.createTime()));
-    }
-
     public Optional<Finding> findFinding(String projectId, String findingId) {
         return jdbc.query("""
                 SELECT f.* FROM oat_verification_finding f
@@ -170,6 +224,48 @@ public class VerificationRepository {
                 WHERE baseline_id = ?
                 ORDER BY create_time DESC
                 """, this::writeBackAction, baselineId);
+    }
+
+    public void saveAnalysisJob(AnalysisJob job) {
+        jdbc.update("""
+                INSERT INTO oat_verification_analysis_job
+                (id, project_id, baseline_id, status, message, created_by, create_time, update_time, finish_time)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, job.id(), job.projectId(), job.baselineId(), job.status().name(), job.message(),
+                job.createdBy(), ts(job.createTime()), ts(job.updateTime()), ts(job.finishTime()));
+    }
+
+    public Optional<AnalysisJob> findAnalysisJob(String projectId, String jobId) {
+        return jdbc.query("""
+                SELECT * FROM oat_verification_analysis_job
+                WHERE project_id = ? AND id = ?
+                """, this::analysisJob, projectId, jobId).stream().findFirst();
+    }
+
+    public Optional<AnalysisJob> findRunningAnalysisJob(String projectId, String baselineId) {
+        return jdbc.query("""
+                SELECT * FROM oat_verification_analysis_job
+                WHERE project_id = ? AND baseline_id = ? AND status IN ('QUEUED','RUNNING')
+                ORDER BY create_time DESC
+                LIMIT 1
+                """, this::analysisJob, projectId, baselineId).stream().findFirst();
+    }
+
+    public Optional<AnalysisJob> findLatestAnalysisJob(String projectId, String baselineId) {
+        return jdbc.query("""
+                SELECT * FROM oat_verification_analysis_job
+                WHERE project_id = ? AND baseline_id = ?
+                ORDER BY create_time DESC
+                LIMIT 1
+                """, this::analysisJob, projectId, baselineId).stream().findFirst();
+    }
+
+    public void updateAnalysisJobStatus(String jobId, AnalysisJobStatus status, String message, LocalDateTime finishTime) {
+        jdbc.update("""
+                UPDATE oat_verification_analysis_job
+                SET status = ?, message = ?, update_time = ?, finish_time = ?
+                WHERE id = ?
+                """, status.name(), message, ts(LocalDateTime.now()), ts(finishTime), jobId);
     }
 
     private void saveCriterion(AcceptanceCriterion item) {
@@ -219,6 +315,8 @@ public class VerificationRepository {
                 AssetType.valueOf(rs.getString("asset_type")), SourceType.valueOf(rs.getString("source_type")),
                 rs.getString("external_id"), rs.getString("external_url"), rs.getString("source_version"),
                 rs.getString("file_name"), rs.getString("content_hash"), rs.getString("content_text"),
+                nullableColumn(rs, "storage_type"), nullableColumn(rs, "storage_key"),
+                longColumn(rs, "content_size"), nullableColumn(rs, "content_preview"),
                 map(rs.getString("metadata_json")), Freshness.valueOf(rs.getString("freshness")),
                 rs.getString("imported_by"), time(rs.getTimestamp("captured_at")));
     }
@@ -275,6 +373,13 @@ public class VerificationRepository {
                 time(rs.getTimestamp("create_time")));
     }
 
+    private AnalysisJob analysisJob(ResultSet rs, int row) throws SQLException {
+        return new AnalysisJob(rs.getString("id"), rs.getString("project_id"), rs.getString("baseline_id"),
+                AnalysisJobStatus.valueOf(rs.getString("status")), rs.getString("message"), rs.getString("created_by"),
+                time(rs.getTimestamp("create_time")), time(rs.getTimestamp("update_time")),
+                time(rs.getTimestamp("finish_time")));
+    }
+
     private String json(Object value) { return UtilJson.writeValueAsString(value == null ? Map.of() : value); }
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(String value) { return value == null ? Map.of() : UtilJson.convertValue(value, Map.class); }
@@ -286,6 +391,15 @@ public class VerificationRepository {
             return rs.getString(column);
         } catch (SQLException ignored) {
             return null;
+        }
+    }
+
+    private long longColumn(ResultSet rs, String column) {
+        try {
+            long value = rs.getLong(column);
+            return rs.wasNull() ? 0 : value;
+        } catch (SQLException ignored) {
+            return 0;
         }
     }
 }

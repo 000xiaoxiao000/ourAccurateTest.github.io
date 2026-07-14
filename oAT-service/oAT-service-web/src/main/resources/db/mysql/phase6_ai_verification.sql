@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS `oat_verification_asset` (
   `file_name` VARCHAR(512),
   `content_hash` VARCHAR(64) NOT NULL,
   `content_text` MEDIUMTEXT,
+  `storage_type` VARCHAR(32) NOT NULL DEFAULT 'MYSQL',
+  `storage_key` VARCHAR(512),
+  `content_size` BIGINT NOT NULL DEFAULT 0,
+  `content_preview` TEXT,
   `metadata_json` JSON,
   `freshness` VARCHAR(32) NOT NULL DEFAULT 'SNAPSHOT',
   `imported_by` VARCHAR(64),
@@ -25,6 +29,20 @@ CREATE TABLE IF NOT EXISTS `oat_verification_asset` (
   INDEX `idx_verification_asset_project_type` (`project_id`, `asset_type`, `create_time`),
   INDEX `idx_verification_asset_hash` (`project_id`, `content_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI验证外部资产快照';
+
+CREATE TABLE IF NOT EXISTS `oat_verification_asset_content` (
+  `storage_key` VARCHAR(512) PRIMARY KEY,
+  `project_id` VARCHAR(64) NOT NULL,
+  `asset_id` VARCHAR(64) NOT NULL,
+  `content_hash` VARCHAR(64) NOT NULL,
+  `content_text` MEDIUMTEXT,
+  `content_size` BIGINT NOT NULL DEFAULT 0,
+  `content_preview` TEXT,
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_verification_asset_content_project` (`project_id`, `asset_id`),
+  INDEX `idx_verification_asset_content_hash` (`project_id`, `content_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI验证资料正文存储-MySQL默认实现';
 
 CREATE TABLE IF NOT EXISTS `oat_verification_baseline` (
   `id` VARCHAR(64) PRIMARY KEY,
@@ -122,17 +140,6 @@ CREATE TABLE IF NOT EXISTS `oat_verification_finding` (
   INDEX `idx_verification_finding_ac` (`ac_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI一致性结构化发现';
 
-CREATE TABLE IF NOT EXISTS `oat_verification_gate_result` (
-  `id` VARCHAR(64) PRIMARY KEY,
-  `baseline_id` VARCHAR(64) NOT NULL,
-  `status` VARCHAR(16) NOT NULL,
-  `policy_json` JSON NOT NULL,
-  `metrics_json` JSON NOT NULL,
-  `reasons_json` JSON,
-  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_verification_gate_baseline_time` (`baseline_id`, `create_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI验证质量门禁结果';
-
 CREATE TABLE IF NOT EXISTS `oat_verification_writeback_action` (
   `id` VARCHAR(64) PRIMARY KEY,
   `project_id` VARCHAR(64) NOT NULL,
@@ -147,3 +154,17 @@ CREATE TABLE IF NOT EXISTS `oat_verification_writeback_action` (
   INDEX `idx_verification_writeback_baseline` (`baseline_id`, `create_time`),
   INDEX `idx_verification_writeback_finding` (`finding_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI验证外部回写动作审计';
+
+CREATE TABLE IF NOT EXISTS `oat_verification_analysis_job` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `project_id` VARCHAR(64) NOT NULL,
+  `baseline_id` VARCHAR(64) NOT NULL,
+  `status` VARCHAR(32) NOT NULL,
+  `message` VARCHAR(2000),
+  `created_by` VARCHAR(64),
+  `create_time` DATETIME NOT NULL,
+  `update_time` DATETIME NOT NULL,
+  `finish_time` DATETIME,
+  INDEX `idx_verification_analysis_job_baseline` (`project_id`, `baseline_id`, `create_time`),
+  INDEX `idx_verification_analysis_job_status` (`project_id`, `baseline_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI验证异步分析任务';

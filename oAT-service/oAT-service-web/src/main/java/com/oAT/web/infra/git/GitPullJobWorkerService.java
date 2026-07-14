@@ -4,6 +4,7 @@ import com.oAT.web.common.Job;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.GitCacheInfo;
 import com.oAT.web.service.entity.GitJobVo;
+import org.eclipse.jgit.api.CloneCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.ProgressMonitor;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
@@ -45,12 +46,17 @@ public class GitPullJobWorkerService {
         String normalizedRepoUrl = gitRemoteSupportService.normalizeRemoteUrl(repoUrl);
         try {
             tempDir = Files.createTempDirectory("oAT_git_clone");
-            try (Git git = Git.cloneRepository()
+            CloneCommand cloneCommand = Git.cloneRepository()
                     .setURI(normalizedRepoUrl)
-                    .setDirectory(tempDir.toFile())
-                    .setCredentialsProvider(new UsernamePasswordCredentialsProvider(StringUtils.hasText(username) ? username : "git", password))
-                    .setBranch(branch)
-                    .call()) {
+                    .setDirectory(tempDir.toFile());
+            UsernamePasswordCredentialsProvider credentialsProvider = gitRemoteSupportService.credentials(username, password);
+            if (credentialsProvider != null) {
+                cloneCommand.setCredentialsProvider(credentialsProvider);
+            }
+            if (StringUtils.hasText(branch)) {
+                cloneCommand.setBranch(gitRemoteSupportService.normalizeBranchName(branch));
+            }
+            try (Git git = cloneCommand.call()) {
                 if (StringUtils.hasText(commitId)) {
                     git.checkout().setName(commitId).call();
                 }
@@ -87,13 +93,18 @@ public class GitPullJobWorkerService {
             tempDir = Files.createTempDirectory("oAT_git_clone");
             File cloneDir = tempDir.toFile();
 
-            try (Git git = Git.cloneRepository()
+            CloneCommand cloneCommand = Git.cloneRepository()
                     .setURI(normalizedRepoUrl)
                     .setDirectory(cloneDir)
-                    .setCredentialsProvider(new UsernamePasswordCredentialsProvider(StringUtils.hasText(username) ? username : "git", password))
-                    .setBranch(branch)
-                    .setProgressMonitor(progressMonitor(job))
-                    .call()) {
+                    .setProgressMonitor(progressMonitor(job));
+            UsernamePasswordCredentialsProvider credentialsProvider = gitRemoteSupportService.credentials(username, password);
+            if (credentialsProvider != null) {
+                cloneCommand.setCredentialsProvider(credentialsProvider);
+            }
+            if (StringUtils.hasText(branch)) {
+                cloneCommand.setBranch(gitRemoteSupportService.normalizeBranchName(branch));
+            }
+            try (Git git = cloneCommand.call()) {
                 if (StringUtils.hasText(commitId)) {
                     job.getProgress().next("切换 Commit...", 5);
                     git.checkout().setName(commitId).call();

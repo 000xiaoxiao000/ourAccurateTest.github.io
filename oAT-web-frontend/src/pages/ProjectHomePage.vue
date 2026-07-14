@@ -52,7 +52,7 @@
           <div class="panel-head ai-panel-head">
             <div>
               <h2>AI 需求一致性验证</h2>
-              <p class="panel-desc">冻结需求、用例、源码和运行证据，输出可审核的追溯矩阵和质量门禁</p>
+              <p class="panel-desc">冻结需求、用例、Bug、源码和运行证据，输出 AI 生成的追溯矩阵和问题清单</p>
             </div>
             <RouterLink class="ai-entry primary" :to="`/p/${projectId}/verification`">
               进入 AI 验证
@@ -162,7 +162,7 @@ const aiCapabilities = [
   { icon: '需', title: 'AC 提取', text: '把需求拆成可验证的最小验收标准' },
   { icon: '追', title: '双向追溯', text: '关联 AC、用例、源码符号和运行证据' },
   { icon: '审', title: '证据审核', text: '确认、驳回、豁免或回写到外部事实源' },
-  { icon: '禁', title: '质量门禁', text: '按覆盖、风险和新鲜度给出发布判断' },
+  { icon: '险', title: 'AI 风险发现', text: '由 AI 基于证据输出缺失、偏差和不可验证项' },
 ]
 
 const aiStarters = ['总结项目风险', '线上异常怎么排查', '下一步优先看哪里']

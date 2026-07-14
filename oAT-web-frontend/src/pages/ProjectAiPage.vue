@@ -96,6 +96,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { clearAiLearningSuggestions, fetchAiFeedbackStats, fetchAiLearningReport, submitAiFeedback } from '@/api/bootstrap'
 import { backendApiUrl } from '@/api/http'
 import { useDialog } from '@/composables/useDialog'
+import { useToast } from '@/composables/useToast'
 import ProjectAiAskWorkspace from '@/features/ai/components/ProjectAiAskWorkspace.vue'
 import ProjectAiHero from '@/features/ai/components/ProjectAiHero.vue'
 import ProjectAiReplyPanel from '@/features/ai/components/ProjectAiReplyPanel.vue'
@@ -112,6 +113,7 @@ const router = useRouter()
 const projectStore = useProjectStore()
 const authStore = useAuthStore()
 const dialog = useDialog()
+const toast = useToast()
 const projectId = computed(() => String(route.params.projectId || ''))
 const context = computed(() => projectStore.aiContextByProjectId[projectId.value])
 const reply = computed(() => projectStore.aiLastReplyByProjectId[projectId.value])
@@ -166,7 +168,9 @@ const {
   copyAnchorLink,
   updateActiveAnchorFromScroll,
   clearAnchorTimers,
-} = useProjectAiAnchors(activeMessages, anchorFilterMode, anchorSearch)
+} = useProjectAiAnchors(activeMessages, anchorFilterMode, anchorSearch, () => {
+  toast.error('复制链接失败，请检查浏览器剪贴板权限')
+})
 
 const {
   activeSessionId,
@@ -323,7 +327,7 @@ async function copyMessage(text: string, messageId: string) {
       if (copiedMessageId.value === messageId) copiedMessageId.value = ''
     }, 1400)
   } catch {
-    window.prompt('复制消息内容', text)
+    toast.error('复制消息失败，请检查浏览器剪贴板权限')
   }
 }
 

@@ -66,12 +66,12 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { fetchRepositoryBranchesPreview } from '@/api/bootstrap'
-import { useDialog } from '@/composables/useDialog'
+import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()
 const projectStore = useProjectStore()
-const dialog = useDialog()
+const toast = useToast()
 const projectId = computed(() => String(route.params.projectId || ''))
 const appId = computed(() => String(route.params.appId || ''))
 const storeKey = computed(() => `${projectId.value}:${appId.value}`)
@@ -119,7 +119,7 @@ async function save() {
   try {
     await projectStore.updateRepository(projectId.value, appId.value, { ...form })
     syncForm()
-    await dialog.alert({ title: '仓库配置已保存', message: '仓库地址和认证信息已更新，可继续读取远端分支或进行 Git 版本比对。', tone: 'success' })
+    toast.success('仓库配置已保存，可继续读取远端分支或进行 Git 版本比对')
   } catch (err) {
     error.value = err instanceof Error ? err.message : '保存仓库配置失败'
   } finally {

@@ -4,6 +4,8 @@ import com.oAT.web.esDao.StaticInfoRepository;
 import com.oAT.web.esDao.entity.StaticSourceInfo;
 import com.oAT.web.verification.model.VerificationModels;
 import com.oAT.web.verification.model.VerificationModels.*;
+import com.oAT.web.verification.storage.AssetContentStore;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
@@ -13,34 +15,35 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.stream.Collectors;
 
 @Service
 public class VerificationService {
-    private static final Pattern WORD = Pattern.compile("[\\p{IsHan}]{2,}|[a-zA-Z][a-zA-Z0-9_]{2,}|\\d+");
-    private static final Pattern NUMBER = Pattern.compile("\\d+(?:\\.\\d+)?");
-
     private final VerificationRepository repository;
-    private final VerificationProjectionParser parser;
     private final StaticInfoRepository staticInfoRepository;
-    private final VerificationAiAnalyzer aiAnalyzer;
+    private final VerificationAiOrchestrator aiOrchestrator;
+    private final VerificationAiWriteBackComposer writeBackComposer;
+    private final AssetContentStore assetContentStore;
+    private final Executor verificationAiExecutor;
 
-    public VerificationService(VerificationRepository repository, VerificationProjectionParser parser,
-                               StaticInfoRepository staticInfoRepository, VerificationAiAnalyzer aiAnalyzer) {
+    public VerificationService(VerificationRepository repository, StaticInfoRepository staticInfoRepository,
+                               VerificationAiOrchestrator aiOrchestrator, VerificationAiWriteBackComposer writeBackComposer,
+                               AssetContentStore assetContentStore,
+                               @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.repository = repository;
-        this.parser = parser;
         this.staticInfoRepository = staticInfoRepository;
-        this.aiAnalyzer = aiAnalyzer;
+        this.aiOrchestrator = aiOrchestrator;
+        this.writeBackComposer = writeBackComposer;
+        this.assetContentStore = assetContentStore;
+        this.verificationAiExecutor = verificationAiExecutor;
     }
 
     public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
@@ -50,9 +53,14 @@ public class VerificationService {
         Assert.notNull(assetType, "资产类型不能为空");
         Assert.hasText(content, "导入内容不能为空");
         LocalDateTime now = LocalDateTime.now();
-        AssetSnapshot asset = new AssetSnapshot(UUID.randomUUID().toString(), projectId, assetType,
+        String assetId = UUID.randomUUID().toString();
+        String contentHash = sha256(content);
+        AssetContentStore.StoredContent stored = assetContentStore.store(
+                new AssetContentStore.StoreCommand(projectId, assetId, contentHash, content));
+        AssetSnapshot asset = new AssetSnapshot(assetId, projectId, assetType,
                 sourceType == null ? SourceType.FILE : sourceType, externalId, externalUrl, sourceVersion,
-                fileName, sha256(content), content, metadata == null ? Map.of() : metadata,
+                fileName, contentHash, null, stored.storageType(), stored.storageKey(), stored.contentSize(),
+                stored.contentPreview(), metadata == null ? Map.of() : metadata,
                 sourceType == SourceType.API || sourceType == SourceType.AGENT ? Freshness.LIVE : Freshness.MANUAL,
                 userId, now);
         repository.saveAsset(asset);
@@ -60,7 +68,33 @@ public class VerificationService {
     }
 
     public List<AssetSnapshot> assets(String projectId, AssetType type) {
-        return repository.findAssets(projectId, type);
+        return repository.findAssets(projectId, type).stream().map(this::withoutContent).toList();
+    }
+
+    public AssetSnapshot updateAsset(String projectId, String assetId, String userId, UpdateAsset command) {
+        Assert.notNull(command, "更新资料请求不能为空");
+        AssetSnapshot existing = requiredAsset(projectId, assetId, null);
+        String content = StringUtils.hasText(command.content()) ? command.content() : loadAssetContent(existing);
+        Assert.hasText(content, "资料内容不能为空");
+        String contentHash = sha256(content);
+        AssetContentStore.StoredContent stored = assetContentStore.store(
+                new AssetContentStore.StoreCommand(projectId, existing.id(), contentHash, content));
+        AssetSnapshot updated = new AssetSnapshot(existing.id(), existing.projectId(), existing.assetType(),
+                existing.sourceType(), textOrExisting(command.externalId(), existing.externalId()),
+                textOrExisting(command.externalUrl(), existing.externalUrl()),
+                textOrExisting(command.sourceVersion(), existing.sourceVersion()),
+                textOrExisting(command.fileName(), existing.fileName()), contentHash, null,
+                stored.storageType(), stored.storageKey(), stored.contentSize(), stored.contentPreview(),
+                existing.metadata(), existing.freshness(), userId, LocalDateTime.now());
+        Assert.isTrue(repository.updateAsset(updated), "找不到指定资料");
+        return updated;
+    }
+
+    public void deleteAsset(String projectId, String assetId) {
+        AssetSnapshot asset = requiredAsset(projectId, assetId, null);
+        Assert.isTrue(!repository.isAssetReferenced(projectId, assetId), "该资料已被分析基线引用，不能直接删除");
+        Assert.isTrue(repository.deleteAsset(projectId, assetId), "找不到指定资料");
+        assetContentStore.delete(asset.storageKey());
     }
 
     public Baseline createBaseline(String projectId, String userId, CreateBaseline command) {
@@ -86,6 +120,34 @@ public class VerificationService {
         return repository.findBaselines(projectId);
     }
 
+    public Baseline updateBaseline(String projectId, String baselineId, UpdateBaseline command) {
+        Assert.notNull(command, "更新基线请求不能为空");
+        Baseline existing = requiredBaseline(projectId, baselineId);
+        String requirementAssetId = textOrExisting(command.requirementAssetId(), existing.requirementAssetId());
+        String testcaseAssetId = textOrExisting(command.testcaseAssetId(), existing.testcaseAssetId());
+        AssetSnapshot requirement = requiredAsset(projectId, requirementAssetId, AssetType.REQUIREMENT);
+        AssetSnapshot testcase = requiredAsset(projectId, testcaseAssetId, AssetType.TESTCASE);
+        if (StringUtils.hasText(command.sourceAssetId())) requiredAsset(projectId, command.sourceAssetId(), AssetType.SOURCE);
+        if (StringUtils.hasText(command.executionAssetId())) requiredAsset(projectId, command.executionAssetId(), AssetType.EXECUTION);
+        if (StringUtils.hasText(command.coverageAssetId())) requiredAsset(projectId, command.coverageAssetId(), AssetType.COVERAGE);
+        Freshness freshness = requirement.freshness() == Freshness.LIVE && testcase.freshness() == Freshness.LIVE
+                ? Freshness.LIVE : Freshness.MANUAL;
+        Baseline updated = new Baseline(existing.id(), existing.projectId(),
+                StringUtils.hasText(command.name()) ? command.name().trim() : existing.name(),
+                requirementAssetId, testcaseAssetId, command.sourceAssetId(), command.executionAssetId(),
+                command.coverageAssetId(), command.sourceAppId(), command.repositoryUrl(), command.sourceBranch(),
+                command.sourceCommit(), existing.analyzerVersion(), BaselineStatus.CREATED, freshness,
+                existing.createdBy(), existing.createTime(), LocalDateTime.now());
+        Assert.isTrue(repository.updateBaseline(updated), "找不到指定分析基线");
+        repository.deleteAnalysis(baselineId);
+        return updated;
+    }
+
+    public void deleteBaseline(String projectId, String baselineId) {
+        requiredBaseline(projectId, baselineId);
+        Assert.isTrue(repository.deleteBaseline(projectId, baselineId), "找不到指定分析基线");
+    }
+
     public BaselineDetail detail(String projectId, String baselineId) {
         Baseline baseline = requiredBaseline(projectId, baselineId);
         List<AcceptanceCriterion> criteria = repository.findCriteria(baselineId);
@@ -97,41 +159,71 @@ public class VerificationService {
                 findings, metrics(criteria, links, findings));
     }
 
-    @Transactional
-    public BaselineDetail analyze(String projectId, String baselineId) {
+    public AnalysisJob startAnalysis(String projectId, String baselineId, String userId) {
         Baseline baseline = requiredBaseline(projectId, baselineId);
+        if (baseline.status() == BaselineStatus.ANALYZING) {
+            return repository.findRunningAnalysisJob(projectId, baselineId)
+                    .orElseThrow(() -> new IllegalArgumentException("该分析基线正在执行AI分析，请稍后刷新结果"));
+        }
+        repository.findRunningAnalysisJob(projectId, baselineId).ifPresent(job -> {
+            throw new IllegalArgumentException("该分析基线已有AI分析任务在执行，请稍后刷新结果");
+        });
+        LocalDateTime now = LocalDateTime.now();
+        AnalysisJob job = new AnalysisJob(UUID.randomUUID().toString(), projectId, baselineId,
+                AnalysisJobStatus.QUEUED, "AI分析任务已进入队列", userId, now, now, null);
+        repository.saveAnalysisJob(job);
         repository.updateBaselineStatus(baselineId, BaselineStatus.ANALYZING);
         try {
+            verificationAiExecutor.execute(() -> runAnalysisJob(projectId, baselineId, job.id()));
+        } catch (RejectedExecutionException e) {
+            repository.updateAnalysisJobStatus(job.id(), AnalysisJobStatus.FAILED, "AI分析队列已满，请稍后重试", LocalDateTime.now());
+            repository.updateBaselineStatus(baselineId, BaselineStatus.FAILED);
+            throw new IllegalStateException("AI分析队列已满，请稍后重试", e);
+        }
+        return job;
+    }
+
+    public AnalysisJob analysisJob(String projectId, String jobId) {
+        return repository.findAnalysisJob(projectId, jobId)
+                .orElseThrow(() -> new IllegalArgumentException("找不到AI分析任务: " + jobId));
+    }
+
+    public AnalysisJob latestAnalysisJob(String projectId, String baselineId) {
+        requiredBaseline(projectId, baselineId);
+        return repository.findLatestAnalysisJob(projectId, baselineId)
+                .orElseThrow(() -> new IllegalArgumentException("该分析基线还没有AI分析任务"));
+    }
+
+    private void runAnalysisJob(String projectId, String baselineId, String jobId) {
+        repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.RUNNING, "AI分析执行中", null);
+        try {
+            executeAnalysis(projectId, baselineId);
+            repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "AI分析完成", LocalDateTime.now());
+        } catch (RuntimeException e) {
+            repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.FAILED,
+                    StringUtils.hasText(e.getMessage()) ? e.getMessage() : "AI分析失败", LocalDateTime.now());
+        }
+    }
+
+    private BaselineDetail executeAnalysis(String projectId, String baselineId) {
+        try {
+            Baseline baseline = requiredBaseline(projectId, baselineId);
             AssetSnapshot requirement = requiredAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT);
             AssetSnapshot testcase = requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
-            List<AcceptanceCriterion> criteria = parser.parseRequirements(baselineId, requirement.content());
-            List<TestcaseProjection> testcases = parser.parseTestcases(baselineId, testcase.fileName(), testcase.content());
-            List<TraceLink> links = new ArrayList<>();
-            List<Finding> findings = new ArrayList<>();
             Map<String, StaticSourceInfo> sources = loadSources(baseline.sourceAppId());
             String sourceAssetContent = StringUtils.hasText(baseline.sourceAssetId())
-                    ? requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE).content() : "";
+                    ? loadAssetContent(requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE)) : "";
             String executionContent = StringUtils.hasText(baseline.executionAssetId())
-                    ? requiredAsset(projectId, baseline.executionAssetId(), AssetType.EXECUTION).content() : "";
+                    ? loadAssetContent(requiredAsset(projectId, baseline.executionAssetId(), AssetType.EXECUTION)) : "";
             String coverageContent = StringUtils.hasText(baseline.coverageAssetId())
-                    ? requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE).content() : "";
-            for (AcceptanceCriterion criterion : criteria) {
-                List<TestcaseProjection> matchedTests = matchTestcases(criterion, testcases);
-                matchedTests.forEach(test -> links.add(testLink(baselineId, criterion, test)));
-                List<StaticSourceInfo> matchedSources = matchSources(criterion, sources.values());
-                matchedSources.stream().limit(5).forEach(source -> links.add(codeLink(baselineId, criterion, source)));
-                boolean hasSourceAssetMatch = false;
-                if (matchedSources.isEmpty() && hasSourceAssetEvidence(criterion, sourceAssetContent)) {
-                    links.add(sourceAssetLink(baselineId, criterion, baseline.sourceAssetId(), sourceAssetContent));
-                    hasSourceAssetMatch = true;
-                }
-                addRuntimeEvidenceLinks(baselineId, criterion, matchedTests, executionContent, coverageContent, links);
-                buildFindings(baselineId, criterion, matchedTests, matchedSources, hasSourceAssetMatch, findings);
-                findings.addAll(aiAnalyzer.analyze(baselineId, criterion, matchedTests, matchedSources,
-                        hasSourceAssetMatch ? sourceAssetContent : ""));
-            }
-            addUnlinkedTestcaseFindings(baselineId, testcases, links, findings);
-            repository.replaceAnalysis(baselineId, criteria, testcases, links, deduplicateFindings(findings));
+                    ? loadAssetContent(requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE)) : "";
+            String defectContent = loadDefectAssets(projectId);
+            VerificationAiOrchestrator.AiVerificationResult result = aiOrchestrator.analyze(
+                    new VerificationAiOrchestrator.AiVerificationInput(baselineId, loadAssetContent(requirement),
+                            loadAssetContent(testcase), defectContent, sourceAssetContent, executionContent, coverageContent,
+                            new ArrayList<>(sources.values())));
+            repository.replaceAnalysis(baselineId, result.criteria(), result.testcases(),
+                    result.traceLinks(), result.findings());
             repository.updateBaselineStatus(baselineId, BaselineStatus.WAITING_REVIEW);
             return detail(projectId, baselineId);
         } catch (RuntimeException e) {
@@ -149,7 +241,7 @@ public class VerificationService {
             List<TestcaseProjection> tests = detail.testcases().stream().filter(v -> testcaseIds.contains(v.id())).toList();
             List<TraceLink> code = links.stream().filter(v -> "SOURCE_SYMBOL".equals(v.targetType())).toList();
             List<Finding> findings = detail.findings().stream().filter(v -> ac.id().equals(v.acId())).toList();
-            Verdict verdict = verdict(ac, tests, code, findings);
+            Verdict verdict = verdict(findings);
             EvidenceLevel level = evidenceLevel(tests, links.stream().filter(v -> v.sourceId().equals(ac.id())).toList());
             return new MatrixRow(ac, tests, code, findings, verdict, level);
         }).toList();
@@ -168,14 +260,29 @@ public class VerificationService {
 
     public WriteBackAction writeBackFinding(String projectId, String findingId, String userId, WriteBackFinding command) {
         Assert.notNull(command, "回写请求不能为空");
-        Assert.hasText(command.externalUrl(), "外部事项链接不能为空");
         Finding finding = repository.findFinding(projectId, findingId)
                 .orElseThrow(() -> new IllegalArgumentException("找不到指定分析问题"));
+        AcceptanceCriterion criterion = repository.findCriteria(finding.baselineId()).stream()
+                .filter(item -> item.id().equals(finding.acId()))
+                .findFirst()
+                .orElse(null);
+        List<TraceLink> traceLinks = repository.findTraceLinks(finding.baselineId()).stream()
+                .filter(item -> finding.acId() != null && finding.acId().equals(item.sourceId()))
+                .toList();
+        Set<String> testcaseIds = traceLinks.stream()
+                .filter(item -> "TESTCASE".equals(item.targetType()))
+                .map(TraceLink::targetId)
+                .collect(Collectors.toSet());
+        List<TestcaseProjection> testcases = repository.findTestcases(finding.baselineId()).stream()
+                .filter(item -> testcaseIds.contains(item.id()) || testcaseIds.contains(item.externalKey()))
+                .toList();
+        String aiMessage = writeBackComposer.compose(new VerificationAiWriteBackComposer.WriteBackInput(
+                finding, criterion, testcases, traceLinks, command.targetRole(), command.externalUrl(), command.message()));
         Assert.isTrue(repository.reviewFinding(projectId, findingId, ReviewStatus.WRITTEN_BACK, userId,
-                command.message(), command.externalUrl()), "找不到指定分析问题");
+                aiMessage, command.externalUrl()), "找不到指定分析问题");
         WriteBackAction action = new WriteBackAction(UUID.randomUUID().toString(), projectId, finding.baselineId(),
-                findingId, StringUtils.hasText(command.connectorType()) ? command.connectorType() : "link-only",
-                command.externalUrl(), "RECORDED", command.message(), userId, LocalDateTime.now());
+                findingId, StringUtils.hasText(command.connectorType()) ? command.connectorType() : "ai-writeback",
+                command.externalUrl(), "AI_GENERATED", aiMessage, userId, LocalDateTime.now());
         repository.saveWriteBackAction(action);
         return action;
     }
@@ -198,104 +305,6 @@ public class VerificationService {
         repository.markBaselineStale(baselineId);
     }
 
-    public GateResult evaluateGate(String projectId, String baselineId, GatePolicy policy) {
-        BaselineDetail detail = detail(projectId, baselineId);
-        GatePolicy effective = policy == null ? GatePolicy.defaults() : policy;
-        List<String> reasons = new ArrayList<>();
-        if (detail.metrics().testcaseCoverageRate() < effective.minimumTestcaseCoverage())
-            reasons.add("AC用例覆盖率低于 " + percent(effective.minimumTestcaseCoverage()));
-        if (detail.metrics().implementationCoverageRate() < effective.minimumImplementationCoverage())
-            reasons.add("AC实现覆盖率低于 " + percent(effective.minimumImplementationCoverage()));
-        if (detail.metrics().executionEvidenceRate() < effective.minimumExecutionEvidence())
-            reasons.add("AC执行证据低于 " + percent(effective.minimumExecutionEvidence()));
-        if (detail.metrics().runtimeCoverageRate() < effective.minimumRuntimeCoverage())
-            reasons.add("AC运行覆盖证据低于 " + percent(effective.minimumRuntimeCoverage()));
-        long high = detail.findings().stream().filter(v -> v.reviewStatus() != ReviewStatus.REJECTED)
-                .filter(v -> v.severity() == Severity.CRITICAL || v.severity() == Severity.HIGH).count();
-        if (high > effective.maximumOpenHighFindings()) reasons.add("高风险未关闭问题 " + high + " 个");
-        if (detail.baseline().freshness() == Freshness.STALE) reasons.add("分析基线已过期");
-        GateStatus status = reasons.isEmpty() ? GateStatus.PASSED : effective.blocking() ? GateStatus.FAILED : GateStatus.WARNING;
-        GateResult result = new GateResult(UUID.randomUUID().toString(), baselineId, status,
-                Map.of("minimumTestcaseCoverage", effective.minimumTestcaseCoverage(),
-                        "minimumImplementationCoverage", effective.minimumImplementationCoverage(),
-                        "minimumExecutionEvidence", effective.minimumExecutionEvidence(),
-                        "minimumRuntimeCoverage", effective.minimumRuntimeCoverage(),
-                        "maximumOpenHighFindings", effective.maximumOpenHighFindings(), "blocking", effective.blocking()),
-                detail.metrics(), reasons, LocalDateTime.now());
-        repository.saveGateResult(result);
-        return result;
-    }
-
-    private void buildFindings(String baselineId, AcceptanceCriterion ac, List<TestcaseProjection> tests,
-                               List<StaticSourceInfo> sources, boolean hasSourceAssetMatch, List<Finding> findings) {
-        if (ac.ambiguity()) findings.add(finding(baselineId, ac, "AMBIGUOUS_REQUIREMENT", Perspective.PRODUCT,
-                Severity.MEDIUM, "需求描述存在模糊词", "验收标准包含无法直接量化的表达：" + ac.content(),
-                "请在需求事实源中补充明确阈值或可观察结果", 0.78, EvidenceLevel.E1, Verdict.AMBIGUOUS));
-        if (tests.isEmpty()) findings.add(finding(baselineId, ac, "MISSING_TESTCASE", Perspective.TEST,
-                Severity.HIGH, "验收标准缺少测试用例", ac.acKey() + " 没有找到可验证该规则的测试用例",
-                "补充正常、边界和反向场景，并提供可判定预期", 0.82, EvidenceLevel.E1, Verdict.NOT_SATISFIED));
-        else if (tests.stream().allMatch(v -> !StringUtils.hasText(v.expected())))
-            findings.add(finding(baselineId, ac, "WEAK_ASSERTION", Perspective.TEST, Severity.HIGH,
-                    "关联用例缺少明确预期", "已找到关联用例，但没有可观察的预期结果",
-                    "为关键业务结果、错误码和副作用补充断言", 0.88, EvidenceLevel.E1, Verdict.PARTIAL));
-        if (hasNumericConflict(ac, tests)) findings.add(finding(baselineId, ac, "WRONG_EXPECTATION",
-                Perspective.TEST, Severity.HIGH, "用例预期可能与需求约束冲突",
-                "需求与关联用例包含不同的数值约束", "核对边界、次数、长度和时限后修正用例预期",
-                0.72, EvidenceLevel.E1, Verdict.NOT_SATISFIED));
-        if (sources.isEmpty() && !hasSourceAssetMatch) findings.add(finding(baselineId, ac, "MISSING_IMPLEMENTATION",
-                Perspective.DEVELOPMENT, Severity.HIGH, "未找到可信实现证据",
-                "当前源码索引中没有找到与 " + ac.acKey() + " 匹配的类或方法",
-                "确认源码快照完整后，定位并补充实现或人工关联真实符号", 0.60,
-                EvidenceLevel.E0, Verdict.NOT_VERIFIABLE));
-    }
-
-    private void addUnlinkedTestcaseFindings(String baselineId, List<TestcaseProjection> tests,
-                                             List<TraceLink> links, List<Finding> findings) {
-        Set<String> linked = links.stream().filter(v -> "TESTCASE".equals(v.targetType()))
-                .map(TraceLink::targetId).collect(Collectors.toSet());
-        for (TestcaseProjection test : tests) if (!linked.contains(test.id())) {
-            findings.add(new Finding(UUID.randomUUID().toString(), baselineId, null, "TRACEABILITY_BREAK",
-                    Perspective.CROSS, Severity.MEDIUM, "测试用例未关联到验收标准",
-                    test.externalKey() + " " + test.title() + " 没有找到需求来源", "在外部平台补充需求 ID 或人工确认关联",
-                    0.75, EvidenceLevel.E0, Verdict.NOT_VERIFIABLE, ReviewStatus.PENDING,
-                    List.of(Map.of("testcaseId", test.externalKey(), "locator", test.sourceLocator())), null, null, null));
-        }
-    }
-
-    private List<Finding> deduplicateFindings(List<Finding> findings) {
-        Map<String, Finding> result = new LinkedHashMap<>();
-        for (Finding finding : findings) {
-            String key = value(finding.acId()) + "|" + finding.findingType() + "|" + finding.perspective();
-            Finding existing = result.get(key);
-            if (existing == null || finding.confidence() > existing.confidence()) result.put(key, finding);
-        }
-        return new ArrayList<>(result.values());
-    }
-
-    private List<TestcaseProjection> matchTestcases(AcceptanceCriterion ac, List<TestcaseProjection> tests) {
-        String requirement = ac.requirementKey().toLowerCase(Locale.ROOT);
-        String acKey = value(ac.acKey()).toLowerCase(Locale.ROOT);
-        return tests.stream().filter(test -> {
-            String refs = value(test.requirementRefs()).toLowerCase(Locale.ROOT);
-            if (StringUtils.hasText(acKey) && refs.contains(acKey)) return true;
-            if (refs.contains(requirement) && similarity(ac.content(), test.title() + " " + test.steps() + " " + test.expected()) >= 0.12)
-                return true;
-            return similarity(ac.content(), test.title() + " " + test.steps() + " " + test.expected()) >= 0.18;
-        }).toList();
-    }
-
-    private List<StaticSourceInfo> matchSources(AcceptanceCriterion ac, Iterable<StaticSourceInfo> sources) {
-        List<StaticSourceInfo> result = new ArrayList<>();
-        for (StaticSourceInfo source : sources) {
-            if (source.getClassInfo() == null) continue;
-            StringBuilder searchable = new StringBuilder(value(source.getClassInfo().getClassName())).append(' ')
-                    .append(value(source.getClassInfo().getSourceCode()));
-            if (source.getClassInfo().getMethodMaps() != null) searchable.append(' ').append(source.getClassInfo().getMethodMaps().keySet());
-            if (similarity(ac.content() + " " + ac.title(), searchable.toString()) >= 0.10) result.add(source);
-        }
-        return result;
-    }
-
     private Map<String, StaticSourceInfo> loadSources(String appId) {
         if (!StringUtils.hasText(appId)) return Map.of();
         Map<String, StaticSourceInfo> result = new LinkedHashMap<>();
@@ -304,63 +313,48 @@ public class VerificationService {
         return result;
     }
 
-    private TraceLink testLink(String baselineId, AcceptanceCriterion ac, TestcaseProjection test) {
-        boolean explicit = value(test.requirementRefs()).toLowerCase(Locale.ROOT).contains(ac.requirementKey().toLowerCase(Locale.ROOT));
-        double confidence = explicit ? 0.98 : Math.min(0.90, 0.55 + similarity(ac.content(), test.title() + " " + test.expected()));
-        return new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", ac.id(), "TESTCASE", test.id(),
-                "VERIFIED_BY", explicit ? "EXPLICIT_ID" : "SEMANTIC_RULE", confidence,
-                EvidenceLevel.E1, explicit ? ReviewStatus.CONFIRMED : ReviewStatus.PENDING,
-                Map.of("ac", ac.content(), "testcase", test.externalKey(), "locator", test.sourceLocator()));
-    }
-
-    private TraceLink codeLink(String baselineId, AcceptanceCriterion ac, StaticSourceInfo source) {
-        String className = source.getClassInfo().getClassName();
-        return new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", ac.id(), "SOURCE_SYMBOL", className,
-                "IMPLEMENTED_BY", "STATIC_SOURCE", 0.68, EvidenceLevel.E2, ReviewStatus.PENDING,
-                Map.of("className", className, "sourceId", value(source.getId())));
-    }
-
-    private TraceLink sourceAssetLink(String baselineId, AcceptanceCriterion ac, String sourceAssetId, String content) {
-        return new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", ac.id(), "SOURCE_SYMBOL",
-                "SOURCE_ASSET:" + sourceAssetId, "IMPLEMENTED_BY", "SOURCE_SNAPSHOT", 0.56,
-                EvidenceLevel.E2, ReviewStatus.PENDING,
-                Map.of("sourceAssetId", sourceAssetId, "matchedBy", "source_snapshot_rule",
-                        "snippet", content.substring(0, Math.min(content.length(), 600))));
-    }
-
-    private void addRuntimeEvidenceLinks(String baselineId, AcceptanceCriterion ac, List<TestcaseProjection> tests,
-                                         String executionContent, String coverageContent, List<TraceLink> links) {
-        boolean hasExecution = StringUtils.hasText(executionContent) && tests.stream().anyMatch(test ->
-                containsIgnoreCase(executionContent, test.externalKey()) || containsIgnoreCase(executionContent, test.title()));
-        if (hasExecution) {
-            links.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", ac.id(), "EXECUTION",
-                    "EXECUTION_REPORT", "PROVEN_BY", "EXECUTION_REPORT", 0.72, EvidenceLevel.E3,
-                    ReviewStatus.PENDING, Map.of("matchedTestcases", tests.stream().map(TestcaseProjection::externalKey).toList())));
+    private String loadDefectAssets(String projectId) {
+        List<AssetSnapshot> defects = repository.findAssets(projectId, AssetType.DEFECT);
+        if (defects.isEmpty()) return "";
+        StringBuilder result = new StringBuilder();
+        for (AssetSnapshot defect : defects) {
+            result.append("资料: ").append(value(defect.fileName())).append('\n');
+            if (StringUtils.hasText(defect.externalId())) result.append("外部ID: ").append(defect.externalId()).append('\n');
+            if (StringUtils.hasText(defect.externalUrl())) result.append("外部链接: ").append(defect.externalUrl()).append('\n');
+            result.append(value(loadAssetContent(defect))).append("\n\n");
         }
-        boolean hasCoverage = StringUtils.hasText(coverageContent) && (similarity(ac.content(), coverageContent) >= 0.04
-                || tests.stream().anyMatch(test -> containsIgnoreCase(coverageContent, test.externalKey())
-                || containsIgnoreCase(coverageContent, test.title())));
-        if (hasCoverage) {
-            links.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", ac.id(), "COVERAGE",
-                    "COVERAGE_REPORT", "COVERED_BY", "COVERAGE_REPORT", 0.64, EvidenceLevel.E4,
-                    ReviewStatus.PENDING, Map.of("matchedBy", "report_text")));
+        return result.toString();
+    }
+
+    private String loadAssetContent(AssetSnapshot asset) {
+        if (StringUtils.hasText(asset.storageKey())) {
+            String stored = assetContentStore.load(asset.storageKey());
+            if (StringUtils.hasText(stored)) return stored;
         }
+        return value(asset.content());
     }
 
-    private Finding finding(String baselineId, AcceptanceCriterion ac, String type, Perspective perspective,
-                            Severity severity, String title, String description, String suggestion, double confidence,
-                            EvidenceLevel level, Verdict verdict) {
-        return new Finding(UUID.randomUUID().toString(), baselineId, ac.id(), type, perspective, severity, title,
-                description, suggestion, confidence, level, verdict, ReviewStatus.PENDING,
-                List.of(Map.of("requirementKey", ac.requirementKey(), "acKey", ac.acKey(),
-                        "content", ac.content(), "locator", ac.sourceLocator())), null, null, null);
+    private AssetSnapshot withoutContent(AssetSnapshot asset) {
+        return new AssetSnapshot(asset.id(), asset.projectId(), asset.assetType(), asset.sourceType(),
+                asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
+                null, asset.storageType(), asset.storageKey(), asset.contentSize(),
+                StringUtils.hasText(asset.contentPreview()) ? asset.contentPreview() : preview(asset.content()),
+                asset.metadata(), asset.freshness(), asset.importedBy(), asset.capturedAt());
     }
 
-    private Verdict verdict(AcceptanceCriterion ac, List<TestcaseProjection> tests, List<TraceLink> code, List<Finding> findings) {
-        if (ac.ambiguity()) return Verdict.AMBIGUOUS;
+    private String preview(String content) {
+        String safe = value(content);
+        return safe.length() <= 600 ? safe : safe.substring(0, 600);
+    }
+
+    private Verdict verdict(List<Finding> findings) {
         if (findings.stream().anyMatch(v -> v.verdict() == Verdict.NOT_SATISFIED)) return Verdict.NOT_SATISFIED;
-        if (tests.isEmpty() || code.isEmpty()) return Verdict.PARTIAL;
-        return Verdict.STATICALLY_CONSISTENT;
+        if (findings.stream().anyMatch(v -> v.verdict() == Verdict.AMBIGUOUS)) return Verdict.AMBIGUOUS;
+        if (findings.stream().anyMatch(v -> v.verdict() == Verdict.NOT_VERIFIABLE)) return Verdict.NOT_VERIFIABLE;
+        if (findings.stream().anyMatch(v -> v.verdict() == Verdict.PARTIAL)) return Verdict.PARTIAL;
+        if (findings.stream().anyMatch(v -> v.verdict() == Verdict.STATICALLY_CONSISTENT)) return Verdict.STATICALLY_CONSISTENT;
+        if (findings.stream().anyMatch(v -> v.verdict() == Verdict.SATISFIED)) return Verdict.SATISFIED;
+        return Verdict.NOT_VERIFIABLE;
     }
 
     private Metrics metrics(List<AcceptanceCriterion> criteria, List<TraceLink> links, List<Finding> findings) {
@@ -383,63 +377,11 @@ public class VerificationService {
         return tests.isEmpty() ? EvidenceLevel.E0 : EvidenceLevel.E1;
     }
 
-    private boolean hasNumericConflict(AcceptanceCriterion ac, List<TestcaseProjection> tests) {
-        Set<String> requirementNumbers = numbers(ac.content());
-        if (requirementNumbers.isEmpty()) return false;
-        return tests.stream().map(v -> numbers(v.expected())).filter(v -> !v.isEmpty())
-                .anyMatch(v -> v.stream().noneMatch(requirementNumbers::contains));
-    }
-
-    private Set<String> numbers(String value) {
-        Set<String> result = new HashSet<>(); Matcher matcher = NUMBER.matcher(value(value));
-        while (matcher.find()) result.add(matcher.group()); return result;
-    }
-
-    private boolean hasSourceAssetEvidence(AcceptanceCriterion ac, String sourceAssetContent) {
-        if (!StringUtils.hasText(sourceAssetContent)) return false;
-        String acText = value(ac.title()) + " " + value(ac.content());
-        String source = sourceAssetContent.toLowerCase(Locale.ROOT);
-        Set<String> requirementNumbers = numbers(acText);
-        if (!requirementNumbers.isEmpty() && requirementNumbers.stream().noneMatch(source::contains)) return false;
-
-        int requiredConcepts = 0;
-        int matchedConcepts = 0;
-        if (containsAny(acText, "锁定", "禁用", "冻结")) {
-            requiredConcepts++;
-            if (containsAny(source, "lock", "locked", "disable", "frozen")) matchedConcepts++;
-        }
-        if (containsAny(acText, "解除", "解锁", "自动解除", "恢复")) {
-            requiredConcepts++;
-            if (containsAny(source, "unlock", "unlocked", "recover", "restore")) matchedConcepts++;
-        }
-        if (containsAny(acText, "密码", "错误", "失败")) {
-            requiredConcepts++;
-            if (containsAny(source, "password", "credential", "failed", "fail", "badcredentials")) matchedConcepts++;
-        }
-        if (containsAny(acText, "分钟", "小时", "秒")) {
-            requiredConcepts++;
-            if (containsAny(source, "duration", "ofminutes", "minute", "minutes", "timeout", "expire")) matchedConcepts++;
-        }
-        if (requiredConcepts > 0) return matchedConcepts == requiredConcepts;
-        return similarity(ac.content(), sourceAssetContent) >= 0.05;
-    }
-
-    private double similarity(String left, String right) {
-        Set<String> a = words(left); Set<String> b = words(right);
-        if (a.isEmpty() || b.isEmpty()) return 0;
-        Set<String> intersection = new HashSet<>(a); intersection.retainAll(b);
-        Set<String> union = new HashSet<>(a); union.addAll(b);
-        return (double) intersection.size() / union.size();
-    }
-
-    private Set<String> words(String value) {
-        Set<String> result = new HashSet<>(); Matcher matcher = WORD.matcher(value(value).toLowerCase(Locale.ROOT));
-        while (matcher.find()) result.add(matcher.group()); return result;
-    }
-
     private AssetSnapshot requiredAsset(String projectId, String id, AssetType type) {
         AssetSnapshot asset = repository.findAsset(projectId, id).orElseThrow(() -> new IllegalArgumentException("找不到资产: " + id));
-        Assert.isTrue(asset.assetType() == type, "资产类型不匹配: " + id);
+        if (type != null) {
+            Assert.isTrue(asset.assetType() == type, "资产类型不匹配: " + id);
+        }
         return asset;
     }
 
@@ -455,26 +397,17 @@ public class VerificationService {
     }
 
     private double rate(int value, int total) { return total == 0 ? 0 : Math.round((double) value / total * 10000) / 10000.0; }
-    private String percent(double value) { return Math.round(value * 10000) / 100.0 + "%"; }
     private String value(String value) { return value == null ? "" : value; }
-    private boolean containsIgnoreCase(String text, String needle) {
-        return StringUtils.hasText(needle) && value(text).toLowerCase(Locale.ROOT).contains(needle.toLowerCase(Locale.ROOT));
-    }
-    private boolean containsAny(String text, String... needles) {
-        String safe = value(text).toLowerCase(Locale.ROOT);
-        for (String needle : needles) if (safe.contains(needle.toLowerCase(Locale.ROOT))) return true;
-        return false;
-    }
+    private String textOrExisting(String value, String existing) { return StringUtils.hasText(value) ? value.trim() : existing; }
 
     public record CreateBaseline(String name, String requirementAssetId, String testcaseAssetId, String sourceAssetId,
                                  String executionAssetId, String coverageAssetId, String sourceAppId,
                                  String repositoryUrl, String sourceBranch, String sourceCommit) {}
+    public record UpdateAsset(String fileName, String content, String externalId, String externalUrl, String sourceVersion) {}
+    public record UpdateBaseline(String name, String requirementAssetId, String testcaseAssetId, String sourceAssetId,
+                                 String executionAssetId, String coverageAssetId, String sourceAppId,
+                                 String repositoryUrl, String sourceBranch, String sourceCommit) {}
     public record ReviewFinding(ReviewStatus status, String reason, String externalWorkItemUrl) {}
     public record ReviewTraceLink(ReviewStatus status) {}
-    public record WriteBackFinding(String connectorType, String externalUrl, String message) {}
-    public record GatePolicy(double minimumTestcaseCoverage, double minimumImplementationCoverage,
-                             double minimumExecutionEvidence, double minimumRuntimeCoverage,
-                             int maximumOpenHighFindings, boolean blocking) {
-        public static GatePolicy defaults() { return new GatePolicy(1.0, 1.0, 0.0, 0.0, 0, false); }
-    }
+    public record WriteBackFinding(String connectorType, String externalUrl, String message, String targetRole) {}
 }

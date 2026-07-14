@@ -2,8 +2,6 @@ package com.oAT.web.control.api;
 
 import com.alibaba.excel.EasyExcel;
 import com.oAT.web.control.entity.ResultNotified;
-import com.oAT.web.coverage.universal.IstanbulCoverageParser;
-import com.oAT.web.coverage.universal.UniversalCoverageFile;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.ProjectService;
@@ -12,16 +10,25 @@ import com.oAT.web.service.entity.ProjectVo;
 import com.oAT.web.service.entity.UserVo;
 import com.oAT.web.verification.VerificationService;
 import com.oAT.web.verification.VerificationService.CreateBaseline;
-import com.oAT.web.verification.VerificationService.GatePolicy;
 import com.oAT.web.verification.VerificationService.ReviewFinding;
 import com.oAT.web.verification.VerificationService.ReviewTraceLink;
+import com.oAT.web.verification.VerificationService.UpdateAsset;
+import com.oAT.web.verification.VerificationService.UpdateBaseline;
 import com.oAT.web.verification.VerificationService.WriteBackFinding;
+import com.oAT.web.verification.connector.ConnectorRegistry;
 import com.oAT.web.verification.model.VerificationModels.*;
+import com.oAT.web.verification.qualitygate.QualityGateService;
+import com.oAT.web.verification.traceability.ChangeImpactService;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -31,11 +38,15 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.File;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.Map;
+import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -44,17 +55,37 @@ import java.util.zip.ZipFile;
 @RestController
 @RequestMapping("/api/projects/{projectId}/verification")
 public class VerificationApiControl {
+    private static final Set<String> SOURCE_EXTENSIONS = Set.of(
+            ".java", ".kt", ".kts", ".scala", ".groovy",
+            ".js", ".jsx", ".ts", ".tsx", ".vue",
+            ".py", ".go", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp",
+            ".cs", ".php", ".rb", ".swift", ".m", ".mm",
+            ".sql", ".xml", ".yaml", ".yml", ".json", ".properties");
+    private static final Set<String> COVERAGE_EXTENSIONS = Set.of(
+            ".xml", ".json", ".info", ".lcov", ".txt", ".out", ".cov", ".coverage", ".csv", ".tsv");
+    private static final Set<String> X_MIND_TEXT_ENTRIES = Set.of(
+            "content.json", "content.xml", "metadata.json", "manifest.json");
+
     private final VerificationService verificationService;
     private final ProjectService projectService;
     private final AppService appService;
     private final GitService gitService;
+    private final QualityGateService qualityGateService;
+    private final ChangeImpactService changeImpactService;
+    private final ConnectorRegistry connectorRegistry;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
-                                  AppService appService, GitService gitService) {
+                                  AppService appService, GitService gitService,
+                                  QualityGateService qualityGateService,
+                                  ChangeImpactService changeImpactService,
+                                  ConnectorRegistry connectorRegistry) {
         this.verificationService = verificationService;
         this.projectService = projectService;
         this.appService = appService;
         this.gitService = gitService;
+        this.qualityGateService = qualityGateService;
+        this.changeImpactService = changeImpactService;
+        this.connectorRegistry = connectorRegistry;
     }
 
     @GetMapping("/overview")
@@ -66,6 +97,7 @@ public class VerificationApiControl {
                 verificationService.assets(projectId, AssetType.SOURCE),
                 verificationService.assets(projectId, AssetType.EXECUTION),
                 verificationService.assets(projectId, AssetType.COVERAGE),
+                verificationService.assets(projectId, AssetType.DEFECT),
                 verificationService.baselines(projectId)));
     }
 
@@ -93,6 +125,24 @@ public class VerificationApiControl {
         return ok("资产快照导入成功", result);
     }
 
+    @PutMapping("/assets/{assetId}")
+    public ResultNotified<AssetSnapshot> updateAsset(@PathVariable String projectId,
+                                                     @PathVariable String assetId,
+                                                     @SessionAttribute UserVo user,
+                                                     @RequestBody UpdateAsset request) {
+        ensureProjectAccess(projectId, user);
+        return ok("资料更新成功", verificationService.updateAsset(projectId, assetId, user.getId(), request));
+    }
+
+    @DeleteMapping("/assets/{assetId}")
+    public ResultNotified<String> deleteAsset(@PathVariable String projectId,
+                                              @PathVariable String assetId,
+                                              @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        verificationService.deleteAsset(projectId, assetId);
+        return ok("资料删除成功", assetId);
+    }
+
     @PostMapping("/assets/git-source")
     public ResultNotified<AssetSnapshot> importGitSource(@PathVariable String projectId,
                                                          @SessionAttribute UserVo user,
@@ -102,18 +152,26 @@ public class VerificationApiControl {
                 ? new GitSourceImport(null, null, null, null, null, null, null, null)
                 : request;
         GitCredentials credentials = resolveGitCredentials(projectId, effectiveRequest);
-        String branch = StringUtils.hasText(effectiveRequest.branch()) ? effectiveRequest.branch().trim() : credentials.branch();
+        String branch = optionalText(StringUtils.hasText(effectiveRequest.branch()) ? effectiveRequest.branch() : credentials.branch());
         String commit = StringUtils.hasText(effectiveRequest.commit()) ? effectiveRequest.commit().trim() : credentials.commit();
         Assert.hasText(credentials.repoUrl(), "仓库地址不能为空");
         if (!StringUtils.hasText(commit)) {
-            commit = gitService.getLatestCommitId(credentials.repoUrl(), credentials.username(), credentials.password(), branch);
+            try {
+                commit = gitService.getLatestCommitId(credentials.repoUrl(), credentials.username(), credentials.password(), branch);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(e.getMessage() == null ? "无法获取 Git 最新 Commit" : e.getMessage(), e);
+            }
         }
         Assert.hasText(commit, "Commit 不能为空，且无法自动获取最新 Commit");
 
         File tempZip = Files.createTempFile("oat-verification-source-", ".zip").toFile();
         try {
-            gitService.downloadAndPackage(credentials.repoUrl(), credentials.username(), credentials.password(),
-                    branch, commit, tempZip);
+            try {
+                gitService.downloadAndPackage(credentials.repoUrl(), credentials.username(), credentials.password(),
+                        branch, commit, tempZip);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException(e.getMessage() == null ? "Git 源码拉取失败" : e.getMessage(), e);
+            }
             SourceSnapshot source = summarizeSourceZip(tempZip, effectiveRequest.maxFiles(), effectiveRequest.maxBytes());
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("automaticSync", false);
@@ -133,11 +191,33 @@ public class VerificationApiControl {
         }
     }
 
+    private String optionalText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
     @PostMapping("/baselines")
     public ResultNotified<Baseline> createBaseline(@PathVariable String projectId, @SessionAttribute UserVo user,
                                                     @RequestBody CreateBaseline request) {
         ensureProjectAccess(projectId, user);
         return ok("分析基线创建成功", verificationService.createBaseline(projectId, user.getId(), request));
+    }
+
+    @PutMapping("/baselines/{baselineId}")
+    public ResultNotified<Baseline> updateBaseline(@PathVariable String projectId,
+                                                   @PathVariable String baselineId,
+                                                   @SessionAttribute UserVo user,
+                                                   @RequestBody UpdateBaseline request) {
+        ensureProjectAccess(projectId, user);
+        return ok("分析基线更新成功", verificationService.updateBaseline(projectId, baselineId, request));
+    }
+
+    @DeleteMapping("/baselines/{baselineId}")
+    public ResultNotified<String> deleteBaseline(@PathVariable String projectId,
+                                                 @PathVariable String baselineId,
+                                                 @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        verificationService.deleteBaseline(projectId, baselineId);
+        return ok("分析基线删除成功", baselineId);
     }
 
     @GetMapping("/baselines/{baselineId}")
@@ -148,10 +228,25 @@ public class VerificationApiControl {
     }
 
     @PostMapping("/baselines/{baselineId}/analyze")
-    public ResultNotified<BaselineDetail> analyze(@PathVariable String projectId, @PathVariable String baselineId,
-                                                  @SessionAttribute UserVo user) {
+    public ResultNotified<AnalysisJob> analyze(@PathVariable String projectId, @PathVariable String baselineId,
+                                               @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
-        return ok("AI一致性分析完成", verificationService.analyze(projectId, baselineId));
+        return ok("AI一致性分析任务已创建", verificationService.startAnalysis(projectId, baselineId, user.getId()));
+    }
+
+    @GetMapping("/analysis-jobs/{jobId}")
+    public ResultNotified<AnalysisJob> analysisJob(@PathVariable String projectId, @PathVariable String jobId,
+                                                   @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取AI分析任务成功", verificationService.analysisJob(projectId, jobId));
+    }
+
+    @GetMapping("/baselines/{baselineId}/analysis-jobs/latest")
+    public ResultNotified<AnalysisJob> latestAnalysisJob(@PathVariable String projectId,
+                                                         @PathVariable String baselineId,
+                                                         @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取最近AI分析任务成功", verificationService.latestAnalysisJob(projectId, baselineId));
     }
 
     @GetMapping("/baselines/{baselineId}/matrix")
@@ -181,7 +276,7 @@ public class VerificationApiControl {
                                                      @SessionAttribute UserVo user,
                                                      @RequestBody WriteBackFinding request) {
         ensureProjectAccess(projectId, user);
-        return ok("外部回写动作已记录", verificationService.writeBackFinding(projectId, findingId, user.getId(), request));
+        return ok("AI回写内容已生成并记录", verificationService.writeBackFinding(projectId, findingId, user.getId(), request));
     }
 
     @GetMapping("/baselines/{baselineId}/writebacks")
@@ -189,7 +284,7 @@ public class VerificationApiControl {
                                                             @PathVariable String baselineId,
                                                             @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
-        return ok("获取外部回写动作成功", verificationService.writeBackActions(projectId, baselineId));
+        return ok("获取AI回写记录成功", verificationService.writeBackActions(projectId, baselineId));
     }
 
     @PostMapping("/trace-links/{traceLinkId}/review")
@@ -201,14 +296,6 @@ public class VerificationApiControl {
         return ok("追溯关系审核成功", traceLinkId);
     }
 
-    @PostMapping("/baselines/{baselineId}/quality-gate")
-    public ResultNotified<GateResult> qualityGate(@PathVariable String projectId, @PathVariable String baselineId,
-                                                  @SessionAttribute UserVo user,
-                                                  @RequestBody(required = false) GatePolicy policy) {
-        ensureProjectAccess(projectId, user);
-        return ok("质量门禁计算完成", verificationService.evaluateGate(projectId, baselineId, policy));
-    }
-
     @PostMapping("/baselines/{baselineId}/stale")
     public ResultNotified<String> markStale(@PathVariable String projectId, @PathVariable String baselineId,
                                             @SessionAttribute UserVo user) {
@@ -216,6 +303,89 @@ public class VerificationApiControl {
         verificationService.markBaselineStale(projectId, baselineId);
         return ok("分析基线已标记过期", baselineId);
     }
+
+    // ── Quality Gate ──────────────────────────────────────────────────────────
+
+    @PostMapping("/quality-gate/policies")
+    public ResultNotified<QualityGatePolicy> createPolicy(@PathVariable String projectId,
+                                                          @SessionAttribute UserVo user,
+                                                          @RequestBody QualityGatePolicy request) {
+        ensureProjectAccess(projectId, user);
+        return ok("质量门禁策略已创建", qualityGateService.createPolicy(projectId, user.getId(), request));
+    }
+
+    @GetMapping("/quality-gate/policies")
+    public ResultNotified<List<QualityGatePolicy>> listPolicies(@PathVariable String projectId,
+                                                                @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取质量门禁策略列表成功", qualityGateService.listPolicies(projectId));
+    }
+
+    @PostMapping("/baselines/{baselineId}/quality-gate/evaluate")
+    public ResultNotified<QualityGateResult> evaluateGate(@PathVariable String projectId,
+                                                          @PathVariable String baselineId,
+                                                          @SessionAttribute UserVo user,
+                                                          @RequestBody EvaluateGateRequest request) {
+        ensureProjectAccess(projectId, user);
+        Assert.hasText(request.policyId(), "policyId 不能为空");
+        return ok("质量门禁评估完成",
+                qualityGateService.evaluate(projectId, baselineId, request.policyId(), user.getId()));
+    }
+
+    @GetMapping("/baselines/{baselineId}/quality-gate/results")
+    public ResultNotified<List<QualityGateResult>> gateResults(@PathVariable String projectId,
+                                                               @PathVariable String baselineId,
+                                                               @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取质量门禁结果成功", qualityGateService.listResults(projectId, baselineId));
+    }
+
+    @PostMapping("/baselines/{baselineId}/quality-gate/exemptions")
+    public ResultNotified<GateExemption> createExemption(@PathVariable String projectId,
+                                                         @PathVariable String baselineId,
+                                                         @SessionAttribute UserVo user,
+                                                         @RequestBody ExemptionRequest request) {
+        ensureProjectAccess(projectId, user);
+        return ok("质量门禁豁免已创建",
+                qualityGateService.createExemption(projectId, baselineId, request.ruleId(),
+                        request.reason(), user.getId(), request.expiresAt()));
+    }
+
+    @GetMapping("/baselines/{baselineId}/quality-gate/exemptions")
+    public ResultNotified<List<GateExemption>> listExemptions(@PathVariable String projectId,
+                                                              @PathVariable String baselineId,
+                                                              @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取豁免列表成功", qualityGateService.listExemptions(projectId, baselineId));
+    }
+
+    // ── Change Impact ─────────────────────────────────────────────────────────
+
+    @PostMapping("/baselines/{baselineId}/change-impact")
+    public ResultNotified<ChangeImpactReport> analyzeImpact(@PathVariable String projectId,
+                                                            @PathVariable String baselineId,
+                                                            @SessionAttribute UserVo user,
+                                                            @RequestBody(required = false) ChangeImpactRequest request) {
+        ensureProjectAccess(projectId, user);
+        String desc = request != null ? request.changeDescription() : null;
+        return ok("变更影响分析完成",
+                changeImpactService.analyzeImpact(projectId, baselineId, desc, user.getId()));
+    }
+
+    // ── Connector types ───────────────────────────────────────────────────────
+
+    @GetMapping("/connectors/types")
+    public ResultNotified<List<String>> connectorTypes(@PathVariable String projectId,
+                                                       @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取连接器类型列表成功", connectorRegistry.availableTypes());
+    }
+
+    // ── Request records ───────────────────────────────────────────────────────
+
+    public record EvaluateGateRequest(String policyId) {}
+    public record ExemptionRequest(String ruleId, String reason, LocalDateTime expiresAt) {}
+    public record ChangeImpactRequest(String changeDescription) {}
 
     private String readContent(MultipartFile file, AssetType assetType) throws IOException {
         if (file == null || file.isEmpty()) return "";
@@ -229,6 +399,26 @@ public class VerificationApiControl {
                 Files.deleteIfExists(tempZip.toPath());
             }
         }
+        if (name.endsWith(".zip") && assetType == AssetType.COVERAGE) {
+            File tempZip = Files.createTempFile("oat-verification-upload-coverage-", ".zip").toFile();
+            try {
+                file.transferTo(tempZip);
+                return summarizeCoverageArchive(tempZip);
+            } finally {
+                Files.deleteIfExists(tempZip.toPath());
+            }
+        }
+        if (name.endsWith(".xmind")) {
+            File tempXmind = Files.createTempFile("oat-verification-upload-mindmap-", ".xmind").toFile();
+            try {
+                file.transferTo(tempXmind);
+                return extractXmind(tempXmind);
+            } finally {
+                Files.deleteIfExists(tempXmind.toPath());
+            }
+        }
+        if (name.endsWith(".docx")) return extractDocx(file.getBytes());
+        if (name.endsWith(".doc")) return extractDoc(file.getBytes());
         if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
             List<Map<Integer, String>> rows = EasyExcel.read(file.getInputStream()).headRowNumber(0)
                     .doReadAllSync();
@@ -236,12 +426,76 @@ public class VerificationApiControl {
                     .map(entry -> value(entry.getValue())).collect(Collectors.joining("\t")))
                     .collect(Collectors.joining("\n"));
         }
-        if (assetType == AssetType.COVERAGE && name.endsWith(".json")) {
-            return summarizeIstanbulCoverage(file.getBytes());
+        if (name.endsWith(".mm") || name.endsWith(".opml")) {
+            return "脑图/大纲资料: " + file.getOriginalFilename() + "\n" + new String(file.getBytes(), StandardCharsets.UTF_8);
         }
-        if (name.endsWith(".pdf") || name.endsWith(".doc") || name.endsWith(".docx"))
-            throw new IllegalArgumentException("当前MVP暂不解析PDF/Word，请先导出为Markdown、文本、CSV或Excel");
+        if (name.endsWith(".pdf"))
+            throw new IllegalArgumentException("当前暂不解析PDF，请先导出为 Word、Markdown、文本、CSV 或 Excel");
         return new String(file.getBytes(), StandardCharsets.UTF_8);
+    }
+
+    private String extractDocx(byte[] bytes) throws IOException {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            StringBuilder builder = new StringBuilder("Word文档内容\n");
+            document.getParagraphs().forEach(paragraph -> {
+                String text = paragraph.getText();
+                if (StringUtils.hasText(text)) builder.append(text.trim()).append('\n');
+            });
+            document.getTables().forEach(table -> {
+                table.getRows().forEach(row -> builder.append(row.getTableCells().stream()
+                        .map(cell -> value(cell.getText())).collect(Collectors.joining("\t"))).append('\n'));
+            });
+            return builder.toString();
+        }
+    }
+
+    private String extractDoc(byte[] bytes) throws IOException {
+        try (HWPFDocument document = new HWPFDocument(new ByteArrayInputStream(bytes));
+             WordExtractor extractor = new WordExtractor(document)) {
+            return "Word文档内容\n" + value(extractor.getText());
+        }
+    }
+
+    private String extractXmind(File xmindFile) throws IOException {
+        StringBuilder builder = new StringBuilder("XMind脑图内容\n");
+        int count = 0;
+        try (ZipFile zip = new ZipFile(xmindFile, StandardCharsets.UTF_8)) {
+            List<? extends ZipEntry> entries = zip.stream()
+                    .filter(entry -> !entry.isDirectory())
+                    .filter(entry -> X_MIND_TEXT_ENTRIES.contains(entry.getName())
+                            || entry.getName().endsWith("/content.json")
+                            || entry.getName().endsWith("/content.xml"))
+                    .sorted(Comparator.comparing(ZipEntry::getName))
+                    .toList();
+            for (ZipEntry entry : entries) {
+                builder.append("\n\n// MINDMAP_ENTRY: ").append(entry.getName()).append('\n')
+                        .append(new String(zip.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8));
+                count++;
+            }
+        }
+        Assert.isTrue(count > 0, "XMind文件中未找到可读取的脑图内容");
+        return builder.toString();
+    }
+
+    private String summarizeCoverageArchive(File archiveFile) throws IOException {
+        StringBuilder builder = new StringBuilder("多语言覆盖率资料\n");
+        int count = 0;
+        try (ZipFile zip = new ZipFile(archiveFile, StandardCharsets.UTF_8)) {
+            List<? extends ZipEntry> entries = zip.stream()
+                    .filter(entry -> !entry.isDirectory())
+                    .filter(entry -> COVERAGE_EXTENSIONS.stream().anyMatch(ext -> entry.getName().toLowerCase().endsWith(ext)))
+                    .sorted(Comparator.comparing(ZipEntry::getName))
+                    .limit(200)
+                    .toList();
+            for (ZipEntry entry : entries) {
+                String content = new String(zip.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8);
+                builder.append("\n\n// COVERAGE_FILE: ").append(entry.getName()).append('\n')
+                        .append(content, 0, Math.min(content.length(), 20_000));
+                count++;
+            }
+        }
+        Assert.isTrue(count > 0, "覆盖率压缩包中未找到可读取的覆盖率文件");
+        return builder.toString();
     }
 
     private ProjectVo ensureProjectAccess(String projectId, UserVo user) {
@@ -258,7 +512,8 @@ public class VerificationApiControl {
 
     public record Overview(List<AssetSnapshot> requirements, List<AssetSnapshot> testcases,
                            List<AssetSnapshot> sources, List<AssetSnapshot> executions,
-                           List<AssetSnapshot> coverages, List<Baseline> baselines) {}
+                           List<AssetSnapshot> coverages, List<AssetSnapshot> defects,
+                           List<Baseline> baselines) {}
 
     public record GitSourceImport(String appId, String repositoryUrl, String username, String password,
                                   String branch, String commit, Integer maxFiles, Integer maxBytes) {}
@@ -291,7 +546,7 @@ public class VerificationApiControl {
         try (ZipFile zip = new ZipFile(zipFile, StandardCharsets.UTF_8)) {
             List<? extends ZipEntry> entries = zip.stream()
                     .filter(entry -> !entry.isDirectory())
-                    .filter(entry -> entry.getName().endsWith(".java"))
+                    .filter(entry -> isSourceFile(entry.getName()))
                     .sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
                     .toList();
             for (ZipEntry entry : entries) {
@@ -313,22 +568,18 @@ public class VerificationApiControl {
                 count++;
             }
         }
-        Assert.isTrue(count > 0, "Git源码包中未找到 Java 源文件");
+        Assert.isTrue(count > 0, "源码包中未找到可读取的源码文件");
         builder.append("\n\n// SNAPSHOT_ID: ").append(UUID.randomUUID());
         return new SourceSnapshot(builder.toString(), count, truncated);
     }
 
-    private String summarizeIstanbulCoverage(byte[] payload) {
-        List<UniversalCoverageFile> files = new IstanbulCoverageParser().parse(payload);
-        StringBuilder builder = new StringBuilder("Istanbul coverage summary\n");
-        for (UniversalCoverageFile file : files.stream().limit(300).toList()) {
-            long coveredLines = file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count();
-            long coveredBranches = file.getBranches().stream().filter(branch -> branch.getCoveredCount() > 0).count();
-            builder.append(file.getFilePath())
-                    .append(" lines ").append(coveredLines).append('/').append(file.getLines().size())
-                    .append(" branches ").append(coveredBranches).append('/').append(file.getBranches().size())
-                    .append('\n');
+    private boolean isSourceFile(String name) {
+        String lower = name == null ? "" : name.toLowerCase();
+        if (lower.contains("/node_modules/") || lower.contains("/dist/") || lower.contains("/build/")
+                || lower.contains("/target/") || lower.contains("/.git/")) {
+            return false;
         }
-        return builder.toString();
+        return SOURCE_EXTENSIONS.stream().anyMatch(lower::endsWith);
     }
+
 }

@@ -200,3 +200,303 @@ defineExpose({
   selectImageFile,
 })
 </script>
+
+<style scoped>
+.ask-workspace-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px;
+  border: 1px solid rgba(15, 23, 42, .07);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--ai-accent, #0f766e) 8%, transparent), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, .98), rgba(248, 250, 252, .94));
+  box-shadow: 0 18px 46px rgba(15, 23, 42, .07);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-title h2 {
+  margin: 0;
+  color: #172033;
+  font-size: 18px;
+  font-weight: 850;
+}
+
+.message-history {
+  display: grid;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.message-history::-webkit-scrollbar {
+  width: 8px;
+}
+
+.message-history::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ai-accent, #0f766e) 24%, #cbd5e1);
+  background-clip: content-box;
+}
+
+.message-card {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 86px 14px 48px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .05);
+}
+
+.message-card.user {
+  background: color-mix(in srgb, var(--ai-accent, #0f766e) 6%, white);
+}
+
+.message-card.assistant {
+  border-color: color-mix(in srgb, var(--ai-accent, #0f766e) 18%, transparent);
+  background: linear-gradient(180deg, #fff, color-mix(in srgb, var(--ai-accent, #0f766e) 4%, white));
+}
+
+.message-card::before {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--ai-accent, #0f766e);
+  color: #fff;
+  content: 'AI';
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.message-card.user::before {
+  background: #0f172a;
+  content: '我';
+}
+
+.message-copy-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, var(--ai-accent, #0f766e) 18%, transparent);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, .88);
+  color: var(--ai-accent, #0f766e);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.message-role {
+  color: var(--ai-accent, #0f766e);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.message-text {
+  color: #334155;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.markdown-message {
+  white-space: normal;
+}
+
+.message-actions {
+  display: flex;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(15, 23, 42, .06);
+}
+
+.message-action-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, .04);
+  cursor: pointer;
+}
+
+.message-action-btn.active,
+.message-action-btn:hover {
+  background: color-mix(in srgb, var(--ai-accent, #0f766e) 12%, white);
+}
+
+.ask-form {
+  display: grid;
+  gap: 14px;
+  margin-top: auto;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--ai-accent, #0f766e) 14%, transparent);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, .08);
+}
+
+.text-area {
+  width: 100%;
+  min-height: 150px;
+  max-height: 320px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 18px;
+  padding: 16px;
+  background: #f8fafc;
+  color: #172033;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.65;
+  resize: vertical;
+  outline: none;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+
+.text-area:focus {
+  border-color: color-mix(in srgb, var(--ai-accent, #0f766e) 38%, transparent);
+  background: #fff;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--ai-accent, #0f766e) 10%, transparent);
+}
+
+.hidden-input {
+  display: none;
+}
+
+.form-actions,
+.ask-tools,
+.ask-submit-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.form-actions {
+  justify-content: space-between;
+}
+
+.ask-submit-actions {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.ghost-button,
+.primary-button,
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font: inherit;
+  font-weight: 850;
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .16s ease, background .16s ease, color .16s ease, border-color .16s ease;
+}
+
+.ghost-button {
+  border: 1px solid color-mix(in srgb, var(--ai-accent, #0f766e) 20%, transparent);
+  background: color-mix(in srgb, var(--ai-accent, #0f766e) 6%, white);
+  color: var(--ai-accent, #0f766e);
+}
+
+.ghost-button.active {
+  border-color: color-mix(in srgb, var(--ai-accent, #0f766e) 38%, transparent);
+  background: color-mix(in srgb, var(--ai-accent, #0f766e) 14%, white);
+}
+
+.primary-button {
+  border: 0;
+  background: linear-gradient(135deg, var(--ai-accent, #0f766e), color-mix(in srgb, var(--ai-accent, #0f766e) 76%, #0f172a));
+  color: #fff;
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--ai-accent, #0f766e) 20%, transparent);
+}
+
+.danger-button {
+  border: 0;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #fff;
+}
+
+.ghost-button:hover,
+.primary-button:hover,
+.danger-button:hover {
+  transform: translateY(-1px);
+}
+
+.ghost-button:disabled,
+.primary-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: .62;
+  transform: none;
+}
+
+.floating-anchors {
+  position: absolute;
+  top: 28px;
+  right: 14px;
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .ask-workspace-panel {
+    min-height: 640px;
+  }
+
+  .message-card {
+    padding-right: 14px;
+  }
+
+  .message-copy-button {
+    position: static;
+    justify-self: end;
+  }
+
+  .form-actions,
+  .ask-submit-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ask-submit-actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .ghost-button,
+  .primary-button,
+  .danger-button {
+    width: 100%;
+  }
+}
+</style>

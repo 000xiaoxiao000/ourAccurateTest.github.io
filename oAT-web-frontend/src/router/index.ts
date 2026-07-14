@@ -71,6 +71,31 @@ const router = createRouter({
           component: () => import('@/pages/VerificationWorkspacePage.vue'),
         },
         {
+          path: 'p/:projectId/verification/connections',
+          name: 'data-connections',
+          component: () => import('@/pages/DataConnectionPage.vue'),
+        },
+        {
+          path: 'p/:projectId/verification/baselines/:baselineId/matrix',
+          name: 'traceability-matrix',
+          component: () => import('@/pages/TraceabilityMatrixPage.vue'),
+        },
+        {
+          path: 'p/:projectId/verification/baselines/:baselineId/findings',
+          name: 'finding-review',
+          component: () => import('@/pages/FindingReviewPage.vue'),
+        },
+        {
+          path: 'p/:projectId/verification/baselines/:baselineId/coverage',
+          name: 'coverage-execution',
+          component: () => import('@/pages/CoverageExecutionPage.vue'),
+        },
+        {
+          path: 'p/:projectId/verification/baselines/:baselineId/gate',
+          name: 'quality-gate',
+          component: () => import('@/pages/QualityGatePage.vue'),
+        },
+        {
           path: 'p/:projectId/apps',
           name: 'project-apps',
           component: () => import('@/pages/ProjectAppsPage.vue'),
