@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 public class LLMServiceImpl implements LLMService {
 
     private static final Logger logger = LoggerFactory.getLogger(LLMServiceImpl.class);
+    private static final int MAX_CHAT_ATTEMPTS = 2;
 
     @Autowired
     private AIConfig aiConfig;
@@ -37,13 +38,23 @@ public class LLMServiceImpl implements LLMService {
         }
 
         ChatModel model = resolveChatLanguageModel();
-        try {
-            ChatResponse response = model.chat(SystemMessage.from(systemPrompt), UserMessage.from(userMessage));
-            return response == null || response.aiMessage() == null ? null : response.aiMessage().text();
-        } catch (RuntimeException e) {
-            logger.error("LLM direct chat failed", e);
-            throw e;
+        RuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
+            try {
+                ChatResponse response = model.chat(SystemMessage.from(systemPrompt), UserMessage.from(userMessage));
+                String result = response == null || response.aiMessage() == null ? null : response.aiMessage().text();
+                if (result != null && !result.isBlank()) return result;
+                logger.warn("LLM returned an empty response, attempt={}", attempt);
+            } catch (RuntimeException e) {
+                lastFailure = e;
+                logger.warn("LLM direct chat failed, attempt={}/{}: {}", attempt, MAX_CHAT_ATTEMPTS, e.toString());
+            }
         }
+        if (lastFailure != null) {
+            logger.error("LLM direct chat failed after {} attempts", MAX_CHAT_ATTEMPTS, lastFailure);
+            throw new IllegalStateException("AI 模型调用失败，请检查模型名称、API Key、网络或稍后重试", lastFailure);
+        }
+        return null;
     }
 
     @Override

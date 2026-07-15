@@ -7,9 +7,10 @@ import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.storage.AssetContentStore;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -27,6 +28,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class VerificationService {
+    private static final Logger logger = LoggerFactory.getLogger(VerificationService.class);
+
     private final VerificationRepository repository;
     private final StaticInfoRepository staticInfoRepository;
     private final VerificationAiOrchestrator aiOrchestrator;
@@ -200,6 +203,7 @@ public class VerificationService {
             executeAnalysis(projectId, baselineId, jobId);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "分析完成，结果已生成", LocalDateTime.now());
         } catch (RuntimeException e) {
+            logger.error("AI分析任务失败, baselineId={}, jobId={}", baselineId, jobId, e);
             String message = readableAnalysisFailure(e);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.FAILED,
                     message, LocalDateTime.now());
@@ -252,6 +256,9 @@ public class VerificationService {
         }
         if (detail != null && detail.contains("AI服务不可用")) {
             return "AI 服务当前不可用，请检查 AI 开关、接口地址、模型名称和 API Key。";
+        }
+        if (detail != null && detail.contains("AI 模型调用失败")) {
+            return "AI 模型调用失败，请检查模型名称、API Key、网络连通性或稍后重试。详细原因已记录到服务端日志。";
         }
         return StringUtils.hasText(detail) ? "分析失败：" + detail : "分析失败，请检查资料和模型配置后重试。";
     }

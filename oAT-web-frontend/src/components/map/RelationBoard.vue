@@ -261,6 +261,7 @@ const props = defineProps<{
   contextActions?: RelationContextAction[]
   showEdgeLabels?: boolean
   highlightRelated?: boolean
+  selectedNodeId?: string
 }>()
 
 const emit = defineEmits<{
@@ -631,6 +632,15 @@ function handleKeydown(event: KeyboardEvent) {
     showSelectedTip()
   }
 }
+
+watch(
+  () => props.selectedNodeId,
+  (nodeId) => {
+    if (!nodeId || nodeId === selectedId.value || !props.nodes.some((node) => node.id === nodeId)) return
+    selectedId.value = nodeId
+    centerGraphOnNode(nodeId)
+  },
+)
 
 watch(
   () => [

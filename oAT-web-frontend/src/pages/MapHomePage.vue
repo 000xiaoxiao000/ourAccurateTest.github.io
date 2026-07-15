@@ -1,62 +1,28 @@
 <template>
-  <section>
-    <div class="home-map-toolbar trace-map-toolbar">
+  <section class="trace-workspace">
+    <header class="workspace-toolbar">
       <div>
-        <strong>{{ selectedNode ? selectedNode.label || selectedNode.id : '双向追溯链路地图' }}</strong>
-        <span>{{ selectedNode ? selectedTypeText : baselineStatusText }}</span>
+        <span class="eyebrow">Traceability Workspace</span>
+        <strong>需求 · 测试 · 代码追溯</strong>
+        <span>{{ selectedNode ? selectedNode.label || selectedNode.id : baselineStatusText }}</span>
       </div>
       <div class="toolbar-actions">
-        <label v-if="overview.baselines.length" class="baseline-select">
-          <span>分析基线</span>
-          <select v-model="activeBaselineId" :disabled="loading">
-            <option v-for="baseline in overview.baselines" :key="baseline.id" :value="baseline.id">
-              {{ baseline.name || baseline.id }} · {{ baseline.status }}
-            </option>
-          </select>
-        </label>
+        <label v-if="overview.baselines.length" class="baseline-select"><span>分析基线</span><select v-model="activeBaselineId" :disabled="loading"><option v-for="baseline in overview.baselines" :key="baseline.id" :value="baseline.id">{{ baseline.name || baseline.id }} · {{ baseline.status }}</option></select></label>
         <button type="button" :class="{ active: showRelationLabels }" @click="showRelationLabels = !showRelationLabels">关系标签</button>
         <button type="button" :class="{ active: highlightRelated }" @click="highlightRelated = !highlightRelated">高亮追溯</button>
-        <button type="button" @click="openVerificationWorkspace">打开 AI 验证</button>
-        <button type="button" :disabled="loading" @click="load">刷新追溯图</button>
+        <button type="button" :disabled="loading" @click="load">刷新</button>
       </div>
-      <div v-if="!overview.baselines.length && !loading && !error" class="layer-status">
-        暂无分析基线。请先在 AI 验证页面导入需求、用例、源码并执行分析，链路地图会展示需求、用例、Bug、源码之间的双向追溯关系。
-      </div>
+    </header>
+    <div v-if="!overview.baselines.length && !loading && !error" class="workspace-notice">暂无分析基线。请先在 AI 验证页面导入需求、用例和源码并执行分析。</div>
+    <div class="trace-columns">
+      <aside class="asset-pane">
+        <div class="pane-head"><strong>业务资产</strong><span>{{ traceStats.requirements }} 需求 · {{ traceStats.testcases }} 用例</span></div>
+        <section class="asset-group"><div class="group-head"><strong>需求</strong><span>{{ traceStats.requirements }}</span></div><button v-for="item in detail?.criteria || []" :key="item.id" :class="['asset-card', 'requirement', { active: selectedNode?.id === requirementNodeId(item.id) }]" @click="selectAsset(requirementNodeId(item.id))"><b>{{ item.requirementKey }}/{{ item.acKey }}</b><strong>{{ item.title || item.content }}</strong><small>{{ item.testable ? '可测试' : '待澄清' }} · {{ requirementTestCount(item.id) }} 个关联用例</small></button></section>
+        <section class="asset-group testcase-group"><div class="group-head"><strong>测试用例</strong><span>{{ traceStats.testcases }}</span></div><button v-for="item in detail?.testcases || []" :key="item.id" :class="['asset-card', 'testcase', { active: selectedNode?.id === testcaseNodeId(item.id) }]" @click="selectAsset(testcaseNodeId(item.id))"><b>{{ item.externalKey || item.id }}</b><strong>{{ item.title || '未命名测试用例' }}</strong><small>{{ testcaseRequirementCount(item.id) }} 个关联需求 · {{ testcaseSourceCount(item.id) }} 个关联代码</small></button></section>
+      </aside>
+      <main class="map-pane"><RelationBoard compact hide-lists eyebrow="Traceability Map" title="追溯关系画布" :loading="loading" :error="error" :nodes="nodes" :edges="edges" :selected-node-id="selectedNode?.id" :show-edge-labels="showRelationLabels" :highlight-related="highlightRelated" @node-select="handleNodeSelect" /></main>
+      <aside class="code-pane"><div class="pane-head"><strong>代码树</strong><span>{{ traceStats.sources }} 个符号</span></div><div v-if="!sourceNodes.length" class="empty-card">暂无关联源码数据</div><div v-else class="code-tree"><button v-for="node in sourceNodes" :key="node.id" :class="['code-item', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>{{ node.type?.includes('dynamic') ? '◌' : '●' }}</i><span><strong>{{ node.label }}</strong><small>{{ node.type?.includes('dynamic') ? '动态运行命中' : '静态源码实现' }}</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></div></aside>
     </div>
-
-    <div class="trace-summary-grid">
-      <article class="trace-stat requirement">
-        <span>需求/验收点</span>
-        <strong>{{ traceStats.requirements }}</strong>
-      </article>
-      <article class="trace-stat testcase">
-        <span>测试用例</span>
-        <strong>{{ traceStats.testcases }}</strong>
-      </article>
-      <article class="trace-stat source">
-        <span>源码符号</span>
-        <strong>{{ traceStats.sources }}</strong>
-      </article>
-      <article class="trace-stat bug">
-        <span>Bug/问题</span>
-        <strong>{{ traceStats.bugs }}</strong>
-      </article>
-    </div>
-
-    <RelationBoard
-      eyebrow="Traceability Map"
-      title="需求双向追溯地图"
-      subtext="围绕人工标注基准集和 AI 分析基线，展示需求、测试用例、Bug/问题、源码实现之间的可追溯关系。"
-      :loading="loading"
-      :error="error"
-      :nodes="nodes"
-      :edges="edges"
-      :context-actions="contextActions"
-      :show-edge-labels="showRelationLabels"
-      :highlight-related="highlightRelated"
-      @node-select="handleNodeSelect"
-      @context-action="handleContextAction"
-    />
   </section>
 </template>
 
@@ -112,6 +78,7 @@ const contextActions = computed(() => [
 const traceGraph = computed(() => buildTraceGraph(detail.value))
 const nodes = computed(() => traceGraph.value.nodes)
 const edges = computed(() => traceGraph.value.edges)
+const sourceNodes = computed(() => nodes.value.filter((node) => node.id.startsWith('src:')))
 const traceStats = computed(() => ({
   requirements: detail.value?.criteria.length || 0,
   testcases: detail.value?.testcases.length || 0,
@@ -123,6 +90,28 @@ watch(activeBaselineId, async (value, oldValue) => {
   if (!value || value === oldValue) return
   await loadBaselineDetail(value)
 })
+
+function selectAsset(nodeId: string) {
+  const node = nodes.value.find((item) => item.id === nodeId) || null
+  handleNodeSelect(node)
+}
+
+function requirementTestCount(criterionId: string) {
+  return edges.value.filter((edge) => edge.source === requirementNodeId(criterionId) && edge.target.startsWith('tc:')).length
+}
+
+function testcaseRequirementCount(testcaseId: string) {
+  return edges.value.filter((edge) => edge.target === testcaseNodeId(testcaseId) && edge.source.startsWith('req:')).length
+}
+
+function testcaseSourceCount(testcaseId: string) {
+  const requirementIds = new Set(edges.value.filter((edge) => edge.target === testcaseNodeId(testcaseId)).map((edge) => edge.source))
+  return edges.value.filter((edge) => requirementIds.has(edge.source) && edge.target.startsWith('src:')).length
+}
+
+function sourceLinkCount(nodeId: string) {
+  return edges.value.filter((edge) => edge.target === nodeId || edge.source === nodeId).length
+}
 
 function handleNodeSelect(node: RelationNodeSelection | null) {
   selectedNode.value = node
@@ -387,155 +376,10 @@ onMounted(load)
 </script>
 
 <style scoped>
-.home-map-toolbar {
-  display: grid;
-  grid-template-columns: minmax(260px, .55fr) 1fr;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 14px;
-  padding: 14px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-}
-
-.home-map-toolbar > div:first-child {
-  display: grid;
-  gap: 4px;
-}
-
-.home-map-toolbar span,
-.layer-status {
-  color: #64748b;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-}
-
-.toolbar-actions button {
-  border: none;
-  border-radius: 999px;
-  padding: 10px 14px;
-  background: rgba(15, 23, 42, 0.08);
-  cursor: pointer;
-  font-weight: 800;
-  transition: transform .12s ease, background .12s ease, color .12s ease, box-shadow .12s ease;
-}
-
-.toolbar-actions button.active,
-.toolbar-actions button:hover:not(:disabled) {
-  background: #0f172a;
-  color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, .16);
-}
-
-.toolbar-actions button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.toolbar-actions button:disabled {
-  opacity: .55;
-  cursor: not-allowed;
-}
-
-.toolbar-actions .danger {
-  background: rgba(220, 38, 38, 0.12);
-  color: #b91c1c;
-}
-
-.baseline-select {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 40px;
-  border: 1px solid rgba(15, 23, 42, .10);
-  border-radius: 999px;
-  padding: 4px 10px 4px 14px;
-  background: rgba(255, 255, 255, .9);
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.baseline-select select {
-  max-width: min(360px, 42vw);
-  border: 0;
-  background: transparent;
-  color: #172033;
-  font: inherit;
-  outline: none;
-}
-
-.trace-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.trace-stat {
-  padding: 14px 16px;
-  border: 1px solid rgba(15, 23, 42, .08);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, .94);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, .05);
-}
-
-.trace-stat span {
-  color: #64748b;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.trace-stat strong {
-  display: block;
-  margin-top: 6px;
-  color: #0f172a;
-  font-size: 26px;
-  line-height: 1;
-}
-
-.trace-stat.requirement { box-shadow: inset 4px 0 0 #0f766e, 0 12px 30px rgba(15, 23, 42, .05); }
-.trace-stat.testcase { box-shadow: inset 4px 0 0 #2563eb, 0 12px 30px rgba(15, 23, 42, .05); }
-.trace-stat.source { box-shadow: inset 4px 0 0 #7c3aed, 0 12px 30px rgba(15, 23, 42, .05); }
-.trace-stat.bug { box-shadow: inset 4px 0 0 #dc2626, 0 12px 30px rgba(15, 23, 42, .05); }
-
-.layer-status {
-  grid-column: 1 / -1;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(15, 118, 110, 0.08);
-  font-weight: 700;
-}
-
-.layer-status.error {
-  color: #b91c1c;
-  background: rgba(220, 38, 38, 0.08);
-}
-
-@media (max-width: 860px) {
-  .home-map-toolbar {
-    grid-template-columns: 1fr;
-  }
-
-  .toolbar-actions {
-    justify-content: flex-start;
-  }
-
-  .trace-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 560px) {
-  .trace-summary-grid {
-    grid-template-columns: 1fr;
-  }
-}
+.trace-workspace { min-width: 0; }
+.workspace-toolbar { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:14px; padding:15px 17px; border:1px solid rgba(15,23,42,.08); border-radius:22px; background:rgba(255,255,255,.94); }
+.workspace-toolbar > div:first-child { display:grid; gap:4px; }.workspace-toolbar > div:first-child > strong { color:#172033; font-size:19px; }.workspace-toolbar span { color:#64748b; font-size:13px; }.eyebrow { color:#0f766e !important; font-size:11px !important; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
+.toolbar-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }.toolbar-actions button { border:0; border-radius:999px; padding:9px 13px; background:#eef2f5; font-weight:800; cursor:pointer; }.toolbar-actions button.active,.toolbar-actions button:hover:not(:disabled) { background:#0f766e; color:#fff; }.toolbar-actions button:disabled { opacity:.5; cursor:not-allowed; }.baseline-select { display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #e2e8f0; border-radius:999px; font-weight:800; }.baseline-select select { max-width:260px; border:0; background:transparent; outline:0; }
+.workspace-notice { margin-bottom:14px; padding:11px 14px; border-radius:14px; background:#f0fdfa; color:#0f766e; font-weight:700; }.trace-columns { display:grid; grid-template-columns:minmax(220px,.7fr) minmax(450px,1.65fr) minmax(230px,.76fr); gap:14px; min-height:calc(100vh - 245px); }.asset-pane,.code-pane { overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:22px; background:rgba(255,255,255,.94); box-shadow:0 14px 36px rgba(15,23,42,.05); }.asset-pane { display:flex; flex-direction:column; }.pane-head { display:flex; justify-content:space-between; gap:8px; padding:15px; border-bottom:1px solid #eef2f5; color:#172033; }.pane-head span { color:#64748b; font-size:11px; font-weight:700; }.asset-group { display:grid; gap:8px; padding:12px; min-height:0; overflow:auto; }.testcase-group { flex:1; border-top:1px solid #eef2f5; }.group-head { display:flex; justify-content:space-between; align-items:center; color:#334155; font-size:14px; }.group-head span { display:grid; place-items:center; min-width:22px; height:22px; border-radius:999px; background:#eff6ff; color:#2563eb; font-size:12px; }.asset-card { display:grid; gap:4px; border:1px solid transparent; border-radius:13px; padding:10px; background:#f8fafc; color:#172033; text-align:left; cursor:pointer; }.asset-card:hover,.asset-card.active { border-color:rgba(15,118,110,.4); background:#f0fdfa; }.asset-card b { color:#0f766e; font-size:11px; }.asset-card.testcase b { color:#2563eb; }.asset-card strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.asset-card small { color:#64748b; font-size:11px; }.map-pane { min-width:0; }.map-pane :deep(.compact-board .graph-panel) { min-height:calc(100vh - 245px); }.map-pane :deep(.compact-board .relation-graph) { min-height:490px; }.code-tree { display:grid; gap:4px; padding:10px; }.code-item { display:flex; align-items:center; gap:8px; width:100%; border:1px solid transparent; border-radius:10px; padding:9px; background:transparent; text-align:left; cursor:pointer; }.code-item:hover,.code-item.active { border-color:#c4b5fd; background:#f5f3ff; }.code-item i { color:#7c3aed; font-style:normal; }.code-item span { display:grid; min-width:0; gap:2px; }.code-item strong,.code-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.code-item strong { color:#172033; font-size:12px; }.code-item small { color:#64748b; font-size:11px; }.code-item em { margin-left:auto; border-radius:999px; padding:2px 6px; background:#ede9fe; color:#6d28d9; font-size:10px; font-style:normal; font-weight:900; }.empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
+@media(max-width:1100px) { .trace-columns { grid-template-columns:minmax(210px,.7fr) minmax(400px,1.5fr); }.code-pane { grid-column:1/-1; }.code-tree { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:760px) { .workspace-toolbar { align-items:flex-start; flex-direction:column; }.toolbar-actions { justify-content:flex-start; }.trace-columns { grid-template-columns:1fr; }.code-pane { grid-column:auto; }.code-tree { grid-template-columns:1fr; }.asset-pane { max-height:500px; } }
 </style>

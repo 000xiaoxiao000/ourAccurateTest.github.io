@@ -29,6 +29,7 @@ public class VerificationAiOrchestrator {
     private static final int MAX_REQUIREMENT_CHARS = 18_000;
     private static final int MAX_TESTCASE_CHARS = 18_000;
     private static final int MAX_ASSET_CHARS = 14_000;
+    private static final int MAX_TOTAL_PROMPT_CHARS = 48_000;
     private static final int MAX_SOURCE_CLASSES = 18;
     private static final int MAX_SOURCE_CLASS_CHARS = 2_400;
     private static final Pattern HTTP_ENDPOINT = Pattern.compile("\\b(?:GET|POST|PUT|DELETE|PATCH)\\s*[:：]?\\s*(/[A-Za-z0-9_./{}-]+)");
@@ -982,19 +983,23 @@ public class VerificationAiOrchestrator {
         appendSection(prompt, "执行报告", input.executionContent(), MAX_ASSET_CHARS);
         appendSection(prompt, "覆盖率报告", input.coverageContent(), MAX_ASSET_CHARS);
         prompt.append("【静态源码索引】\n");
-        if (input.staticSources() == null || input.staticSources().isEmpty()) {
+        if (prompt.length() >= MAX_TOTAL_PROMPT_CHARS) {
+            prompt.append("(因输入总长度限制未附加；系统仍会用静态索引建立确定性源码追溯)\n");
+        } else if (input.staticSources() == null || input.staticSources().isEmpty()) {
             prompt.append("(无静态源码索引)\n");
         } else {
             int count = 0;
             for (StaticSourceInfo source : input.staticSources()) {
                 if (source == null || source.getClassInfo() == null) continue;
-                if (count++ >= MAX_SOURCE_CLASSES) break;
+                if (count++ >= MAX_SOURCE_CLASSES || prompt.length() >= MAX_TOTAL_PROMPT_CHARS) break;
                 String className = source.getClassInfo().getClassName();
                 prompt.append("类: ").append(value(className)).append('\n');
                 if (source.getClassInfo().getMethodMaps() != null && !source.getClassInfo().getMethodMaps().isEmpty()) {
                     prompt.append("方法: ").append(source.getClassInfo().getMethodMaps().keySet()).append('\n');
                 }
-                prompt.append(truncate(value(source.getClassInfo().getSourceCode()), MAX_SOURCE_CLASS_CHARS)).append("\n\n");
+                int remaining = Math.max(0, MAX_TOTAL_PROMPT_CHARS - prompt.length());
+                if (remaining > 0) prompt.append(truncate(value(source.getClassInfo().getSourceCode()), Math.min(MAX_SOURCE_CLASS_CHARS, remaining)));
+                prompt.append("\n\n");
             }
         }
         prompt.append("""
@@ -1013,7 +1018,15 @@ public class VerificationAiOrchestrator {
     private void appendSection(StringBuilder prompt, String title, String content, int maxChars) {
         prompt.append("【").append(title).append("】\n");
         if (StringUtils.hasText(content)) {
-            prompt.append(truncate(content, maxChars)).append("\n\n");
+            int remaining = Math.max(0, MAX_TOTAL_PROMPT_CHARS - prompt.length());
+            int allowed = Math.min(maxChars, remaining);
+            if (allowed == 0) {
+                prompt.append("(因输入总长度限制未附加；系统仍会通过确定性追溯处理该资料)\n\n");
+                return;
+            }
+            prompt.append(truncate(content, allowed));
+            if (content.length() > allowed) prompt.append("\n[内容已截断]");
+            prompt.append("\n\n");
         } else {
             prompt.append("(未提供)\n\n");
         }
