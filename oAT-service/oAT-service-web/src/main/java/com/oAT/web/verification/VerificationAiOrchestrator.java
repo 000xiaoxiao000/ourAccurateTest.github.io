@@ -31,7 +31,8 @@ public class VerificationAiOrchestrator {
     private static final int MAX_ASSET_CHARS = 14_000;
     private static final int MAX_SOURCE_CLASSES = 18;
     private static final int MAX_SOURCE_CLASS_CHARS = 2_400;
-    private static final Pattern HTTP_ENDPOINT = Pattern.compile("\\b(?:GET|POST|PUT|DELETE|PATCH)\\s+(/[A-Za-z0-9_./{}-]+)");
+    private static final Pattern HTTP_ENDPOINT = Pattern.compile("\\b(?:GET|POST|PUT|DELETE|PATCH)\\s*[:：]?\\s*(/[A-Za-z0-9_./{}-]+)");
+    private static final Pattern IDENTIFIER_TOKEN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{3,}");
 
     /**
      * Runs the 5-stage analysis pipeline:
@@ -227,15 +228,14 @@ public class VerificationAiOrchestrator {
             }
         }
 
-        while (prefix.length() > 0 && Character.isWhitespace(prefix.charAt(prefix.length() - 1))) {
+        while (!prefix.isEmpty() && Character.isWhitespace(prefix.charAt(prefix.length() - 1))) {
             prefix.setLength(prefix.length() - 1);
         }
-        while (prefix.length() > 0 && (prefix.charAt(prefix.length() - 1) == ','
+        while (!prefix.isEmpty() && (prefix.charAt(prefix.length() - 1) == ','
                 || prefix.charAt(prefix.length() - 1) == ':')) {
-            prefix.setLength(prefix.length() - 1);
-            while (prefix.length() > 0 && Character.isWhitespace(prefix.charAt(prefix.length() - 1))) {
+            do {
                 prefix.setLength(prefix.length() - 1);
-            }
+            } while (!prefix.isEmpty() && Character.isWhitespace(prefix.charAt(prefix.length() - 1)));
         }
         for (int i = open.size() - 1; i >= 0; i--) {
             prefix.append(open.get(i) == '{' ? '}' : ']');
@@ -248,7 +248,7 @@ public class VerificationAiOrchestrator {
                 下面是一次 AI 分析的原始返回，但它不是可直接解析的完整 JSON。
                 请从中保留有效分析内容，修复截断、Markdown 包裹、解释文本、字段格式问题，重新输出完整 JSON。
                 只能输出 JSON 对象，不能输出 Markdown、代码围栏或任何解释文本。
-                如果原始结果没有有效内容，仍需返回 {\"criteria\":[],\"testcases\":[],\"traceLinks\":[],\"findings\":[]}。
+                如果原始结果没有有效内容，仍需返回 {"criteria":[],"testcases":[],"traceLinks":[],"findings":[]}。
 
                 原始返回：
                 """ + value(response);
@@ -447,18 +447,20 @@ public class VerificationAiOrchestrator {
                 if (StringUtils.hasText(className) && containsToken(requirement, className)) {
                     matchedSymbol = className;
                 }
+                boolean sourceTermMatch = sourceContainsCriterionTerms(sourceCode, criterion);
                 if (source.getClassInfo().getMethodMaps() != null) {
                     for (String methodName : source.getClassInfo().getMethodMaps().keySet()) {
                         if (StringUtils.hasText(methodName) && (containsToken(requirement, methodName)
                                 || endpoints.stream().anyMatch(endpoint -> methodMatchesEndpoint(methodName, endpoint))
-                                || sourceContainsEndpoint(sourceCode, endpoints))) {
+                                || sourceContainsEndpoint(sourceCode, endpoints)
+                                || (sourceTermMatch && sourceContainsMethod(sourceCode, methodName)))) {
                             matchedSymbol = className + "#" + methodName;
                             break;
                         }
                     }
                 }
-                if (!StringUtils.hasText(matchedSymbol) && sourceContainsEndpoint(sourceCode, endpoints)) {
-                    matchedSymbol = StringUtils.hasText(className) ? className : endpoints.get(0);
+                if (!StringUtils.hasText(matchedSymbol) && (sourceContainsEndpoint(sourceCode, endpoints) || sourceTermMatch)) {
+                    matchedSymbol = StringUtils.hasText(className) ? className : endpoints.isEmpty() ? "" : endpoints.get(0);
                 }
                 if (!StringUtils.hasText(matchedSymbol)) continue;
                 result.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", criterion.id(),
@@ -550,7 +552,12 @@ public class VerificationAiOrchestrator {
     private boolean methodMatchesEndpoint(String methodName, String endpoint) {
         String method = value(methodName).toLowerCase(Locale.ROOT);
         String segment = endpointLastSegment(endpoint).toLowerCase(Locale.ROOT);
-        return StringUtils.hasText(segment) && (method.equals(segment) || method.contains(segment) || segment.contains(method));
+        String normalizedMethod = identifierKey(method);
+        String normalizedSegment = identifierKey(segment);
+        return StringUtils.hasText(segment) && (method.equals(segment) || method.contains(segment) || segment.contains(method)
+                || normalizedMethod.equals(normalizedSegment)
+                || normalizedMethod.contains(normalizedSegment)
+                || normalizedSegment.contains(normalizedMethod));
     }
 
     private String endpointLastSegment(String endpoint) {
@@ -563,6 +570,44 @@ public class VerificationAiOrchestrator {
         String normalizedToken = value(token).toLowerCase(Locale.ROOT).trim();
         if (normalizedToken.length() < 4) return false;
         return value(text).toLowerCase(Locale.ROOT).contains(normalizedToken);
+    }
+
+    private boolean sourceContainsMethod(String sourceCode, String methodName) {
+        if (!StringUtils.hasText(sourceCode) || !StringUtils.hasText(methodName)) return false;
+        String source = sourceCode.toLowerCase(Locale.ROOT);
+        String method = methodName.toLowerCase(Locale.ROOT);
+        return source.contains(method + "(") || source.contains(" " + method + "(");
+    }
+
+    private boolean sourceContainsCriterionTerms(String sourceCode, AcceptanceCriterion criterion) {
+        if (!StringUtils.hasText(sourceCode)) return false;
+        String normalizedSource = value(sourceCode).toLowerCase(Locale.ROOT);
+        int hits = 0;
+        for (String token : criterionTokens(criterion)) {
+            if (normalizedSource.contains(token.toLowerCase(Locale.ROOT))) {
+                hits++;
+                if (hits >= 2) return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> criterionTokens(AcceptanceCriterion criterion) {
+        List<String> result = new ArrayList<>();
+        Matcher matcher = IDENTIFIER_TOKEN.matcher(searchableCriterionText(criterion));
+        while (matcher.find()) {
+            String token = matcher.group();
+            String lower = token.toLowerCase(Locale.ROOT);
+            if (lower.length() < 4 || lower.startsWith("http") || lower.startsWith("req") || lower.startsWith("ac")) {
+                continue;
+            }
+            if (!result.contains(token)) result.add(token);
+        }
+        return result;
+    }
+
+    private String identifierKey(String value) {
+        return value(value).replaceAll("[^A-Za-z0-9]", "").toLowerCase(Locale.ROOT);
     }
 
     private boolean sameKey(String left, String right) {
@@ -669,9 +714,6 @@ public class VerificationAiOrchestrator {
                                          List<Finding> findings, List<StaticSourceInfo> staticSources) {
         List<Finding> result = new ArrayList<>(findings);
         for (AcceptanceCriterion criterion : criteria) {
-            List<Finding> existing = result.stream()
-                    .filter(finding -> criterion.id().equals(finding.acId()))
-                    .toList();
             boolean hasTestcase = traceLinks.stream()
                     .anyMatch(link -> criterion.id().equals(link.sourceId()) && "TESTCASE".equals(link.targetType()));
             boolean hasImplementation = traceLinks.stream()
@@ -687,6 +729,11 @@ public class VerificationAiOrchestrator {
             Severity severity = verdict == Verdict.SATISFIED ? Severity.INFO : Severity.MEDIUM;
             EvidenceLevel level = hasCoverage ? EvidenceLevel.E4 : hasExecutionOrCoverage ? EvidenceLevel.E3
                     : hasImplementation ? EvidenceLevel.E2 : hasTestcase ? EvidenceLevel.E1 : EvidenceLevel.E0;
+            result.removeIf(finding -> isContradictedMissingFinding(criterion, finding,
+                    hasTestcase, hasImplementation, hasExecutionOrCoverage));
+            List<Finding> existing = result.stream()
+                    .filter(finding -> criterion.id().equals(finding.acId()))
+                    .toList();
             if (verdict == Verdict.SATISFIED) {
                 if (existing.isEmpty()) {
                     result.add(autoFinding(baselineId, criterion, "SATISFIED_SUMMARY", Perspective.CROSS,
@@ -732,6 +779,16 @@ public class VerificationAiOrchestrator {
         addOrphanTestcaseFindings(baselineId, testcases, traceLinks, result);
         addOrphanSourceFindings(baselineId, staticSources, traceLinks, result);
         return result;
+    }
+
+    private boolean isContradictedMissingFinding(AcceptanceCriterion criterion, Finding finding,
+                                                 boolean hasTestcase, boolean hasImplementation,
+                                                 boolean hasExecutionOrCoverage) {
+        if (!criterion.id().equals(finding.acId())) return false;
+        String type = value(finding.findingType()).toUpperCase(Locale.ROOT);
+        return (hasTestcase && "MISSING_TESTCASE".equals(type))
+                || (hasImplementation && "MISSING_IMPLEMENTATION".equals(type))
+                || (hasExecutionOrCoverage && "MISSING_RUNTIME_EVIDENCE".equals(type));
     }
 
     private void addOrphanTestcaseFindings(String baselineId, List<TestcaseProjection> testcases,

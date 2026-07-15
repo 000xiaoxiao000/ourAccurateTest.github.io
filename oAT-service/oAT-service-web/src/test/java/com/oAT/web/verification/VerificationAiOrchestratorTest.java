@@ -320,6 +320,61 @@ class VerificationAiOrchestratorTest {
     }
 
     @Test
+    void removesMissingImplementationFindingWhenStaticSourceIndexProvesImplementation() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("""
+                {
+                  "criteria": [{
+                    "requirementKey": "D-005",
+                    "acKey": "AC-D-005",
+                    "title": "循环站点转换",
+                    "content": "GET/detail/updated-site-info-loop 根据 loopCount 和 includeNullStation 生成站点列表并转换"
+                  }],
+                  "testcases": [{
+                    "externalKey": "TC-D-005",
+                    "title": "循环站点转换",
+                    "steps": "调用 GET/detail/updated-site-info-loop",
+                    "expected": "根据 loopCount 和 includeNullStation 生成站点列表"
+                  }],
+                  "findings": [{
+                    "acKey": "AC-D-005",
+                    "findingType": "MISSING_IMPLEMENTATION",
+                    "perspective": "DEVELOPMENT",
+                    "severity": "MEDIUM",
+                    "title": "缺少源码实现",
+                    "description": "没有对应静态源码类、方法或接口实现证据",
+                    "verdict": "NOT_VERIFIABLE"
+                  }]
+                }
+                """);
+        StaticSourceClassInfo classInfo = new StaticSourceClassInfo();
+        classInfo.setClassName("DetailController");
+        classInfo.setSourceCode("""
+                @RestController
+                @RequestMapping("/detail")
+                class DetailController {
+                  @GetMapping("/updated-site-info-loop")
+                  public List<SiteInfo> updatedSiteInfoLoop(Integer loopCount, Boolean includeNullStation) {
+                    return buildSites(loopCount, includeNullStation);
+                  }
+                }
+                """);
+        StaticSourceMethodInfo methodInfo = new StaticSourceMethodInfo();
+        methodInfo.setMethodName("updatedSiteInfoLoop");
+        classInfo.setMethodMaps(Map.of("updatedSiteInfoLoop", methodInfo));
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", "D-005 GET/detail/updated-site-info-loop 根据 loopCount 和 includeNullStation 生成站点列表并转换",
+                        "TC-D-005 调用 GET/detail/updated-site-info-loop 后检查站点列表", "", "", "", "",
+                        List.of(new StaticSourceInfo(classInfo))));
+
+        assertThat(result.traceLinks()).anyMatch(link -> "SOURCE_SYMBOL".equals(link.targetType())
+                && "DetailController#updatedSiteInfoLoop".equals(link.targetId()));
+        assertThat(result.findings()).noneMatch(finding -> "MISSING_IMPLEMENTATION".equals(finding.findingType()));
+    }
+
+    @Test
     void enrichesTraceabilityAcrossRequirementTestcaseSourceRuntimeAndDefectAssets() {
         LLMService llmService = mock(LLMService.class);
         when(llmService.isAvailable()).thenReturn(true);

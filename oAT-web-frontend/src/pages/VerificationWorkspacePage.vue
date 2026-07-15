@@ -1,5 +1,11 @@
 <template>
-  <section class="verification-page">
+  <section
+    class="verification-page"
+    @mouseover="showHelp"
+    @mouseout="hideHelpOnLeave"
+    @focusin="showHelp"
+    @focusout="hideHelp"
+  >
     <header class="page-header plain-header verification-header">
       <div>
         <div class="eyebrow">AI Requirement Verification</div>
@@ -524,10 +530,27 @@
       </template>
     </section>
   </section>
+  <Teleport to="body">
+    <div
+      v-if="helpTooltip.visible"
+      ref="helpTooltipRef"
+      class="adaptive-help-tooltip"
+      :class="helpTooltip.placement"
+      :style="{
+        left: `${helpTooltip.left}px`,
+        top: `${helpTooltip.top}px`,
+        width: `${helpTooltip.width}px`,
+        '--arrow-left': `${helpTooltip.arrowLeft}px`,
+      }"
+      role="tooltip"
+    >
+      {{ helpTooltip.text }}
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -661,6 +684,17 @@ const gitForm = reactive({
   commit: '',
   maxFiles: 120,
 })
+const helpTooltipRef = ref<HTMLElement | null>(null)
+const helpTooltip = reactive({
+  visible: false,
+  text: '',
+  left: 0,
+  top: 0,
+  width: 320,
+  arrowLeft: 24,
+  placement: 'below' as 'above' | 'below',
+})
+let activeHelpElement: HTMLElement | null = null
 
 const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: string }> = [
   { key: 'library', label: '资料库', description: '导入 / 查看资料' },
@@ -945,12 +979,73 @@ const assetGroups = computed<Array<{ key: AssetType; label: string; items: Verif
 const importedAssetCount = computed(() => assetGroups.value.reduce((total, group) => total + group.items.length, 0))
 const visibleAssetGroups = computed(() => assetGroups.value.filter((group) => group.items.length > 0))
 
+function showHelp(event: MouseEvent | FocusEvent) {
+  const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.with-help[data-help]') : null
+  if (!target) return
+  const text = target.dataset.help || ''
+  if (!text) return
+  activeHelpElement = target
+  helpTooltip.text = text
+  helpTooltip.visible = true
+  void nextTick(positionHelpTooltip)
+}
+
+function hideHelpOnLeave(event: MouseEvent) {
+  if (!activeHelpElement) return
+  const nextTarget = event.relatedTarget instanceof Node ? event.relatedTarget : null
+  if (nextTarget && activeHelpElement.contains(nextTarget)) return
+  hideHelp()
+}
+
+function hideHelp() {
+  activeHelpElement = null
+  helpTooltip.visible = false
+}
+
+function positionHelpTooltip() {
+  if (!activeHelpElement || !helpTooltip.visible) return
+  const tooltip = helpTooltipRef.value
+  if (!tooltip) return
+  const margin = 12
+  const gap = 10
+  const viewportWidth = window.innerWidth
+  const viewportHeight = window.innerHeight
+  const width = Math.max(180, Math.min(320, viewportWidth - margin * 2))
+  helpTooltip.width = width
+
+  const triggerRect = activeHelpElement.getBoundingClientRect()
+  const tooltipRect = tooltip.getBoundingClientRect()
+  const tooltipHeight = tooltipRect.height || 48
+  const triggerCenter = triggerRect.left + triggerRect.width / 2
+  const minLeft = margin + width / 2
+  const maxLeft = viewportWidth - margin - width / 2
+  const left = clamp(triggerCenter, minLeft, Math.max(minLeft, maxLeft))
+  const showBelow = triggerRect.bottom + gap + tooltipHeight <= viewportHeight - margin
+    || triggerRect.top < tooltipHeight + gap + margin
+  const top = showBelow
+    ? Math.min(triggerRect.bottom + gap, viewportHeight - margin - tooltipHeight)
+    : Math.max(margin, triggerRect.top - gap - tooltipHeight)
+  const tooltipLeft = left - width / 2
+  helpTooltip.left = left
+  helpTooltip.top = top
+  helpTooltip.placement = showBelow ? 'below' : 'above'
+  helpTooltip.arrowLeft = clamp(triggerCenter - tooltipLeft, 16, width - 16)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', positionHelpTooltip)
+  window.addEventListener('scroll', positionHelpTooltip, true)
   await projectStore.loadProjectContext(projectId.value).catch(() => undefined)
   await loadOverview()
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', positionHelpTooltip)
+  window.removeEventListener('scroll', positionHelpTooltip, true)
   clearAnalysisPoll()
 })
 
@@ -2000,36 +2095,6 @@ button,
   gap: 8px;
 }
 
-.metrics-strip article {
-  overflow: visible;
-}
-
-.metrics-strip .with-help::after {
-  top: calc(100% + 8px);
-  bottom: auto;
-}
-
-.metrics-strip .with-help::before {
-  top: calc(100% + 3px);
-  bottom: auto;
-  transform: rotate(225deg) translateY(4px);
-}
-
-.metrics-strip article:last-child .with-help::after {
-  right: 0;
-  left: auto;
-}
-
-.metrics-strip article:last-child .with-help::before {
-  right: 12px;
-  left: auto;
-}
-
-.metrics-strip .with-help:hover::before,
-.metrics-strip .with-help:focus-visible::before {
-  transform: rotate(225deg) translateY(0);
-}
-
 .metrics-strip span {
   color: var(--oat-text-muted);
   font-size: 12px;
@@ -2040,13 +2105,52 @@ button,
 }
 
 .with-help {
-  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   cursor: help;
   text-decoration: underline dotted rgba(15, 118, 110, .45);
   text-underline-offset: 3px;
+}
+
+.adaptive-help-tooltip {
+  position: fixed;
+  z-index: 1000;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 118, 110, .22);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+  color: var(--oat-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  text-align: left;
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.adaptive-help-tooltip::before {
+  position: absolute;
+  left: var(--arrow-left);
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid rgba(15, 118, 110, .22);
+  border-bottom: 1px solid rgba(15, 118, 110, .22);
+  background: #fff;
+  content: '';
+}
+
+.adaptive-help-tooltip.above::before {
+  bottom: -6px;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.adaptive-help-tooltip.below::before {
+  top: -6px;
+  transform: translateX(-50%) rotate(225deg);
 }
 
 .analysis-progress {
@@ -2071,61 +2175,6 @@ button,
   border-radius: inherit;
   background: var(--oat-primary);
   transition: width .35s ease;
-}
-
-.with-help::after {
-  position: absolute;
-  z-index: 40;
-  left: 0;
-  bottom: calc(100% + 8px);
-  width: max-content;
-  max-width: min(280px, 72vw);
-  padding: 8px 10px;
-  border: 1px solid rgba(15, 118, 110, .22);
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
-  color: var(--oat-text);
-  content: attr(data-help);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.55;
-  opacity: 0;
-  pointer-events: none;
-  text-align: left;
-  transform: translateY(4px);
-  transition: opacity .14s ease, transform .14s ease;
-  white-space: normal;
-}
-
-.with-help::before {
-  position: absolute;
-  z-index: 41;
-  left: 12px;
-  bottom: calc(100% + 3px);
-  width: 10px;
-  height: 10px;
-  border-right: 1px solid rgba(15, 118, 110, .22);
-  border-bottom: 1px solid rgba(15, 118, 110, .22);
-  background: #fff;
-  content: '';
-  opacity: 0;
-  pointer-events: none;
-  transform: rotate(45deg) translateY(4px);
-  transition: opacity .14s ease, transform .14s ease;
-}
-
-.with-help:hover::after,
-.with-help:focus-visible::after,
-.with-help:hover::before,
-.with-help:focus-visible::before {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.with-help:hover::before,
-.with-help:focus-visible::before {
-  transform: rotate(45deg) translateY(0);
 }
 
 .gate-band.warning {
@@ -2224,16 +2273,6 @@ button,
 
 .table-row:first-child {
   border-top: 0;
-}
-
-.table-row > div:last-child .with-help::after {
-  right: 0;
-  left: auto;
-}
-
-.table-row > div:last-child .with-help::before {
-  right: 12px;
-  left: auto;
 }
 
 .table-head {
