@@ -1424,6 +1424,7 @@ function findingTypeText(value: string) {
     WEAK_ASSERTION: '断言不足',
     WRONG_EXPECTATION: '预期错误',
     MISSING_IMPLEMENTATION: '缺少源码实现',
+    MISSING_IMPLEMENTATION_EVIDENCE: '缺少源码关联证据',
     LOGIC_DEVIATION: '实现偏差',
     AMBIGUOUS_REQUIREMENT: '需求不明确',
     REQUIREMENT_CONFIRMATION: '需求口径确认',
@@ -2114,6 +2115,7 @@ button,
 }
 
 .adaptive-help-tooltip {
+  --arrow-left: 50%;
   position: fixed;
   z-index: 1000;
   padding: 8px 10px;
@@ -2134,7 +2136,7 @@ button,
 
 .adaptive-help-tooltip::before {
   position: absolute;
-  left: var(--arrow-left);
+  left: var(--arrow-left, 50%);
   width: 10px;
   height: 10px;
   border-right: 1px solid rgba(15, 118, 110, .22);

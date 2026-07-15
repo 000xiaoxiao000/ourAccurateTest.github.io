@@ -33,6 +33,10 @@ public class VerificationAiOrchestrator {
     private static final int MAX_SOURCE_CLASS_CHARS = 2_400;
     private static final Pattern HTTP_ENDPOINT = Pattern.compile("\\b(?:GET|POST|PUT|DELETE|PATCH)\\s*[:：]?\\s*(/[A-Za-z0-9_./{}-]+)");
     private static final Pattern IDENTIFIER_TOKEN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{3,}");
+    private static final Pattern SOURCE_FILE_MARKER = Pattern.compile("^\\s*//\\s*FILE:\\s*(.+?)\\s*$");
+    private static final Pattern SPRING_MAPPING = Pattern.compile("@(Request|Get|Post|Put|Delete|Patch)Mapping\\s*\\(\\s*(?:value\\s*=\\s*)?\\\"([^\\\"]*)\\\"");
+    private static final Pattern JAVA_CLASS = Pattern.compile("\\bclass\\s+([A-Za-z_][A-Za-z0-9_]*)");
+    private static final Pattern JAVA_METHOD = Pattern.compile("\\b(?:public|protected|private)\\s+(?:static\\s+)?(?:<[^>]+>\\s+)?[A-Za-z_$][A-Za-z0-9_$<>, ?\\[\\].]*\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*\\(");
 
     /**
      * Runs the 5-stage analysis pipeline:
@@ -443,6 +447,19 @@ public class VerificationAiOrchestrator {
                 if (source == null || source.getClassInfo() == null) continue;
                 String className = value(source.getClassInfo().getClassName());
                 String sourceCode = value(source.getClassInfo().getSourceCode());
+                SourceEndpoint endpointEvidence = parseSourceEndpoints(sourceCode).stream()
+                        .filter(endpoint -> criterionEndpointsMatch(endpoints, endpoint))
+                        .findFirst()
+                        .orElse(null);
+                if (endpointEvidence != null) {
+                    result.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", criterion.id(),
+                            "SOURCE_SYMBOL", truncate(endpointEvidence.symbol(), 512), "IMPLEMENTED_BY",
+                            "STATIC_INDEX_ENDPOINT_MATCH", 0.92, EvidenceLevel.E2, ReviewStatus.PENDING,
+                            Map.of("reason", "静态源码索引解析到与验收标准完全匹配的 Spring 接口映射",
+                                    "endpoint", endpointEvidence.endpoint(), "httpMethod", endpointEvidence.httpMethod(),
+                                    "locator", endpointEvidence.locator())));
+                    break;
+                }
                 String matchedSymbol = null;
                 if (StringUtils.hasText(className) && containsToken(requirement, className)) {
                     matchedSymbol = className;
@@ -477,22 +494,99 @@ public class VerificationAiOrchestrator {
                                                      List<TraceLink> links, String sourceContent) {
         List<TraceLink> result = new ArrayList<>(links);
         if (!StringUtils.hasText(sourceContent)) return result;
-        String haystack = sourceContent.toLowerCase(Locale.ROOT);
+        List<SourceEndpoint> endpoints = parseSourceEndpoints(sourceContent);
         for (AcceptanceCriterion criterion : criteria) {
             if (hasLink(result, criterion.id(), "SOURCE_SYMBOL")) continue;
-            List<String> endpoints = endpointsOf(criterion);
-            String matched = endpoints.stream()
-                    .filter(endpoint -> haystack.contains(endpoint.toLowerCase(Locale.ROOT))
-                            || haystack.contains(endpointLastSegment(endpoint).toLowerCase(Locale.ROOT)))
+            SourceEndpoint matched = endpoints.stream()
+                    .filter(endpoint -> criterionEndpointsMatch(endpointsOf(criterion), endpoint))
                     .findFirst()
-                    .orElse("");
-            if (!StringUtils.hasText(matched)) continue;
+                    .orElse(null);
+            if (matched == null) continue;
             result.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", criterion.id(),
-                    "SOURCE_SYMBOL", truncate(matched, 512), "IMPLEMENTED_BY", "SOURCE_ASSET_MATCH",
-                    0.68, EvidenceLevel.E2, ReviewStatus.PENDING,
-                    Map.of("reason", "源码资料中出现该验收标准的接口路径", "endpoint", matched)));
+                    "SOURCE_SYMBOL", truncate(matched.symbol(), 512), "IMPLEMENTED_BY", "SOURCE_ENDPOINT_MATCH",
+                    0.90, EvidenceLevel.E2, ReviewStatus.PENDING,
+                    Map.of("reason", "从源码快照解析到与验收标准完全匹配的 Spring 接口映射",
+                            "endpoint", matched.endpoint(), "httpMethod", matched.httpMethod(),
+                            "locator", matched.locator(), "file", matched.filePath())));
         }
         return result;
+    }
+
+    private List<SourceEndpoint> parseSourceEndpoints(String sourceContent) {
+        List<SourceEndpoint> result = new ArrayList<>();
+        String filePath = "源码快照";
+        String className = "";
+        String classPath = "";
+        String pendingHttpMethod = "";
+        String pendingPath = "";
+        int lineNumber = 0;
+        for (String line : sourceContent.split("\\R")) {
+            lineNumber++;
+            Matcher fileMatcher = SOURCE_FILE_MARKER.matcher(line);
+            if (fileMatcher.matches()) {
+                filePath = fileMatcher.group(1).trim();
+                className = "";
+                classPath = "";
+                pendingHttpMethod = "";
+                pendingPath = "";
+                continue;
+            }
+            Matcher mappingMatcher = SPRING_MAPPING.matcher(line);
+            if (mappingMatcher.find()) {
+                String mappingType = mappingMatcher.group(1);
+                String path = mappingMatcher.group(2);
+                if ("Request".equals(mappingType)) {
+                    classPath = normalizeEndpoint(path);
+                } else {
+                    pendingHttpMethod = mappingType.substring(0, mappingType.length() - "Mapping".length()).toUpperCase(Locale.ROOT);
+                    pendingPath = path;
+                }
+                continue;
+            }
+            Matcher classMatcher = JAVA_CLASS.matcher(line);
+            if (classMatcher.find()) {
+                className = classMatcher.group(1);
+                continue;
+            }
+            Matcher methodMatcher = JAVA_METHOD.matcher(line);
+            if (!methodMatcher.find() || !StringUtils.hasText(pendingHttpMethod) || !StringUtils.hasText(className)) continue;
+            String methodName = methodMatcher.group(1);
+            String endpoint = joinEndpoint(classPath, pendingPath);
+            result.add(new SourceEndpoint(endpoint, pendingHttpMethod, className, methodName, filePath,
+                    filePath + ":" + lineNumber));
+            pendingHttpMethod = "";
+            pendingPath = "";
+        }
+        return result;
+    }
+
+    private boolean criterionEndpointsMatch(List<String> criterionEndpoints, SourceEndpoint sourceEndpoint) {
+        return criterionEndpoints.stream()
+                .map(this::normalizeEndpoint)
+                .anyMatch(criterionEndpoint -> criterionEndpoint.equals(sourceEndpoint.endpoint()));
+    }
+
+    private String joinEndpoint(String basePath, String methodPath) {
+        String base = normalizeEndpoint(basePath);
+        String method = normalizeEndpoint(methodPath);
+        if ("/".equals(base)) return method;
+        if ("/".equals(method)) return base;
+        return normalizeEndpoint(base + "/" + method.substring(1));
+    }
+
+    private String normalizeEndpoint(String endpoint) {
+        String normalized = value(endpoint).trim().replaceAll("/{2,}", "/");
+        if (!StringUtils.hasText(normalized)) return "/";
+        if (!normalized.startsWith("/")) normalized = "/" + normalized;
+        return normalized.length() > 1 && normalized.endsWith("/")
+                ? normalized.substring(0, normalized.length() - 1) : normalized;
+    }
+
+    private record SourceEndpoint(String endpoint, String httpMethod, String className, String methodName,
+                                  String filePath, String locator) {
+        private String symbol() {
+            return className + "#" + methodName;
+        }
     }
 
     private List<TraceLink> addTextEvidenceTraceLinks(String baselineId, List<AcceptanceCriterion> criteria,
@@ -712,7 +806,7 @@ public class VerificationAiOrchestrator {
     private List<Finding> ensureFindings(String baselineId, List<AcceptanceCriterion> criteria,
                                          List<TestcaseProjection> testcases, List<TraceLink> traceLinks,
                                          List<Finding> findings, List<StaticSourceInfo> staticSources) {
-        List<Finding> result = new ArrayList<>(findings);
+        List<Finding> result = normalizeMissingImplementationFindings(findings);
         for (AcceptanceCriterion criterion : criteria) {
             boolean hasTestcase = traceLinks.stream()
                     .anyMatch(link -> criterion.id().equals(link.sourceId()) && "TESTCASE".equals(link.targetType()));
@@ -768,11 +862,11 @@ public class VerificationAiOrchestrator {
                         Perspective.TEST, severity, criterion.acKey() + " " + title, description, suggestion, 0.55, level, verdict));
             }
             if (!hasImplementation && existing.stream().noneMatch(finding -> finding.perspective() == Perspective.DEVELOPMENT)) {
-                result.add(autoFinding(baselineId, criterion, "MISSING_IMPLEMENTATION", Perspective.DEVELOPMENT,
-                        severity, criterion.acKey() + " 关联或补充源码实现证据",
+                result.add(autoFinding(baselineId, criterion, "MISSING_IMPLEMENTATION_EVIDENCE", Perspective.DEVELOPMENT,
+                        severity, criterion.acKey() + " 未识别到源码实现关联证据",
                         "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
-                                + " 没有对应静态源码类、方法或接口实现证据。开发人员需要确认是否已实现，以及实现位置是否已被导入或关联。验收标准：" + criterion.content(),
-                        "补充源码包、源码工程版本、接口/类/方法定位；如尚未实现，请创建开发任务。",
+                                + " 尚未关联到本次导入范围内的静态源码类、方法或接口证据。这不等同于代码尚未实现；可能是源码快照、应用静态索引或接口定位未覆盖该实现。验收标准：" + criterion.content(),
+                        "确认已选择正确的源码版本和应用静态索引；补充源码包、源码工程版本、接口/类/方法定位后重新分析。只有确认源码范围完整且仍无实现时，才创建开发任务。",
                         0.55, level, verdict));
             }
         }
@@ -781,13 +875,25 @@ public class VerificationAiOrchestrator {
         return result;
     }
 
+    private List<Finding> normalizeMissingImplementationFindings(List<Finding> findings) {
+        return findings.stream().map(finding -> "MISSING_IMPLEMENTATION".equalsIgnoreCase(finding.findingType())
+                ? new Finding(finding.id(), finding.baselineId(), finding.acId(), "MISSING_IMPLEMENTATION_EVIDENCE",
+                finding.perspective(), finding.severity(), "未识别到源码实现关联证据",
+                "当前分析未关联到足以证明该验收标准的源码实现证据。这不等同于代码尚未实现；请确认源码快照、应用静态索引和接口/类/方法定位是否覆盖实现位置。原始分析说明：" + finding.description(),
+                "补充或选择正确的源码版本和静态索引后重新分析；仅在确认源码范围完整且仍无实现时创建开发任务。",
+                finding.confidence(), finding.evidenceLevel(), Verdict.NOT_VERIFIABLE, finding.reviewStatus(),
+                finding.evidence(), finding.externalWorkItemUrl(), finding.reviewedBy(), finding.reviewReason())
+                : finding).toList();
+    }
+
     private boolean isContradictedMissingFinding(AcceptanceCriterion criterion, Finding finding,
                                                  boolean hasTestcase, boolean hasImplementation,
                                                  boolean hasExecutionOrCoverage) {
         if (!criterion.id().equals(finding.acId())) return false;
         String type = value(finding.findingType()).toUpperCase(Locale.ROOT);
         return (hasTestcase && "MISSING_TESTCASE".equals(type))
-                || (hasImplementation && "MISSING_IMPLEMENTATION".equals(type))
+                || (hasImplementation && ("MISSING_IMPLEMENTATION".equals(type)
+                || "MISSING_IMPLEMENTATION_EVIDENCE".equals(type)))
                 || (hasExecutionOrCoverage && "MISSING_RUNTIME_EVIDENCE".equals(type));
     }
 

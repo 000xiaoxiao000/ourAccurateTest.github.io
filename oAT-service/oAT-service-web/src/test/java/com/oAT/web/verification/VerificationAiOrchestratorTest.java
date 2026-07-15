@@ -135,7 +135,7 @@ class VerificationAiOrchestratorTest {
         assertThat(result.findings()).extracting("perspective")
                 .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
         assertThat(result.findings()).extracting("findingType")
-                .contains("REQUIREMENT_CONFIRMATION", "MISSING_RUNTIME_EVIDENCE", "MISSING_IMPLEMENTATION");
+                .contains("REQUIREMENT_CONFIRMATION", "MISSING_RUNTIME_EVIDENCE", "MISSING_IMPLEMENTATION_EVIDENCE");
         assertThat(result.findings()).allMatch(finding -> finding.verdict() == Verdict.PARTIAL);
     }
 
@@ -414,5 +414,68 @@ class VerificationAiOrchestratorTest {
                 && finding.verdict() == Verdict.SATISFIED);
         assertThat(result.findings()).noneMatch(finding -> "MISSING_TESTCASE".equals(finding.findingType()));
         assertThat(result.findings()).noneMatch(finding -> "MISSING_RUNTIME_EVIDENCE".equals(finding.findingType()));
+    }
+
+    @Test
+    void resolvesRemoteweb3ControllerEndpointsFromSourceSnapshotBeforeAiContextIsTruncated() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("{\"criteria\":[]}");
+
+        String requirements = """
+                | 编号 | 功能 | 接口 | 需求描述 |
+                | --- | --- | --- | --- |
+                | D-005 | for 循环站点转换 | GET /detail/updated-site-info-loop | 根据 loopCount 和 includeNullStation 生成站点列表并转换 |
+                | F-002 | Commons 文件上传 | POST /web3/upload/commons | 保存文件并返回文件大小 |
+                | WF-001 | 异步提交工作流 | POST /workflow/apply | 立即返回 HTTP 202 并异步执行工作流 |
+                """;
+        String sourceSnapshot = """
+                // FILE: web3/src/main/java/web3Server/controller/DetailController.java
+                @RestController
+                @RequestMapping(\"/detail\")
+                public class DetailController {
+                  @GetMapping(\"/updated-site-info-loop\")
+                  public List<SiteInfo> getUpdatedSiteInfoByLoop(int loopCount, boolean includeNullStation) { return null; }
+                }
+
+                // FILE: web3/src/main/java/web3Server/controller/FileUploadController.java
+                @RestController
+                @RequestMapping(\"/web3\")
+                public class FileUploadController {
+                  @PostMapping(\"/upload/commons\")
+                  public ResponseEntity<String> uploadFileWithCommons(CommonsMultipartFile file) { return null; }
+                }
+
+                // FILE: web3/src/main/java/web3Server/controller/Workflow/WorkflowController.java
+                @RestController
+                @RequestMapping(\"/workflow\")
+                public class WorkflowController {
+                  @PostMapping(\"/apply\")
+                  public ResponseEntity<Map<String, Object>> apply(String traceId) { return null; }
+                }
+                """;
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", requirements, "", "", sourceSnapshot, "", "", List.of()));
+
+        assertThat(result.traceLinks()).extracting("targetId")
+                .contains("DetailController#getUpdatedSiteInfoByLoop", "FileUploadController#uploadFileWithCommons",
+                        "WorkflowController#apply");
+        assertThat(result.findings()).noneMatch(finding -> "MISSING_IMPLEMENTATION".equals(finding.findingType())
+                || "MISSING_IMPLEMENTATION_EVIDENCE".equals(finding.findingType()));
+    }
+
+    @Test
+    void callsMissingImplementationAnEvidenceGapWhenNoSourceWasProvided() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("{\"criteria\":[{\"acKey\":\"AC-1\",\"content\":\"GET /detail/list 返回明细\"}]}");
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", "", "", "", "", "", "", List.of()));
+
+        assertThat(result.findings()).anyMatch(finding -> "MISSING_IMPLEMENTATION_EVIDENCE".equals(finding.findingType())
+                && finding.title().contains("未识别到源码实现关联证据"));
+        assertThat(result.findings()).noneMatch(finding -> "MISSING_IMPLEMENTATION".equals(finding.findingType()));
     }
 }
