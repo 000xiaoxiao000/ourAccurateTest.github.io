@@ -2,6 +2,7 @@ package com.oAT.web.control.api;
 
 import com.oAT.web.api.map.MapHomePayloadService;
 import com.oAT.web.api.map.MapAppPayloadService;
+import com.oAT.web.common.SourceClassUtil;
 import com.oAT.web.domain.ImageElement;
 import com.oAT.web.esDao.StaticInfoRepository;
 import com.oAT.web.esDao.entity.StaticSourceMethodInfo;
@@ -59,23 +60,69 @@ public class MapApiControl {
     public List<SourceTreeClass> sourceTree(@PathVariable String projectId,
                                             @RequestParam(required = false) String appId,
                                             @RequestParam(required = false) String sourceAssetId) {
-        List<SourceTreeClass> indexed = appId == null || appId.isBlank()
-                ? List.of()
-                : staticInfoRepository.findByAppId(appId).stream()
-                .filter(info -> info.getClassInfo() != null)
-                .map(info -> new SourceTreeClass(
-                        info.getId(),
-                        info.getClassInfo().getClassName(),
-                        info.getClassInfo().getMethodMaps() == null
-                                ? List.of()
-                                : info.getClassInfo().getMethodMaps().entrySet().stream()
-                                .map(entry -> sourceTreeMethod(entry.getKey(), entry.getValue()))
-                                .toList()))
-                .toList();
-        if (!indexed.isEmpty() || sourceAssetId == null || sourceAssetId.isBlank()) return indexed;
-        return verificationRepository.findAsset(projectId, sourceAssetId)
-                .map(this::sourceTreeFromAsset)
-                .orElse(List.of());
+        // Collect results from both sources and merge, deduplicating by filePath
+        List<SourceTreeClass> merged = new ArrayList<>();
+        java.util.Set<String> seenPaths = new java.util.LinkedHashSet<>();
+
+        // 1. Static index (fast, structured method data)
+        if (appId != null && !appId.isBlank()) {
+            staticInfoRepository.findByAppId(appId).stream()
+                    .filter(info -> info.getClassInfo() != null)
+                    .map(info -> {
+                        String fqcn = info.getClassInfo().getClassName();
+                        String filePath = fqcnToFilePath(fqcn);
+                        String simpleName = simpleClassName(fqcn);
+                        return new SourceTreeClass(info.getId(), simpleName, filePath,
+                                info.getClassInfo().getMethodMaps() == null ? List.of()
+                                        : info.getClassInfo().getMethodMaps().entrySet().stream()
+                                        .map(entry -> sourceTreeMethod(entry.getKey(), entry.getValue()))
+                                        .toList());
+                    })
+                    .forEach(cls -> {
+                        if (seenPaths.add(cls.filePath())) merged.add(cls);
+                    });
+        }
+
+        // 2. Source asset (contains all files including non-Java, e.g. frontend code)
+        if (sourceAssetId != null && !sourceAssetId.isBlank()) {
+            verificationRepository.findAsset(projectId, sourceAssetId)
+                    .map(this::sourceTreeFromAsset)
+                    .orElse(List.of())
+                    .forEach(cls -> {
+                        if (seenPaths.add(cls.filePath())) merged.add(cls);
+                    });
+        }
+
+        return merged;
+    }
+
+    /**
+     * Converts a FQCN to a display path rooted at "src/main/java".
+     *   "com.oAT.web3.controller.UserController"
+     *     → "src/main/java/com/oAT/web3/controller/UserController.java"
+     * Path-like names (contain '/' or known extensions) are returned as-is.
+     */
+    private String fqcnToFilePath(String className) {
+        if (className == null || className.isBlank()) return "src/main/java/Unknown.java";
+        String normalized = className.replace('\\', '/');
+        if (SourceClassUtil.isPathLikeName(normalized)) {
+            String path = SourceClassUtil.normalizePathName(normalized);
+            return path.endsWith(".java") ? path : path + ".java";
+        }
+        // Strip inner-class suffix before converting dots to slashes
+        String outer = normalized.contains("$") ? normalized.substring(0, normalized.indexOf('$')) : normalized;
+        String slashed = outer.replace('.', '/');
+        return "src/main/java/" + slashed + ".java";
+    }
+
+    private String simpleClassName(String fqcn) {
+        if (fqcn == null || fqcn.isBlank()) return "Unknown";
+        String base = fqcn.contains("$") ? fqcn.substring(0, fqcn.indexOf('$')) : fqcn;
+        int lastDot   = base.lastIndexOf('.');
+        int lastSlash = base.lastIndexOf('/');
+        int split = Math.max(lastDot, lastSlash);
+        String name = split >= 0 ? base.substring(split + 1) : base;
+        return name.endsWith(".java") ? name.substring(0, name.length() - 5) : name;
     }
 
     private List<SourceTreeClass> sourceTreeFromAsset(AssetSnapshot asset) {
@@ -100,9 +147,14 @@ public class MapApiControl {
 
     private void appendParsedSource(List<SourceTreeClass> result, String fileName, String source) {
         if (source.isBlank()) return;
+        String normalizedFile = fileName.replace('\\', '/');
+        // Keep the original extension for non-Java files; only add .java when there is none
+        String filePath = SourceClassUtil.hasKnownSourceExtension(normalizedFile)
+                ? normalizedFile
+                : normalizedFile + ".java";
         Pattern classPattern = Pattern.compile("(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
         Matcher classMatcher = classPattern.matcher(source);
-        String className = classMatcher.find() ? classMatcher.group(1) : simpleFileName(fileName);
+        String simpleName = classMatcher.find() ? classMatcher.group(1) : simpleFileName(normalizedFile);
         Pattern methodPattern = Pattern.compile("(?m)^\\s*(?:public|protected|private|static|final|synchronized|abstract|native|default|\\s)+[\\w<>,.?\\[\\] ]+\\s+([A-Za-z_$][\\w$]*)\\s*\\([^;{}]*\\)\\s*(?:throws [^{]+)?\\{");
         Matcher methodMatcher = methodPattern.matcher(source);
         List<SourceTreeMethod> methods = new ArrayList<>();
@@ -110,9 +162,13 @@ public class MapApiControl {
             String methodName = methodMatcher.group(1);
             int lineNumber = 1;
             for (int index = 0; index < methodMatcher.start(); index++) if (source.charAt(index) == '\n') lineNumber++;
-            methods.add(new SourceTreeMethod(methodName, className, lineNumber));
+            methods.add(new SourceTreeMethod(methodName, simpleName, lineNumber));
         }
-        result.add(new SourceTreeClass(UUID.nameUUIDFromBytes((fileName + className).getBytes()).toString(), fileName + " · " + className, methods));
+        result.add(new SourceTreeClass(
+                UUID.nameUUIDFromBytes((filePath + simpleName).getBytes()).toString(),
+                simpleName,
+                filePath,
+                methods));
     }
 
     private String simpleFileName(String fileName) {
@@ -131,7 +187,7 @@ public class MapApiControl {
                 lines == null || lines.isEmpty() ? null : lines.get(0));
     }
 
-    public record SourceTreeClass(String id, String className, List<SourceTreeMethod> methods) {}
+    public record SourceTreeClass(String id, String className, String filePath, List<SourceTreeMethod> methods) {}
     public record SourceTreeMethod(String methodName, String methodDesc, Integer lineNumber) {}
 
     @GetMapping("/code")

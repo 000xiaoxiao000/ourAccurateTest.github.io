@@ -174,7 +174,7 @@ public final class SourceClassUtil {
         }
     }
 
-    private static boolean hasKnownSourceExtension(String value) {
+    public static boolean hasKnownSourceExtension(String value) {
         if (!StringUtils.hasText(value)) {
             return false;
         }

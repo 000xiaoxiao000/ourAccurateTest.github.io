@@ -277,6 +277,7 @@ export interface SourceTreeMethod {
 export interface SourceTreeClass {
   id: string
   className: string
+  filePath?: string
   methods: SourceTreeMethod[]
 }
 
