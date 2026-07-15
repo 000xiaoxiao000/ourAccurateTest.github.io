@@ -316,14 +316,19 @@
           </button>
         </nav>
 
-        <section v-if="activeTab === 'matrix'" class="matrix-table">
+        <section v-if="activeTab === 'matrix'" class="tab-content">
+          <div class="list-toolbar">
+            <input v-model.trim="matrixSearch" type="search" placeholder="搜索验收标准、测试用例、证据或结论" />
+            <span>共 {{ filteredMatrix.length }} 条</span>
+          </div>
+          <div class="matrix-table">
           <div class="table-row table-head">
             <span>验收标准</span>
             <span>测试用例</span>
             <span>代码/运行证据</span>
             <span>结论</span>
           </div>
-          <article v-for="row in matrix" :key="row.criterion.id" class="table-row">
+          <article v-for="row in pagedMatrix" :key="row.criterion.id" class="table-row">
             <div>
               <strong>{{ row.criterion.requirementKey }} / {{ row.criterion.acKey }}</strong>
               <p>{{ row.criterion.content }}</p>
@@ -348,10 +353,14 @@
               <small class="with-help" :data-help="evidenceLevelHelp(row.evidenceLevel)" tabindex="0">{{ evidenceLevelText(row.evidenceLevel) }}</small>
               </div>
           </article>
+          <div v-if="!filteredMatrix.length" class="empty-state compact">没有匹配的追溯数据。</div>
+          </div>
+          <PaginationControls v-if="filteredMatrix.length" :page="matrixPage" :page-count="matrixPageCount" :total="filteredMatrix.length" @update:page="matrixPage = $event" />
         </section>
 
         <section v-else-if="activeTab === 'findings'" class="finding-list">
           <div class="finding-toolbar">
+            <input v-model.trim="findingSearch" type="search" placeholder="搜索问题标题、描述、角色或严重程度" />
             <select v-model="findingPerspective">
               <option value="">全部视角</option>
               <option value="PRODUCT">产品</option>
@@ -360,7 +369,7 @@
               <option value="CROSS">交叉</option>
             </select>
           </div>
-          <article v-for="finding in filteredFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
+          <article v-for="finding in pagedFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
             <div class="finding-main">
               <span>{{ perspectiveText(finding.perspective) }} · {{ severityText(finding.severity) }} · {{ reviewStatusText(finding.reviewStatus) }}</span>
               <h3>{{ finding.title }}</h3>
@@ -405,9 +414,14 @@
             </form>
           </article>
           <div v-if="!filteredFindings.length" class="empty-state compact">当前筛选下没有问题。</div>
+          <PaginationControls v-if="filteredFindings.length" :page="findingPage" :page-count="findingPageCount" :total="filteredFindings.length" @update:page="findingPage = $event" />
         </section>
 
         <section v-else class="evidence-panel">
+          <div class="list-toolbar">
+            <input v-model.trim="evidenceSearch" type="search" placeholder="搜索证据记录、状态、连接器或内容" />
+            <span>共 {{ filteredWriteBacks.length }} 条回写记录</span>
+          </div>
           <article>
             <strong>输入新鲜度</strong>
               <span>{{ freshnessText(detail.baseline.freshness) }} · 分析器 {{ detail.baseline.analyzerVersion }}</span>
@@ -420,7 +434,7 @@
               <strong class="with-help" :data-help="helpText.conclusionScope" tabindex="0">结论口径</strong>
               <span>没有测试执行或覆盖率证据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
           </article>
-          <article v-for="action in writeBacks" :key="action.id">
+          <article v-for="action in pagedWriteBacks" :key="action.id">
             <div class="evidence-heading">
               <strong>AI 回写记录：{{ writeBackStatusText(action.status) }}</strong>
               <button type="button" class="ghost-button" @click="copyWriteBack(action.message || '')">复制内容</button>
@@ -429,6 +443,8 @@
             <a v-if="action.externalUrl" :href="action.externalUrl" target="_blank" rel="noreferrer">{{ action.externalUrl }}</a>
             <pre v-if="action.message" class="writeback-message">{{ action.message }}</pre>
           </article>
+          <div v-if="!filteredWriteBacks.length" class="empty-state compact">没有匹配的证据记录。</div>
+          <PaginationControls v-if="filteredWriteBacks.length" :page="evidencePage" :page-count="evidencePageCount" :total="filteredWriteBacks.length" @update:page="evidencePage = $event" />
         </section>
       </template>
     </section>
@@ -436,7 +452,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -493,6 +509,13 @@ const activeWorkspace = ref<WorkspaceKey>('library')
 const selectedBaselineId = ref('')
 const activeTab = ref<'matrix' | 'findings' | 'evidence'>('matrix')
 const findingPerspective = ref('')
+const matrixSearch = ref('')
+const findingSearch = ref('')
+const evidenceSearch = ref('')
+const matrixPage = ref(1)
+const findingPage = ref(1)
+const evidencePage = ref(1)
+const pageSize = 10
 const loading = ref(false)
 const analyzing = ref(false)
 const creatingBaseline = ref(false)
@@ -568,7 +591,66 @@ const helpText = {
 
 const filteredFindings = computed(() => {
   const findings = detail.value?.findings || []
-  return findings.filter((finding) => !findingPerspective.value || finding.perspective === findingPerspective.value)
+  const query = findingSearch.value.toLowerCase()
+  return findings.filter((finding) => {
+    const matchesPerspective = !findingPerspective.value || finding.perspective === findingPerspective.value
+    const searchable = [finding.title, finding.description, finding.suggestion, perspectiveText(finding.perspective), severityText(finding.severity), reviewStatusText(finding.reviewStatus)]
+      .join(' ').toLowerCase()
+    return matchesPerspective && (!query || searchable.includes(query))
+  })
+})
+
+const filteredMatrix = computed(() => {
+  const query = matrixSearch.value.toLowerCase()
+  if (!query) return matrix.value
+  return matrix.value.filter((row) => JSON.stringify(row).toLowerCase().includes(query)
+    || verdictText(row.verdict).toLowerCase().includes(query)
+    || evidenceLevelText(row.evidenceLevel).toLowerCase().includes(query))
+})
+
+const filteredWriteBacks = computed(() => {
+  const query = evidenceSearch.value.toLowerCase()
+  if (!query) return writeBacks.value
+  return writeBacks.value.filter((action) => [action.connectorType, action.status, action.message, action.externalUrl]
+    .filter(Boolean).join(' ').toLowerCase().includes(query))
+})
+
+const matrixPageCount = computed(() => Math.max(1, Math.ceil(filteredMatrix.value.length / pageSize)))
+const findingPageCount = computed(() => Math.max(1, Math.ceil(filteredFindings.value.length / pageSize)))
+const evidencePageCount = computed(() => Math.max(1, Math.ceil(filteredWriteBacks.value.length / pageSize)))
+const pagedMatrix = computed(() => pageSlice(filteredMatrix.value, matrixPage.value))
+const pagedFindings = computed(() => pageSlice(filteredFindings.value, findingPage.value))
+const pagedWriteBacks = computed(() => pageSlice(filteredWriteBacks.value, evidencePage.value))
+
+function pageSlice<T>(items: T[], page: number) {
+  const start = (Math.max(1, page) - 1) * pageSize
+  return items.slice(start, start + pageSize)
+}
+
+watch([matrixSearch, findingSearch, evidenceSearch, findingPerspective], () => {
+  matrixPage.value = 1
+  findingPage.value = 1
+  evidencePage.value = 1
+})
+watch(matrixPageCount, (count) => { matrixPage.value = Math.min(matrixPage.value, count) })
+watch(findingPageCount, (count) => { findingPage.value = Math.min(findingPage.value, count) })
+watch(evidencePageCount, (count) => { evidencePage.value = Math.min(evidencePage.value, count) })
+
+const PaginationControls = defineComponent({
+  props: {
+    page: { type: Number, required: true },
+    pageCount: { type: Number, required: true },
+    total: { type: Number, required: true },
+  },
+  emits: ['update:page'],
+  setup(props, { emit }) {
+    const changePage = (page: number) => emit('update:page', Math.max(1, Math.min(props.pageCount, page)))
+    return () => h('nav', { class: 'pagination-controls', 'aria-label': '分页' }, [
+      h('span', `共 ${props.total} 条，第 ${props.page} / ${props.pageCount} 页`),
+      h('button', { type: 'button', disabled: props.page <= 1, onClick: () => changePage(props.page - 1) }, '上一页'),
+      h('button', { type: 'button', disabled: props.page >= props.pageCount, onClick: () => changePage(props.page + 1) }, '下一页'),
+    ])
+  },
 })
 
 const assetGroups = computed<Array<{ key: AssetType; label: string; items: VerificationAsset[] }>>(() => [
@@ -1714,6 +1796,45 @@ button,
   border-color: var(--oat-primary);
   background: rgba(var(--oat-primary-rgb), .08);
   color: var(--oat-primary-dark);
+}
+
+.tab-content {
+  display: grid;
+  gap: 10px;
+}
+
+.list-toolbar,
+.finding-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.list-toolbar input,
+.finding-toolbar input {
+  flex: 1 1 280px;
+  min-width: 220px;
+}
+
+.list-toolbar > span {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--oat-text-muted);
+  font-size: 12px;
+}
+
+.pagination-controls button {
+  min-height: 32px;
+  padding: 5px 10px;
 }
 
 .matrix-table {
