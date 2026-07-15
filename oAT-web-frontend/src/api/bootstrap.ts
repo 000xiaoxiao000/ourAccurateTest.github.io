@@ -268,6 +268,25 @@ export function fetchMapApp(projectId: string, appId: string, layers: string[]) 
   return apiGetRaw<MapElement[]>(`/api/projects/${projectId}/map/apps/${appId}?${query.toString()}`)
 }
 
+export interface SourceTreeMethod {
+  methodName: string
+  methodDesc?: string
+  lineNumber?: number
+}
+
+export interface SourceTreeClass {
+  id: string
+  className: string
+  methods: SourceTreeMethod[]
+}
+
+export function fetchMapSourceTree(projectId: string, appId?: string, sourceAssetId?: string) {
+  const query = new URLSearchParams()
+  if (appId) query.set('appId', appId)
+  if (sourceAssetId) query.set('sourceAssetId', sourceAssetId)
+  return apiGetRaw<SourceTreeClass[]>(`/api/projects/${projectId}/map/source-tree?${query.toString()}`)
+}
+
 export function fetchMapCode(projectId: string, traceId: string) {
   const query = new URLSearchParams()
   query.set('traceId', traceId)

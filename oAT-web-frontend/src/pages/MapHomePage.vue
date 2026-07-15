@@ -21,7 +21,7 @@
         <section class="asset-group testcase-group"><div class="group-head"><strong>测试用例</strong><span>{{ traceStats.testcases }}</span></div><button v-for="item in detail?.testcases || []" :key="item.id" :class="['asset-card', 'testcase', { active: selectedNode?.id === testcaseNodeId(item.id) }]" @click="selectAsset(testcaseNodeId(item.id))"><b>{{ item.externalKey || item.id }}</b><strong>{{ item.title || '未命名测试用例' }}</strong><small>{{ testcaseRequirementCount(item.id) }} 个关联需求 · {{ testcaseSourceCount(item.id) }} 个关联代码</small></button></section>
       </aside>
       <main class="map-pane"><RelationBoard compact hide-lists eyebrow="Traceability Map" title="追溯关系画布" :loading="loading" :error="error" :nodes="nodes" :edges="edges" :selected-node-id="selectedNode?.id" :show-edge-labels="showRelationLabels" :highlight-related="highlightRelated" @node-select="handleNodeSelect" /></main>
-      <aside class="code-pane"><div class="pane-head"><strong>代码树</strong><span>{{ traceStats.sources }} 个符号</span></div><div v-if="!sourceNodes.length" class="empty-card">暂无方法级追溯链接。请执行静态分析后生成代码符号关联。</div><div v-else class="code-tree"><section v-if="staticSourceNodes.length" class="code-group"><div class="code-group-head">▾ 静态代码 <small>{{ staticSourceNodes.length }}</small></div><button v-for="node in staticSourceNodes" :key="node.id" :class="['code-item', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>●</i><span><strong>{{ node.label }}</strong><small>静态源码实现</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section><section v-if="dynamicSourceNodes.length" class="code-group"><div class="code-group-head">▾ 动态调用链 <small>{{ dynamicSourceNodes.length }}</small></div><button v-for="node in dynamicSourceNodes" :key="node.id" :class="['code-item', 'dynamic', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>◌</i><span><strong>{{ node.label }}</strong><small>动态运行命中</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section></div></aside>
+      <aside class="code-pane"><div class="pane-head"><strong>代码树</strong><span>{{ traceStats.sources }} 个符号</span></div><div v-if="!sourceNodes.length" class="empty-card">暂无已导入源码。请先导入源码或连接代码仓库。</div><div v-else class="code-tree"><section v-if="staticSourceNodes.length" class="code-group"><div class="code-group-head">▾ 静态代码 <small>{{ staticSourceNodes.length }}</small></div><button v-for="node in staticSourceNodes" :key="node.id" :class="['code-item', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>●</i><span><strong>{{ node.label }}</strong><small>静态源码实现</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section><section v-if="dynamicSourceNodes.length" class="code-group"><div class="code-group-head">▾ 动态调用链 <small>{{ dynamicSourceNodes.length }}</small></div><button v-for="node in dynamicSourceNodes" :key="node.id" :class="['code-item', 'dynamic', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>◌</i><span><strong>{{ node.label }}</strong><small>动态运行命中</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section></div></aside>
     </div>
   </section>
 </template>
@@ -31,9 +31,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import RelationBoard from '@/components/map/RelationBoard.vue'
+import { fetchMapSourceTree, fetchProjectApps } from '@/api/bootstrap'
+import type { SourceTreeClass } from '@/api/bootstrap'
 import { fetchBaselineDetail, fetchVerificationOverview } from '@/api/verification'
 import type {
-  AcceptanceCriterion,
   BaselineDetail,
   TraceLink,
   VerificationBaseline,
@@ -61,6 +62,7 @@ const detail = ref<BaselineDetail | null>(null)
 const activeBaselineId = ref('')
 const showRelationLabels = ref(true)
 const highlightRelated = ref(true)
+const sourceTree = ref<SourceTreeClass[]>([])
 
 const selectedClasses = computed(() => selectedNode.value?.classes || selectedNode.value?.type?.split(/\s+/).filter(Boolean) || [])
 const selectedTypeText = computed(() => selectedClasses.value.length ? `类型：${selectedClasses.value.join(' / ')}` : '节点')
@@ -78,23 +80,55 @@ const contextActions = computed(() => [
 const traceGraph = computed(() => buildTraceGraph(detail.value))
 const nodes = computed(() => traceGraph.value.nodes)
 const edges = computed(() => traceGraph.value.edges)
-const sourceNodes = computed(() => nodes.value.filter((node) => node.id.startsWith('src:')))
+const sourceNodes = computed(() => {
+  if (sourceTree.value.length) {
+    return sourceTree.value.flatMap((sourceClass) => {
+      const classNode: RelationNode = {
+        id: sourceNodeId(`class:${sourceClass.id}`),
+        label: sourceClass.className,
+        type: 'source code class',
+        classes: ['source', 'static', 'class'],
+        description: `${sourceClass.methods.length} 个方法`,
+      }
+      const methodNodes: RelationNode[] = sourceClass.methods.map((method, index) => ({
+        id: sourceNodeId(`method:${sourceClass.id}:${index}`),
+        label: `${method.methodName}${method.lineNumber ? ` · L${method.lineNumber}` : ''}`,
+        type: 'source code method',
+        classes: ['source', 'static', 'method'],
+        description: method.methodDesc || sourceClass.className,
+        raw: { className: sourceClass.className, ...method },
+      }))
+      return [classNode, ...methodNodes]
+    })
+  }
+  const linkedSources = nodes.value.filter((node) => node.id.startsWith('src:'))
+  if (linkedSources.length) return linkedSources
+  return overview.value.sources.map((source) => ({
+    id: sourceNodeId(source.id),
+    label: source.fileName || source.externalId || '已导入源码资产',
+    type: 'source code',
+    classes: ['source', 'static'],
+    description: source.contentPreview || '该源码资产尚未生成符号级追溯链接',
+    meta: [source.sourceVersion ? `版本 ${source.sourceVersion}` : '', source.freshness ? `数据 ${source.freshness}` : ''].filter(Boolean),
+  }))
+})
 const staticSourceNodes = computed(() => sourceNodes.value.filter((node) => !node.type?.includes('dynamic')))
 const dynamicSourceNodes = computed(() => sourceNodes.value.filter((node) => node.type?.includes('dynamic')))
 const traceStats = computed(() => ({
   requirements: detail.value?.criteria.length || 0,
   testcases: detail.value?.testcases.length || 0,
-  sources: nodes.value.filter((node) => node.type?.includes('source')).length,
+  sources: sourceNodes.value.length,
   bugs: detail.value?.findings.length || 0,
 }))
 
 watch(activeBaselineId, async (value, oldValue) => {
   if (!value || value === oldValue) return
   await loadBaselineDetail(value)
+  await loadSourceTree()
 })
 
 function selectAsset(nodeId: string) {
-  const node = nodes.value.find((item) => item.id === nodeId) || null
+  const node = nodes.value.find((item) => item.id === nodeId) || sourceNodes.value.find((item) => item.id === nodeId) || null
   handleNodeSelect(node)
 }
 
@@ -145,10 +179,35 @@ async function load() {
     if (preferredBaselineId) {
       await loadBaselineDetail(preferredBaselineId)
     }
+    await loadSourceTree()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载双向追溯地图失败'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSourceTree() {
+  const apps = await fetchProjectApps(projectId.value)
+  const preferredAppId = activeBaseline.value?.sourceAppId
+  const sourceAssetId = activeBaseline.value?.sourceAssetId
+  const orderedApps = preferredAppId
+    ? [...apps.filter((app) => app.id === preferredAppId), ...apps.filter((app) => app.id !== preferredAppId)]
+    : apps
+  const trees = await Promise.all(orderedApps.map(async (app) => {
+    try {
+      return await fetchMapSourceTree(projectId.value, app.id)
+    } catch {
+      return []
+    }
+  }))
+  sourceTree.value = trees.flat()
+  if (!sourceTree.value.length && sourceAssetId) {
+    try {
+      sourceTree.value = await fetchMapSourceTree(projectId.value, undefined, sourceAssetId)
+    } catch {
+      sourceTree.value = []
+    }
   }
 }
 
