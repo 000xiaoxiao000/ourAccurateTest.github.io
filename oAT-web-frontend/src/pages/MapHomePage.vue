@@ -180,7 +180,8 @@ const baselineStatusText = computed(() => {
   return `当前基线：${activeBaseline.value.name || activeBaseline.value.id} · ${activeBaseline.value.status}`
 })
 
-const traceGraph = computed(() => buildTraceGraph(detail.value))
+const sourceSymbolAliases = computed(() => buildSourceSymbolAliases(sourceTree.value))
+const traceGraph = computed(() => buildTraceGraph(detail.value, sourceSymbolAliases.value))
 const nodes      = computed(() => traceGraph.value.nodes)
 const edges      = computed(() => traceGraph.value.edges)
 
@@ -209,7 +210,7 @@ function buildTrie(classes: SourceTreeClass[]): TreeNode[] {
     const rawPath = cls.filePath
       ? cls.filePath.replace(/\\/g, '/')
       : cls.className.replace(/\./g, '/').replace(/\$.*$/, '') + '.java'
-    const filePath = rawPath.endsWith('.java') ? rawPath : rawPath + '.java'
+    const filePath = hasKnownSourceExtension(rawPath) ? rawPath : rawPath + '.java'
     const parts = filePath.split('/').filter(Boolean)
 
     let currentMap = rootMap
@@ -221,7 +222,7 @@ function buildTrie(classes: SourceTreeClass[]): TreeNode[] {
       const isLast = idx === parts.length - 1
 
       if (isLast) {
-        const fileName = segment.replace(/\.java$/, '')
+        const fileName = displayFileName(segment)
         if (!currentMap.has(segment)) {
           currentMap.set(segment, {
             key,
@@ -263,25 +264,7 @@ function buildTrie(classes: SourceTreeClass[]): TreeNode[] {
       })
   }
 
-  // Compact single-child dir chains, like VS Code "compact folders":
-  // src → main → java → com → oAT becomes one node "src/main/java/com/oAT"
-  function compact(nodes: TreeNode[]): TreeNode[] {
-    return nodes.map((node) => {
-      if (!node.isDir) return node
-      const kids = compact(node.children)
-      // collapse: this dir has exactly one child that is also a dir (not a file)
-      if (kids.length === 1 && kids[0].isDir) {
-        const only = kids[0]
-        return {
-          ...only,
-          displayName: `${node.displayName}/${only.displayName}`,
-        }
-      }
-      return { ...node, children: kids }
-    })
-  }
-
-  return compact(toTreeNodes(rootMap))
+  return toTreeNodes(rootMap)
 }
 
 const codeTrieRoot = computed<TreeNode[]>(() => {
@@ -314,7 +297,7 @@ const allCodeTreeDirs = computed<CodeTreeDir[]>(() => {
     const rawPath = cls.filePath
       ? cls.filePath.replace(/\\/g, '/')
       : cls.className.replace(/\./g, '/').replace(/\$.*$/, '') + '.java'
-    const filePath = rawPath.endsWith('.java') ? rawPath : rawPath + '.java'
+    const filePath = hasKnownSourceExtension(rawPath) ? rawPath : rawPath + '.java'
     const lastSlash = filePath.lastIndexOf('/')
     const dirPath   = lastSlash >= 0 ? filePath.substring(0, lastSlash) : '.'
     const fileName  = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath
@@ -327,6 +310,62 @@ const allCodeTreeDirs = computed<CodeTreeDir[]>(() => {
   })
   return [...dirs.values()]
 })
+
+function buildSourceSymbolAliases(classes: SourceTreeClass[]) {
+  const aliases = new Map<string, string>()
+  const add = (alias: string | undefined, nodeId: string) => {
+    const key = normalizeSourceSymbol(alias)
+    if (key && !aliases.has(key)) aliases.set(key, nodeId)
+  }
+
+  classes.forEach((cls) => {
+    const rawPath = cls.filePath ? cls.filePath.replace(/\\/g, '/') : cls.className.replace(/\./g, '/') + '.java'
+    const filePath = hasKnownSourceExtension(rawPath) ? rawPath : rawPath + '.java'
+    const classNodeId = sourceNodeId(`class:${cls.id}`)
+    const simpleName = displayFileName(filePath)
+    const className = cls.className || simpleName
+    const dottedFromPath = filePath.replace(/\.[^.]+$/, '').replace(/\//g, '.')
+
+    add(cls.id, classNodeId)
+    add(className, classNodeId)
+    add(simpleName, classNodeId)
+    add(filePath, classNodeId)
+    add(dottedFromPath, classNodeId)
+    add(`class:${cls.id}`, classNodeId)
+
+    cls.methods.forEach((method, index) => {
+      const methodNodeId = sourceNodeId(`method:${cls.id}:${index}`)
+      add(`method:${cls.id}:${index}`, methodNodeId)
+      add(method.methodName, methodNodeId)
+      add(`${className}#${method.methodName}`, methodNodeId)
+      add(`${simpleName}#${method.methodName}`, methodNodeId)
+      add(`${filePath}#${method.methodName}`, methodNodeId)
+      add(`${dottedFromPath}#${method.methodName}`, methodNodeId)
+      add(`${className}.${method.methodName}`, methodNodeId)
+      add(`${simpleName}.${method.methodName}`, methodNodeId)
+    })
+  })
+
+  return aliases
+}
+
+function normalizeSourceSymbol(value?: string) {
+  return (value || '')
+    .trim()
+    .replace(/^SOURCE_ASSET:/i, '')
+    .replace(/\\/g, '/')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
+function hasKnownSourceExtension(path: string) {
+  return /\.(java|kt|kts|scala|groovy|js|jsx|ts|tsx|vue|py|go|rs|c|cc|cpp|h|hpp|cs|php|rb|swift|m|mm|sql|xml|ya?ml|json|properties|css|scss|less)$/i.test(path)
+}
+
+function displayFileName(path: string) {
+  const name = path.replace(/\\/g, '/').split('/').pop() || path
+  return name.replace(/\.[^.]+$/, '')
+}
 
 // ── source nodes (for counts and fallback) ───────────────────────────────────
 
@@ -509,42 +548,59 @@ async function loadSourceTree() {
   const sourceAssetId = baseline?.sourceAssetId ?? undefined
   const preferredAppId = baseline?.sourceAppId ?? undefined
 
-  // Collect static-index results from ALL apps (merged by backend when sourceAssetId is also passed)
+  // Load the baseline source asset once. Static app indexes are only a supplement:
+  // they can provide method metadata, but must not decide whether the asset tree is loaded.
   const orderedApps = preferredAppId
     ? [...apps.filter((a) => a.id === preferredAppId), ...apps.filter((a) => a.id !== preferredAppId)]
     : apps
 
-  const seenIds = new Set<string>()
+  const indexByPath = new Map<string, number>()
   const combined: (typeof sourceTree.value) = []
 
-  // One request per app, each also carries sourceAssetId so backend merges both sources
+  const addSourceTree = (items: typeof sourceTree.value) => {
+    items.forEach((item) => {
+      const key = item.filePath || item.id
+      const existingIndex = indexByPath.get(key)
+      if (existingIndex === undefined) {
+        indexByPath.set(key, combined.length)
+        combined.push(item)
+        return
+      }
+      const existing = combined[existingIndex]
+      if ((item.methods?.length || 0) > (existing.methods?.length || 0)) {
+        combined[existingIndex] = item
+      }
+    })
+  }
+
+  if (sourceAssetId) {
+    try {
+      addSourceTree(await fetchMapSourceTree(projectId.value, undefined, sourceAssetId))
+    } catch { /* keep loading static indexes below */ }
+  }
+
+  const latestSourceAssetId = overview.value.sources[0]?.id
+  if (latestSourceAssetId && latestSourceAssetId !== sourceAssetId) {
+    try {
+      addSourceTree(await fetchMapSourceTree(projectId.value, undefined, latestSourceAssetId))
+    } catch { /* keep loading static indexes below */ }
+  }
+
   await Promise.all(orderedApps.map(async (app) => {
     try {
-      const result = await fetchMapSourceTree(projectId.value, app.id, sourceAssetId)
-      result.forEach((r) => { if (seenIds.add(r.id)) combined.push(r) })
+      addSourceTree(await fetchMapSourceTree(projectId.value, app.id))
     } catch { /* skip failing apps */ }
   }))
 
-  // If we still have nothing from static index, try the asset alone
-  if (combined.length === 0 && sourceAssetId) {
+  // Some historical baselines may not have a source asset selected. Show the newest
+  // imported source asset as a last-resort tree so the workspace is not empty.
+  if (combined.length === 0 && latestSourceAssetId) {
     try {
-      const result = await fetchMapSourceTree(projectId.value, undefined, sourceAssetId)
-      result.forEach((r) => { if (seenIds.add(r.id)) combined.push(r) })
+      addSourceTree(await fetchMapSourceTree(projectId.value, undefined, latestSourceAssetId))
     } catch { /* skip */ }
   }
 
   sourceTree.value = combined
-
-  if (sourceTree.value.length) {
-    const firstRoot = sourceTree.value[0]?.filePath
-      ? sourceTree.value[0].filePath.replace(/\\/g, '/').split('/')[0]
-      : sourceTree.value[0]?.className.replace(/\./g, '/').split('/')[0]
-    if (firstRoot) {
-      const s = new Set(openDirs.value)
-      s.add(firstRoot)
-      openDirs.value = s
-    }
-  }
 }
 
 async function loadBaselineDetail(baselineId: string) {
@@ -568,7 +624,7 @@ function pickBaselineId(baselines: VerificationBaseline[], current: string) {
 
 // ── graph building ──────────────────────────────────────────────────────────
 
-function buildTraceGraph(current: BaselineDetail | null): { nodes: RelationNode[]; edges: RelationEdge[] } {
+function buildTraceGraph(current: BaselineDetail | null, sourceAliases: Map<string, string>): { nodes: RelationNode[]; edges: RelationEdge[] } {
   if (!current) return { nodes: [], edges: [] }
   const ns = new Map<string, RelationNode>()
   const es = new Map<string, RelationEdge>()
@@ -576,7 +632,7 @@ function buildTraceGraph(current: BaselineDetail | null): { nodes: RelationNode[
   const testcasesByExternalKey = new Map(current.testcases.map((t) => [t.externalKey, t]))
   current.criteria.forEach((c) => ns.set(requirementNodeId(c.id), { id: requirementNodeId(c.id), label: `${c.requirementKey}/${c.acKey}`, type: 'requirement', classes: ['requirement'], description: c.title || c.content }))
   current.testcases.forEach((t) => ns.set(testcaseNodeId(t.id), { id: testcaseNodeId(t.id), label: t.externalKey || t.title || t.id, type: 'testcase', classes: ['testcase'], description: t.title || t.expected || t.steps }))
-  current.traceLinks.forEach((link) => addNormalizedTraceLink(ns, es, link))
+  current.traceLinks.forEach((link) => addNormalizedTraceLink(ns, es, link, sourceAliases))
   addDerivedTestcaseCodeLinks(ns, es)
   addSourceAssetFallbacks(ns, current)
   current.findings.forEach((finding) => {
@@ -596,9 +652,9 @@ function buildTraceGraph(current: BaselineDetail | null): { nodes: RelationNode[
   return { nodes: [...ns.values()], edges: [...es.values()] }
 }
 
-function addNormalizedTraceLink(ns: Map<string, RelationNode>, es: Map<string, RelationEdge>, link: TraceLink) {
-  const src = resolveTraceNodeId(link.sourceType, link.sourceId)
-  const tgt = resolveTraceNodeId(link.targetType, link.targetId)
+function addNormalizedTraceLink(ns: Map<string, RelationNode>, es: Map<string, RelationEdge>, link: TraceLink, sourceAliases: Map<string, string>) {
+  const src = resolveTraceNodeId(link.sourceType, link.sourceId, sourceAliases)
+  const tgt = resolveTraceNodeId(link.targetType, link.targetId, sourceAliases)
   if (!src || !tgt) return
   ensureTraceNode(ns, src, link.sourceType, link.sourceId, link)
   ensureTraceNode(ns, tgt, link.targetType, link.targetId, link)
@@ -645,10 +701,12 @@ function addSourceAssetFallbacks(ns: Map<string, RelationNode>, current: Baselin
   }
 }
 
-function resolveTraceNodeId(type: string, id: string) {
+function resolveTraceNodeId(type: string, id: string, sourceAliases: Map<string, string>) {
   if (type === 'AC' || type === 'REQUIREMENT') return requirementNodeId(id)
   if (type === 'TESTCASE') return testcaseNodeId(id)
-  if (['SOURCE_SYMBOL','SOURCE','CODE','METHOD','CLASS','FILE','EXECUTION','RUNTIME'].includes(type) || type.includes('SOURCE')) return sourceNodeId(id)
+  if (['SOURCE_SYMBOL','SOURCE','CODE','METHOD','CLASS','FILE','EXECUTION','RUNTIME'].includes(type) || type.includes('SOURCE')) {
+    return sourceAliases.get(normalizeSourceSymbol(id)) || sourceNodeId(id)
+  }
   return ''
 }
 
@@ -794,4 +852,3 @@ onMounted(load)
 @media(max-width:1100px) { .trace-columns { grid-template-columns:minmax(200px,.68fr) minmax(320px,1fr); } .code-pane { grid-column:1/-1; } }
 @media(max-width:760px) { .workspace-toolbar { flex-direction:column; align-items:flex-start; } .toolbar-actions { justify-content:flex-start; } .trace-columns { grid-template-columns:1fr; } .code-pane { grid-column:auto; } .asset-pane { max-height:480px; } }
 </style>
-
