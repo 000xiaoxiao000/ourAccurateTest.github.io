@@ -207,7 +207,7 @@ public class QualityGateService {
                 runtimeCovered.size(), closed.size(), (int) open,
                 rate(tested.size(), total), rate(implemented.size(), total),
                 rate(executed.size(), total), rate(runtimeCovered.size(), total),
-                rate(closed.size(), total));
+                rate(closed.size(), total), 0, 0);
     }
 
     private void saveResult(QualityGateResult r) {

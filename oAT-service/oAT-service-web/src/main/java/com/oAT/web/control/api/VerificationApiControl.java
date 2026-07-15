@@ -179,7 +179,9 @@ public class VerificationApiControl {
             metadata.put("repositoryUrl", credentials.repoUrl());
             metadata.put("branch", branch);
             metadata.put("commit", commit);
-            metadata.put("fileCount", source.fileCount());
+            metadata.put("fileCount", source.totalFileCount());
+            metadata.put("totalFileCount", source.totalFileCount());
+            metadata.put("sampledFileCount", source.sampledFileCount());
             metadata.put("truncated", source.truncated());
             metadata.put("appId", effectiveRequest.appId());
             AssetSnapshot asset = verificationService.importAsset(projectId, user.getId(), AssetType.SOURCE,
@@ -518,7 +520,7 @@ public class VerificationApiControl {
     public record GitSourceImport(String appId, String repositoryUrl, String username, String password,
                                   String branch, String commit, Integer maxFiles, Integer maxBytes) {}
     private record GitCredentials(String repoUrl, String username, String password, String branch, String commit) {}
-    private record SourceSnapshot(String content, int fileCount, boolean truncated) {}
+    private record SourceSnapshot(String content, int totalFileCount, int sampledFileCount, boolean truncated) {}
 
     private GitCredentials resolveGitCredentials(String projectId, GitSourceImport request) {
         if (request != null && StringUtils.hasText(request.appId())) {
@@ -541,7 +543,8 @@ public class VerificationApiControl {
         int fileLimit = maxFiles == null || maxFiles <= 0 ? 120 : Math.min(maxFiles, 500);
         int byteLimit = maxBytes == null || maxBytes <= 0 ? 300_000 : Math.min(maxBytes, 2_000_000);
         StringBuilder builder = new StringBuilder();
-        int count = 0;
+        int sampledCount = 0;
+        int totalCount = 0;
         boolean truncated = false;
         try (ZipFile zip = new ZipFile(zipFile, StandardCharsets.UTF_8)) {
             List<? extends ZipEntry> entries = zip.stream()
@@ -549,8 +552,9 @@ public class VerificationApiControl {
                     .filter(entry -> isSourceFile(entry.getName()))
                     .sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
                     .toList();
+            totalCount = entries.size();
             for (ZipEntry entry : entries) {
-                if (count >= fileLimit || builder.length() >= byteLimit) {
+                if (sampledCount >= fileLimit || builder.length() >= byteLimit) {
                     truncated = true;
                     break;
                 }
@@ -565,12 +569,12 @@ public class VerificationApiControl {
                     truncated = true;
                 }
                 builder.append("\n\n// FILE: ").append(entry.getName()).append('\n').append(content);
-                count++;
+                sampledCount++;
             }
         }
-        Assert.isTrue(count > 0, "源码包中未找到可读取的源码文件");
+        Assert.isTrue(totalCount > 0, "源码包中未找到可读取的源码文件");
         builder.append("\n\n// SNAPSHOT_ID: ").append(UUID.randomUUID());
-        return new SourceSnapshot(builder.toString(), count, truncated);
+        return new SourceSnapshot(builder.toString(), totalCount, sampledCount, truncated);
     }
 
     private boolean isSourceFile(String name) {

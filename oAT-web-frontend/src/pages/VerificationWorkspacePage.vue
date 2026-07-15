@@ -82,7 +82,7 @@
                     <input v-model.trim="gitForm.commit" type="text" placeholder="留空取分支最新" />
                   </label>
                   <label>
-                    <span>最大源码文件数</span>
+                    <span>AI 摘要文件数</span>
                     <input v-model.number="gitForm.maxFiles" type="number" min="1" max="500" />
                   </label>
                 </div>
@@ -696,8 +696,8 @@ const helpText = {
   requirementCount: 'AI 从需求资料中抽取并落库的验收标准数量。',
   testcaseCount: 'AI 从测试用例资料中抽取并落库的测试用例数量。',
   defectCount: '资料库中已导入的缺陷/Bug 资料数量。缺陷资料会进入 AI 分析证据池。',
-  staticCodeCount: '静态代码证据数量，来自源码资料或静态源码索引匹配到的类、方法、接口。',
-  dynamicCodeCount: '动态代码证据数量，来自测试执行报告和覆盖率报告中的运行证据。',
+  staticCodeCount: '当前基线导入的静态源码总量。Git 导入会统计仓库包中识别到的全部源码文件，不等于 AI 摘要采样数或追溯命中数。',
+  dynamicCodeCount: '当前基线导入的动态代码证据数量，来自执行报告和覆盖率报告。',
   testcaseCoverage: '有多少验收标准找到了对应测试用例。低于 100% 说明测试用例需要补充。',
   implementationEvidence: '有多少验收标准在源码中找到了对应实现证据。找不到不一定代表没实现，但需要开发确认或补充关联。',
   executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
@@ -711,14 +711,12 @@ const analysisCounts = computed(() => {
   if (!current) {
     return { requirements: 0, testcases: 0, defects: 0, staticCode: 0, dynamicCode: 0 }
   }
-  const staticLinks = current.traceLinks.filter((link) => link.targetType === 'SOURCE_SYMBOL')
-  const dynamicLinks = current.traceLinks.filter((link) => link.targetType === 'EXECUTION' || link.targetType === 'COVERAGE')
   return {
     requirements: current.criteria.length,
     testcases: current.testcases.length,
     defects: overview.value.defects.length,
-    staticCode: uniqueCount(staticLinks.map((link) => link.targetId || link.id)),
-    dynamicCode: uniqueCount(dynamicLinks.map((link) => `${link.targetType}:${link.targetId || link.id}`)),
+    staticCode: current.metrics.staticCodeCount ?? 0,
+    dynamicCode: current.metrics.dynamicCodeCount ?? 0,
   }
 })
 

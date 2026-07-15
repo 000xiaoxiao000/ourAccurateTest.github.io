@@ -122,6 +122,8 @@ export interface VerificationMetrics {
   executionEvidenceRate: number
   runtimeCoverageRate: number
   closedLoopRate: number
+  staticCodeCount?: number
+  dynamicCodeCount?: number
 }
 
 export interface BaselineDetail {

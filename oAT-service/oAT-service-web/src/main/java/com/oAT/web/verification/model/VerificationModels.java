@@ -146,7 +146,9 @@ public final class VerificationModels {
             double implementationCoverageRate,
             double executionEvidenceRate,
             double runtimeCoverageRate,
-            double closedLoopRate) {
+            double closedLoopRate,
+            int staticCodeCount,
+            int dynamicCodeCount) {
     }
 
     public record WriteBackAction(

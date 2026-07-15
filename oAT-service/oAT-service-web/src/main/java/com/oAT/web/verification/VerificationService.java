@@ -156,7 +156,7 @@ public class VerificationService {
         List<Finding> findings = repository.findFindings(baselineId);
         return new BaselineDetail(baseline, requiredAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT),
                 requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE), criteria, testcases, links,
-                findings, metrics(criteria, links, findings));
+                findings, metrics(baseline, projectId, criteria, links, findings));
     }
 
     public AnalysisJob startAnalysis(String projectId, String baselineId, String userId) {
@@ -381,7 +381,8 @@ public class VerificationService {
         return Verdict.NOT_VERIFIABLE;
     }
 
-    private Metrics metrics(List<AcceptanceCriterion> criteria, List<TraceLink> links, List<Finding> findings) {
+    private Metrics metrics(Baseline baseline, String projectId, List<AcceptanceCriterion> criteria,
+                            List<TraceLink> links, List<Finding> findings) {
         Set<String> tested = links.stream().filter(v -> "TESTCASE".equals(v.targetType())).map(TraceLink::sourceId).collect(Collectors.toSet());
         Set<String> implemented = links.stream().filter(v -> "SOURCE_SYMBOL".equals(v.targetType())).map(TraceLink::sourceId).collect(Collectors.toSet());
         Set<String> executed = links.stream().filter(v -> "EXECUTION".equals(v.targetType())).map(TraceLink::sourceId).collect(Collectors.toSet());
@@ -389,9 +390,92 @@ public class VerificationService {
         Set<String> closed = new HashSet<>(tested); closed.retainAll(implemented);
         int total = criteria.size();
         long open = findings.stream().filter(v -> v.reviewStatus() == ReviewStatus.PENDING || v.reviewStatus() == ReviewStatus.CONFIRMED).count();
+        int staticCodeCount = staticCodeCount(baseline, projectId);
+        int dynamicCodeCount = dynamicCodeCount(baseline, projectId);
         return new Metrics(total, tested.size(), implemented.size(), executed.size(), runtimeCovered.size(),
                 closed.size(), (int) open, rate(tested.size(), total), rate(implemented.size(), total),
-                rate(executed.size(), total), rate(runtimeCovered.size(), total), rate(closed.size(), total));
+                rate(executed.size(), total), rate(runtimeCovered.size(), total), rate(closed.size(), total),
+                staticCodeCount, dynamicCodeCount);
+    }
+
+    private int staticCodeCount(Baseline baseline, String projectId) {
+        int sourceFileCount = 0;
+        String sourceAppId = baseline.sourceAppId();
+        if (StringUtils.hasText(baseline.sourceAssetId())) {
+            AssetSnapshot sourceAsset = requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE);
+            sourceFileCount = metadataInt(sourceAsset.metadata(), "totalFileCount");
+            if (sourceFileCount == 0) sourceFileCount = metadataInt(sourceAsset.metadata(), "fileCount");
+            if (!StringUtils.hasText(sourceAppId)) sourceAppId = metadataText(sourceAsset.metadata(), "appId");
+            if (sourceFileCount == 0) {
+                String content = loadAssetContent(sourceAsset);
+                sourceFileCount = countMarkers(content, "// FILE:");
+                if (sourceFileCount == 0 && StringUtils.hasText(content)) sourceFileCount = 1;
+            }
+        }
+        int staticSymbolCount = 0;
+        if (StringUtils.hasText(sourceAppId)) {
+            for (StaticSourceInfo source : staticInfoRepository.findByAppId(sourceAppId)) {
+                if (source == null || source.getClassInfo() == null) continue;
+                staticSymbolCount++;
+                if (source.getClassInfo().getMethodMaps() != null) {
+                    staticSymbolCount += source.getClassInfo().getMethodMaps().size();
+                }
+            }
+        }
+        return Math.max(sourceFileCount, staticSymbolCount);
+    }
+
+    private String metadataText(Map<String, Object> metadata, String key) {
+        if (metadata == null || !metadata.containsKey(key)) return null;
+        Object value = metadata.get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private int metadataInt(Map<String, Object> metadata, String key) {
+        if (metadata == null || !metadata.containsKey(key)) return 0;
+        Object value = metadata.get(key);
+        if (value instanceof Number number) return Math.max(0, number.intValue());
+        if (value instanceof String text && StringUtils.hasText(text)) {
+            try {
+                return Math.max(0, Integer.parseInt(text.trim()));
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    private int dynamicCodeCount(Baseline baseline, String projectId) {
+        int count = 0;
+        if (StringUtils.hasText(baseline.executionAssetId())) {
+            String content = loadAssetContent(requiredAsset(projectId, baseline.executionAssetId(), AssetType.EXECUTION));
+            count += Math.max(1, countNonBlankDataLines(content));
+        }
+        if (StringUtils.hasText(baseline.coverageAssetId())) {
+            String content = loadAssetContent(requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE));
+            int coverageFiles = countMarkers(content, "// COVERAGE_FILE:");
+            count += coverageFiles > 0 ? coverageFiles : Math.max(1, countNonBlankDataLines(content));
+        }
+        return count;
+    }
+
+    private int countMarkers(String content, String marker) {
+        if (!StringUtils.hasText(content)) return 0;
+        int count = 0;
+        for (String line : content.split("\\R")) {
+            if (line.trim().startsWith(marker)) count++;
+        }
+        return count;
+    }
+
+    private int countNonBlankDataLines(String content) {
+        if (!StringUtils.hasText(content)) return 0;
+        int count = 0;
+        for (String line : content.split("\\R")) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty() && !trimmed.startsWith("#") && !trimmed.startsWith("//")) count++;
+        }
+        return count;
     }
 
     private EvidenceLevel evidenceLevel(List<TestcaseProjection> tests, List<TraceLink> links) {
