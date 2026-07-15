@@ -65,6 +65,9 @@ public class VerificationApiControl {
             ".xml", ".json", ".info", ".lcov", ".txt", ".out", ".cov", ".coverage", ".csv", ".tsv");
     private static final Set<String> X_MIND_TEXT_ENTRIES = Set.of(
             "content.json", "content.xml", "metadata.json", "manifest.json");
+    private static final String SOURCE_TREE_BEGIN = "// SOURCE_TREE_BEGIN";
+    private static final String SOURCE_TREE_END = "// SOURCE_TREE_END";
+    private static final String SOURCE_FILE_PREFIX = "// SOURCE_FILE: ";
 
     private final VerificationService verificationService;
     private final ProjectService projectService;
@@ -542,7 +545,8 @@ public class VerificationApiControl {
     private SourceSnapshot summarizeSourceZip(File zipFile, Integer maxFiles, Integer maxBytes) throws IOException {
         int fileLimit = maxFiles == null || maxFiles <= 0 ? 120 : Math.min(maxFiles, 500);
         int byteLimit = maxBytes == null || maxBytes <= 0 ? 300_000 : Math.min(maxBytes, 2_000_000);
-        StringBuilder builder = new StringBuilder();
+        StringBuilder manifestBuilder = new StringBuilder();
+        StringBuilder contentBuilder = new StringBuilder();
         int sampledCount = 0;
         int totalCount = 0;
         boolean truncated = false;
@@ -553,13 +557,18 @@ public class VerificationApiControl {
                     .sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
                     .toList();
             totalCount = entries.size();
+            manifestBuilder.append(SOURCE_TREE_BEGIN).append('\n');
             for (ZipEntry entry : entries) {
-                if (sampledCount >= fileLimit || builder.length() >= byteLimit) {
+                manifestBuilder.append(SOURCE_FILE_PREFIX).append(entry.getName()).append('\n');
+            }
+            manifestBuilder.append(SOURCE_TREE_END).append('\n');
+            for (ZipEntry entry : entries) {
+                if (sampledCount >= fileLimit || contentBuilder.length() >= byteLimit) {
                     truncated = true;
                     break;
                 }
                 String content = new String(zip.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8);
-                int remaining = byteLimit - builder.length();
+                int remaining = byteLimit - contentBuilder.length();
                 if (remaining <= 0) {
                     truncated = true;
                     break;
@@ -568,11 +577,13 @@ public class VerificationApiControl {
                     content = content.substring(0, remaining);
                     truncated = true;
                 }
-                builder.append("\n\n// FILE: ").append(entry.getName()).append('\n').append(content);
+                contentBuilder.append("\n\n// FILE: ").append(entry.getName()).append('\n').append(content);
                 sampledCount++;
             }
         }
         Assert.isTrue(totalCount > 0, "源码包中未找到可读取的源码文件");
+        StringBuilder builder = new StringBuilder(manifestBuilder);
+        builder.append(contentBuilder);
         builder.append("\n\n// SNAPSHOT_ID: ").append(UUID.randomUUID());
         return new SourceSnapshot(builder.toString(), totalCount, sampledCount, truncated);
     }

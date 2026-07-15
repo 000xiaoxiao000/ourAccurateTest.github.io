@@ -25,6 +25,18 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/projects/{projectId}/map")
 public class MapApiControl {
+    private static final String SOURCE_TREE_BEGIN = "// SOURCE_TREE_BEGIN";
+    private static final String SOURCE_TREE_END = "// SOURCE_TREE_END";
+    private static final String SOURCE_FILE_PREFIX = "// SOURCE_FILE:";
+    private static final String FILE_PREFIX = "// FILE:";
+    private static final String SNAPSHOT_ID_PREFIX = "// SNAPSHOT_ID:";
+    private static final List<String> SOURCE_FILE_EXTENSIONS = List.of(
+            ".java", ".kt", ".kts", ".scala", ".groovy",
+            ".js", ".jsx", ".ts", ".tsx", ".vue",
+            ".py", ".go", ".rs", ".c", ".cc", ".cpp", ".h", ".hpp",
+            ".cs", ".php", ".rb", ".swift", ".m", ".mm",
+            ".sql", ".xml", ".yaml", ".yml", ".json", ".properties",
+            ".css", ".scss", ".less");
 
     private final MapHomePayloadService mapHomePayloadService;
     private final MapAppPayloadService mapAppPayloadService;
@@ -129,27 +141,50 @@ public class MapApiControl {
         String content = asset.storageKey() == null ? asset.content() : assetContentStore.load(asset.storageKey());
         if (content == null || content.isBlank()) content = asset.contentPreview();
         if (content == null || content.isBlank()) return List.of();
-        List<SourceTreeClass> result = new ArrayList<>();
+        List<String> manifestFiles = new ArrayList<>();
+        List<SourceTreeClass> parsedFiles = new ArrayList<>();
         String currentFile = asset.fileName() == null ? "ImportedSource.java" : asset.fileName();
         StringBuilder source = new StringBuilder();
+        boolean inManifest = false;
+        boolean hasFileMarker = false;
         for (String line : content.split("\\R")) {
-            if (line.trim().startsWith("// FILE:")) {
-                appendParsedSource(result, currentFile, source.toString());
-                currentFile = line.trim().substring("// FILE:".length()).trim();
+            String trimmed = line.trim();
+            if (SOURCE_TREE_BEGIN.equals(trimmed)) {
+                inManifest = true;
+                continue;
+            }
+            if (SOURCE_TREE_END.equals(trimmed)) {
+                inManifest = false;
+                continue;
+            }
+            if (inManifest) {
+                if (trimmed.startsWith(SOURCE_FILE_PREFIX)) {
+                    String filePath = trimmed.substring(SOURCE_FILE_PREFIX.length()).trim();
+                    if (!filePath.isBlank()) manifestFiles.add(filePath);
+                }
+                continue;
+            }
+            if (trimmed.startsWith(SNAPSHOT_ID_PREFIX)) {
+                continue;
+            }
+            if (trimmed.startsWith(FILE_PREFIX)) {
+                if (hasFileMarker || !source.isEmpty()) appendParsedSource(parsedFiles, currentFile, source.toString());
+                currentFile = trimmed.substring(FILE_PREFIX.length()).trim();
                 source.setLength(0);
+                hasFileMarker = true;
             } else {
                 source.append(line).append('\n');
             }
         }
-        appendParsedSource(result, currentFile, source.toString());
-        return result;
+        appendParsedSource(parsedFiles, currentFile, source.toString());
+        return mergeManifestFiles(manifestFiles, parsedFiles);
     }
 
     private void appendParsedSource(List<SourceTreeClass> result, String fileName, String source) {
         if (source.isBlank()) return;
         String normalizedFile = fileName.replace('\\', '/');
         // Keep the original extension for non-Java files; only add .java when there is none
-        String filePath = SourceClassUtil.hasKnownSourceExtension(normalizedFile)
+        String filePath = hasKnownSourceFileExtension(normalizedFile)
                 ? normalizedFile
                 : normalizedFile + ".java";
         Pattern classPattern = Pattern.compile("(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
@@ -169,6 +204,38 @@ public class MapApiControl {
                 simpleName,
                 filePath,
                 methods));
+    }
+
+    private List<SourceTreeClass> mergeManifestFiles(List<String> manifestFiles, List<SourceTreeClass> parsedFiles) {
+        java.util.Map<String, SourceTreeClass> byPath = new java.util.LinkedHashMap<>();
+        for (String fileName : manifestFiles) {
+            String filePath = normalizeSourceFilePath(fileName);
+            byPath.putIfAbsent(filePath, sourceTreeFileOnly(filePath));
+        }
+        for (SourceTreeClass parsedFile : parsedFiles) {
+            byPath.put(parsedFile.filePath(), parsedFile);
+        }
+        return new ArrayList<>(byPath.values());
+    }
+
+    private SourceTreeClass sourceTreeFileOnly(String filePath) {
+        String simpleName = simpleFileName(filePath);
+        return new SourceTreeClass(
+                UUID.nameUUIDFromBytes((filePath + simpleName).getBytes()).toString(),
+                simpleName,
+                filePath,
+                List.of());
+    }
+
+    private String normalizeSourceFilePath(String fileName) {
+        String normalizedFile = fileName == null ? "ImportedSource.java" : fileName.replace('\\', '/');
+        return hasKnownSourceFileExtension(normalizedFile) ? normalizedFile : normalizedFile + ".java";
+    }
+
+    private boolean hasKnownSourceFileExtension(String value) {
+        if (value == null || value.isBlank()) return false;
+        String lower = value.toLowerCase(java.util.Locale.ROOT);
+        return SOURCE_FILE_EXTENSIONS.stream().anyMatch(lower::endsWith);
     }
 
     private String simpleFileName(String fileName) {

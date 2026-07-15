@@ -59,7 +59,7 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok || !payload.result) {
     throw new ApiError(
-      payload.errorMessage || payload.message || '请求失败',
+      payload.message || payload.errorMessage || '请求失败',
       response.status,
       payload.errorMessage,
     )
