@@ -3,7 +3,7 @@
     <div v-if="loading" class="status-card">正在加载项目上下文...</div>
     <div v-else-if="error" class="status-card error">{{ error }}</div>
     <template v-else-if="context">
-      <div class="hero" :style="{ '--hero-accent': context.ai.mascotPrimary }">
+      <div class="hero">
         <div>
           <div class="eyebrow">Project Context</div>
           <h1>{{ context.project.name }}</h1>
@@ -48,7 +48,7 @@
           </div>
         </section>
 
-        <section class="panel ai-panel" :style="{ '--ai-accent': context.ai.mascotPrimary }">
+        <section class="panel ai-panel">
           <div class="panel-head ai-panel-head">
             <div>
               <h2>AI 需求一致性验证</h2>
@@ -62,15 +62,15 @@
           <div class="ai-showcase">
             <div class="ai-ready-card">
               <div>
-                <strong>{{ context.ai.enabled ? 'AI 助手已就绪' : 'AI 助手待启用' }}</strong>
+                <strong>验证工作台</strong>
                 <span>{{ sourceProjectCount }} 个源码工程 · {{ baselineCount }} 条分析基线</span>
               </div>
             </div>
             <div class="ai-status-card">
-              <span class="status-dot" :class="{ active: context.ai.enabled }"></span>
+              <span class="status-dot active"></span>
               <div>
-                <strong>{{ context.ai.enabled ? '可执行一致性分析' : '暂不可用' }}</strong>
-                <span>最长思考 {{ context.ai.timeout }} 秒，支持需求、用例、源码上下文连续追问</span>
+                <strong>需求一致性分析</strong>
+                <span>基于需求、用例、源码和执行证据生成追溯结果</span>
               </div>
             </div>
           </div>
@@ -83,11 +83,6 @@
             </article>
           </div>
 
-          <div class="ai-starter-row">
-            <RouterLink v-for="question in aiStarters" :key="question" :to="{ path: `/p/${projectId}/ai`, query: { q: question } }">
-              {{ question }}
-            </RouterLink>
-          </div>
         </section>
 
         <section class="panel">
@@ -112,7 +107,6 @@
           <div class="quick-grid">
             <RouterLink :to="`/p/${projectId}/map/home`">链路地图</RouterLink>
             <RouterLink :to="`/p/${projectId}/search`">搜索中心</RouterLink>
-            <RouterLink :to="`/p/${projectId}/ai`">AI 问答</RouterLink>
           </div>
         </section>
       </div>
@@ -164,8 +158,6 @@ const aiCapabilities = [
   { icon: '审', title: '证据审核', text: '确认、驳回、豁免或回写到外部事实源' },
   { icon: '险', title: 'AI 风险发现', text: '由 AI 基于证据输出缺失、偏差和不可验证项' },
 ]
-
-const aiStarters = ['总结项目风险', '线上异常怎么排查', '下一步优先看哪里']
 
 function formatTime(value?: string) {
   if (!value) {

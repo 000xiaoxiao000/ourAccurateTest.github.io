@@ -61,11 +61,6 @@ const router = createRouter({
           component: () => import('@/pages/ProjectHomePage.vue'),
         },
         {
-          path: 'p/:projectId/ai',
-          name: 'project-ai',
-          component: () => import('@/pages/ProjectAiPage.vue'),
-        },
-        {
           path: 'p/:projectId/verification',
           name: 'verification-workspace',
           component: () => import('@/pages/VerificationWorkspacePage.vue'),

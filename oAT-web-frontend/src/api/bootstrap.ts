@@ -1,10 +1,5 @@
 import { apiGet, apiGetRaw, apiPost } from './http'
 import type {
-  AIInteractivePagePayload,
-  AIInteractiveReply,
-  AIFeedbackPayload,
-  AIFeedbackStats,
-  AILearningReport,
   AppSummary,
   AppSettingsPayload,
   CollectorSourcesPayload,
@@ -385,57 +380,4 @@ export function deleteUsecaseDirectory(
     JSON.stringify(payload),
     'application/json',
   )
-}
-
-export function fetchAiInteractiveContext(projectId: string) {
-  return apiGet<AIInteractivePagePayload>(`/api/projects/${projectId}/ai/context`)
-}
-
-export function askAiInteractive(
-  projectId: string,
-  payload: {
-    question?: string
-    pageContext?: string
-    imageData?: string
-    sessionState?: string
-    activeSessionId?: string
-    sessionSortMode?: string
-    timelineExpanded?: boolean
-    memoryScope?: 'workbench' | 'assistant'
-  },
-) {
-  return apiPost<AIInteractiveReply>(`/api/projects/${projectId}/ai/ask`, JSON.stringify(payload), 'application/json')
-}
-
-export function saveAiSessionState(projectId: string, sessionState: string) {
-  return apiPost<string>(
-    `/api/projects/${projectId}/ai/session-state`,
-    JSON.stringify({ sessionState }),
-    'application/json',
-  )
-}
-
-export function clearAiSessionState(projectId: string, memoryScope: 'workbench' | 'assistant' = 'workbench') {
-  return apiPost<string>(
-    `/api/projects/${projectId}/ai/session-state/clear`,
-    JSON.stringify({ memoryScope }),
-    'application/json',
-  )
-}
-
-export function submitAiFeedback(payload: AIFeedbackPayload) {
-  return apiPost<string>('/api/ai/feedback/submit', JSON.stringify(payload), 'application/json')
-}
-
-export function fetchAiFeedbackStats(projectId?: string) {
-  const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''
-  return apiGet<AIFeedbackStats>(`/api/ai/feedback/stats${query}`)
-}
-
-export function fetchAiLearningReport() {
-  return apiGet<AILearningReport>('/api/ai/feedback/learning-report')
-}
-
-export function clearAiLearningSuggestions() {
-  return apiGet<{ cleared?: number }>('/api/ai/feedback/learning-suggestions/clear')
 }

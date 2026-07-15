@@ -42,7 +42,6 @@ const backTarget = computed(() => {
   const routeBackTargets: Record<string, string> = {
     projects: '/projects',
     'project-home': '/projects',
-    'project-ai': projectHome,
     'verification-workspace': projectHome,
     'project-apps': projectHome,
     'app-settings': appList,
@@ -73,7 +72,6 @@ const routeLabels: Record<string, string> = {
   projects: '项目列表',
   'account-settings': '用户设置',
   'project-home': '项目首页',
-  'project-ai': 'AI 工作台',
   'verification-workspace': 'AI 需求验证',
   'project-apps': '源码工程',
   'app-settings': '源码工程设置',

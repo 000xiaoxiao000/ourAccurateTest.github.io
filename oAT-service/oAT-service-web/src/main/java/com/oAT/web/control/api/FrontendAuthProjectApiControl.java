@@ -2,7 +2,6 @@ package com.oAT.web.control.api;
 
 import com.oAT.web.api.common.ApiSummaries.AppSummary;
 import com.oAT.web.api.common.ApiSummaries.UserSummary;
-import com.oAT.web.api.context.FrontendContextPayloads.AiSummary;
 import com.oAT.web.api.context.FrontendContextPayloads.DeleteProjectRequest;
 import com.oAT.web.api.context.FrontendContextPayloads.LoginRequest;
 import com.oAT.web.api.context.FrontendContextPayloads.ProjectContext;
@@ -121,7 +120,6 @@ public class FrontendAuthProjectApiControl {
         context.setApps(apps);
         context.setRecentLogs(recentLogs(projectId));
         context.setCurrentUserRole(resolveUserRole(projectId, user));
-        context.setAi(aiSummary(projectId));
         context.setAppCount(apps.size());
         context.setOnlineAppCount((int) apps.stream().filter(app -> app.getOnlineCount() > 0).count());
         return ok("获取项目上下文成功", context);
@@ -148,17 +146,6 @@ public class FrontendAuthProjectApiControl {
         } catch (RuntimeException ignored) {
             return List.of();
         }
-    }
-
-    private AiSummary aiSummary(String projectId) {
-        AiSummary ai = new AiSummary();
-        ai.setEnabled(true);
-        ai.setTimeout(60);
-        ai.setInteractivePath("/p/" + projectId + "/ai");
-        ai.setAskApiPath("/api/projects/" + projectId + "/ai/ask");
-        ai.setFeedbackApiBasePath("/api/ai/feedback");
-        ai.setMascotPrimary("#0f766e");
-        return ai;
     }
 
     private ProjectSummary toProjectSummary(ProjectVo project) {

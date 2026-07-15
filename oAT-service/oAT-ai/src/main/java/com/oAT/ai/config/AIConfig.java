@@ -88,7 +88,7 @@ public class AIConfig implements AIConfigProperties {
     /**
      * 系统提示词前缀
      */
-    private String systemPromptPrefix = "你是一个专业的代码覆盖率分析助手，专注于帮助用户进行链路分析、问题排查和数据洞察。";
+    private String systemPromptPrefix = "你是一个专业的软件需求一致性分析服务，专注于需求、用例、源码和运行证据的结构化分析。";
 
     @Override
     public boolean isEnabled() {

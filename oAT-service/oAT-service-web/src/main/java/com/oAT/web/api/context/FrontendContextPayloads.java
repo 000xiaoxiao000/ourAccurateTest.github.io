@@ -94,35 +94,12 @@ public final class FrontendContextPayloads {
 
 
 
-    public static class AiSummary {
-        private boolean enabled;
-        private int timeout;
-        private String interactivePath;
-        private String askApiPath;
-        private String feedbackApiBasePath;
-        private String mascotPrimary;
-
-        public boolean isEnabled() { return enabled; }
-        public void setEnabled(boolean enabled) { this.enabled = enabled; }
-        public int getTimeout() { return timeout; }
-        public void setTimeout(int timeout) { this.timeout = timeout; }
-        public String getInteractivePath() { return interactivePath; }
-        public void setInteractivePath(String interactivePath) { this.interactivePath = interactivePath; }
-        public String getAskApiPath() { return askApiPath; }
-        public void setAskApiPath(String askApiPath) { this.askApiPath = askApiPath; }
-        public String getFeedbackApiBasePath() { return feedbackApiBasePath; }
-        public void setFeedbackApiBasePath(String feedbackApiBasePath) { this.feedbackApiBasePath = feedbackApiBasePath; }
-        public String getMascotPrimary() { return mascotPrimary; }
-        public void setMascotPrimary(String mascotPrimary) { this.mascotPrimary = mascotPrimary; }
-    }
-
     public static class ProjectContext {
         private UserSummary currentUser;
         private ProjectSummary project;
         private List<AppSummary> apps;
         private List<SystemLogVo> recentLogs;
         private String currentUserRole;
-        private AiSummary ai;
         private int onlineAppCount;
         private int appCount;
 
@@ -136,8 +113,6 @@ public final class FrontendContextPayloads {
         public void setRecentLogs(List<SystemLogVo> recentLogs) { this.recentLogs = recentLogs; }
         public String getCurrentUserRole() { return currentUserRole; }
         public void setCurrentUserRole(String currentUserRole) { this.currentUserRole = currentUserRole; }
-        public AiSummary getAi() { return ai; }
-        public void setAi(AiSummary ai) { this.ai = ai; }
         public int getOnlineAppCount() { return onlineAppCount; }
         public void setOnlineAppCount(int onlineAppCount) { this.onlineAppCount = onlineAppCount; }
         public int getAppCount() { return appCount; }

@@ -1,6 +1,5 @@
 package com.oAT.web.config;
 
-import com.oAT.web.control.AIInteractiveAccessInterceptor;
 import com.oAT.web.control.LoginInterceptor;
 import com.oAT.web.control.ProjectInterceptor;
 import com.oAT.web.service.ResourceService;
@@ -18,9 +17,6 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Autowired
     ProjectInterceptor projectInterceptor;
-    @Autowired
-    AIInteractiveAccessInterceptor aiInteractiveAccessInterceptor;
-    @Autowired
     LoginInterceptor loginInterceptor;
     @Autowired
     ResourceService resourceService;
@@ -35,7 +31,6 @@ public class WebConfig implements WebMvcConfigurer {
                         "/r/**", "/error", "/share/**", "/share/api/**",
                         "/webhook/**",
                         "/api/auth/login", "/api/auth/register", "/api/auth/me");
-        registry.addInterceptor(aiInteractiveAccessInterceptor).addPathPatterns("/api/projects/*/ai/**");
         registry.addInterceptor(projectInterceptor).addPathPatterns("/p/**");
     }
 

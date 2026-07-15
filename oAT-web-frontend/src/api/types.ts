@@ -43,22 +43,12 @@ export interface AppSummary {
   sourceType?: string
 }
 
-export interface AiSummary {
-  enabled: boolean
-  timeout: number
-  interactivePath: string
-  askApiPath: string
-  feedbackApiBasePath: string
-  mascotPrimary: string
-}
-
 export interface ProjectContext {
   currentUser: UserSummary
   project: ProjectSummary
   apps: AppSummary[]
   recentLogs?: ProjectLogItem[]
   currentUserRole: string
-  ai: AiSummary
   onlineAppCount: number
   appCount: number
 }
@@ -485,107 +475,6 @@ export interface VersionReportDetailPayload {
   impactHints?: {
     zeroHitClasses?: string[]
   }
-}
-
-export interface AIAbilityCard {
-  title: string
-  value: string
-  description: string
-}
-
-export interface AIQuickLink {
-  title: string
-  description: string
-  url: string
-}
-
-export interface AIAction {
-  type: string
-  title: string
-  description: string
-  url?: string
-  requireConfirm?: boolean
-  confirmText?: string
-  payload?: Record<string, unknown>
-}
-
-export interface AIInteractivePagePayload {
-  projectId: string
-  projectName: string
-  projectSummary: string
-  welcomeMessage: string
-  mascotHint: string
-  onlineAppCount: number
-  appCount: number
-  appNames: string[]
-  starterQuestions: string[]
-  abilityCards: AIAbilityCard[]
-  quickLinks: AIQuickLink[]
-  mascot?: Record<string, string>
-  aiTimeout: number
-  sessionState?: string
-}
-
-export interface AIInteractiveReply {
-  question?: string
-  answer?: string
-  topic?: string
-  suggestions?: string[]
-  quickLinks?: AIQuickLink[]
-  actions?: AIAction[]
-  visualizationSuggestions?: Array<Record<string, unknown>>
-  confidence?: number
-  usedTools?: string[]
-  needMoreData?: boolean
-  metadata?: Record<string, unknown>
-  sessionState?: string
-}
-
-export interface AIFeedbackPayload {
-  projectId: string
-  question?: string
-  answer?: string
-  rating: number
-  feedbackType: 'helpful' | 'not_helpful' | 'incorrect' | 'incomplete'
-  comment?: string
-  usedTools?: string
-  responseTime?: number
-}
-
-export interface AISelfLearningStatus {
-  knowledgeBaseSize?: number
-  trackedTopics?: number
-  failurePatterns?: number
-  pendingSuggestions?: number
-  topicGuidanceCount?: number
-  topicHealth?: Record<string, string>
-}
-
-export interface AIFeedbackStats {
-  total?: number
-  positive?: number
-  negative?: number
-  neutral?: number
-  satisfactionRate?: string
-  selfLearning?: AISelfLearningStatus
-}
-
-export interface AILearningSuggestion {
-  priority: 'HIGH' | 'MEDIUM' | 'LOW'
-  title: string
-  description: string
-  id: string
-  createdTime?: number
-}
-
-export interface AILearningReport {
-  timestamp?: string
-  knowledgeBaseEntries?: number
-  trackedTopics?: number
-  failurePatternsAnalyzed?: number
-  suggestionsGenerated?: number
-  topicHealthScores?: Record<string, number>
-  suggestions?: AILearningSuggestion[]
 }
 
 export interface ProjectMemberLite {

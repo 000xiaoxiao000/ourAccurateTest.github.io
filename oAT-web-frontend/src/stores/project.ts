@@ -6,8 +6,6 @@ import {
   addProjectMembers,
   createProject,
   createProjectApp,
-  askAiInteractive,
-  clearAiSessionState,
   createUsecaseDirectory,
   deleteProjectLabel,
   deleteProject,
@@ -15,7 +13,6 @@ import {
   deleteUsecase,
   deleteUsecaseDirectory,
   fetchAppSettings,
-  fetchAiInteractiveContext,
   fetchCollectorSources,
   fetchProjectApps,
   fetchProjectContext,
@@ -31,7 +28,6 @@ import {
   rebuildUsecaseSearchData,
   removeProjectMember,
   renameUsecaseDirectory,
-  saveAiSessionState,
   saveAppSettings,
   saveRepositoryConfig,
   saveUsecase,
@@ -42,8 +38,6 @@ import {
   upsertProjectLabel,
 } from '@/api/bootstrap'
 import type {
-  AIInteractivePagePayload,
-  AIInteractiveReply,
   AppSummary,
   AppSettingsPayload,
   CollectorSourcesPayload,
@@ -70,9 +64,6 @@ export const useProjectStore = defineStore('project', () => {
   const usecaseListByProjectId = ref<Record<string, UsecaseListPayload>>({})
   const usecaseBootstrapByKey = ref<Record<string, UsecaseBootstrapPayload>>({})
   const usecaseDetailByKey = ref<Record<string, UsecaseDetailPayload>>({})
-  const aiContextByProjectId = ref<Record<string, AIInteractivePagePayload>>({})
-  const aiLastReplyByProjectId = ref<Record<string, AIInteractiveReply>>({})
-  const aiAssistantLastReplyByProjectId = ref<Record<string, AIInteractiveReply>>({})
 
   async function loadProjects() {
     projects.value = await fetchProjects()
@@ -325,49 +316,6 @@ export const useProjectStore = defineStore('project', () => {
     return deleteUsecaseDirectory(projectId, directoryId, payload)
   }
 
-  async function loadAiContext(projectId: string) {
-    return loadRecordByKey(aiContextByProjectId, projectId, () => fetchAiInteractiveContext(projectId))
-  }
-
-  async function askAi(projectId: string, payload: Parameters<typeof askAiInteractive>[1]) {
-    const reply = await askAiInteractive(projectId, payload)
-    if (payload.memoryScope === 'assistant') {
-      assignByKey(aiAssistantLastReplyByProjectId, projectId, reply)
-    } else {
-      assignByKey(aiLastReplyByProjectId, projectId, reply)
-    }
-    if (typeof reply.sessionState === 'string') {
-      const current = aiContextByProjectId.value[projectId]
-      if (current) {
-        assignByKey(aiContextByProjectId, projectId, { ...current, sessionState: reply.sessionState })
-      }
-    }
-    return reply
-  }
-
-  async function persistAiSessionState(projectId: string, sessionState: string) {
-    const saved = await saveAiSessionState(projectId, sessionState)
-    const current = aiContextByProjectId.value[projectId]
-    if (current) {
-      assignByKey(aiContextByProjectId, projectId, { ...current, sessionState: saved })
-    }
-    return saved
-  }
-
-  async function resetAiSessionState(projectId: string, memoryScope: 'workbench' | 'assistant' = 'workbench') {
-    const cleared = await clearAiSessionState(projectId, memoryScope)
-    if (memoryScope === 'workbench') {
-      const current = aiContextByProjectId.value[projectId]
-      if (current) {
-        assignByKey(aiContextByProjectId, projectId, { ...current, sessionState: cleared })
-      }
-      assignByKey(aiLastReplyByProjectId, projectId, {})
-    } else {
-      assignByKey(aiAssistantLastReplyByProjectId, projectId, {})
-    }
-    return cleared
-  }
-
   return {
     projects,
     contextByProjectId,
@@ -380,9 +328,6 @@ export const useProjectStore = defineStore('project', () => {
     usecaseListByProjectId,
     usecaseBootstrapByKey,
     usecaseDetailByKey,
-    aiContextByProjectId,
-    aiLastReplyByProjectId,
-    aiAssistantLastReplyByProjectId,
     loadProjects,
     createManagedProject,
     updateManagedProject,
@@ -416,9 +361,5 @@ export const useProjectStore = defineStore('project', () => {
     updateUsecaseDirectory,
     previewUsecaseDirectoryDelete,
     removeUsecaseDirectory,
-    loadAiContext,
-    askAi,
-    persistAiSessionState,
-    resetAiSessionState,
   }
 })

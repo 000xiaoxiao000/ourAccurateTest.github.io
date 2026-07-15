@@ -24,7 +24,6 @@
               <div v-if="!filteredApps.length" class="empty-menu-item">暂无源码工程</div>
             </div>
           </div>
-          <RouterLink v-if="projectId && aiEnabled" :to="`/p/${projectId}/ai`">AI 问答</RouterLink>
           <template v-if="currentUser">
             <div v-if="projectId" class="nav-dropdown create-menu" :class="{ open: openMenu === 'create' }" @mouseenter="openNavMenu('create')" @mouseleave="closeMenus">
               <button class="icon-trigger" type="button" aria-label="快速创建" aria-haspopup="true" :aria-expanded="openMenu === 'create'" @click.stop="toggleMenu('create')">＋</button>
@@ -100,7 +99,6 @@ const projectId = computed(() => typeof route.params.projectId === 'string' ? ro
 const routeAppId = computed(() => typeof route.params.appId === 'string' ? route.params.appId : '')
 const context = computed(() => projectId.value ? projectStore.contextByProjectId[projectId.value] : undefined)
 const apps = computed(() => context.value?.apps || projectStore.appsByProjectId[projectId.value] || [])
-const aiEnabled = computed(() => context.value?.ai.enabled !== false)
 const currentProjectName = computed(() => context.value?.project.name || projects.value.find((project) => project.id === projectId.value)?.name || '项目列表')
 const filteredProjects = computed(() => {
   const keyword = projectKeyword.value.toLowerCase()
@@ -112,10 +110,7 @@ const filteredApps = computed(() => {
 })
 const mainModeClass = computed(() => {
   const name = String(route.name || '')
-  if (name === 'project-ai') {
-    return 'shell-main-wide shell-main-ai'
-  }
-  if (['map-home', 'map-app', 'map-code', 'project-ai', 'verification-workspace', 'search-center'].includes(name)) {
+  if (['map-home', 'map-app', 'map-code', 'verification-workspace', 'search-center'].includes(name)) {
     return 'shell-main-wide'
   }
   if (name.includes('graph') || name.includes('code')) {

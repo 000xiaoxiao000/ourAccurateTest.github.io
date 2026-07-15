@@ -140,7 +140,6 @@ java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSH
 | `VersionService` | 版本、分支、Commit 和 Diff |
 | `UsecaseService` | 用例目录、详情和关联 |
 | `ApiEndpointAnalysisService` | API 端点识别 |
-| `AIInteractiveService` | AI 对话、上下文路由和流式输出 |
 | `VerificationService` | AI 需求一致性验证、快照基线、追溯矩阵、证据审核和质量门禁 |
 
 ## AI 需求一致性验证接入

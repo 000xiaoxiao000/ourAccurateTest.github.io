@@ -1,6 +1,5 @@
 package com.oAT.web.control;
 
-import com.oAT.web.common.PaletteColors;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.entity.AppVo;
@@ -26,12 +25,6 @@ public class ProjectInterceptor implements HandlerInterceptor {
     ProjectService projectService;
     @Autowired
     AppService appService;
-
-    @Value("${ai.llm.enabled:true}")
-    private boolean aiLlmEnabled;
-
-    @Value("${ai.llm.timeout:120}")
-    private int aiTimeout;
 
     @Override
     public boolean preHandle(HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler)
@@ -66,8 +59,6 @@ public class ProjectInterceptor implements HandlerInterceptor {
             project = projectService.getProject(projectId);
             request.setAttribute("project", project);
             request.setAttribute("apps", appService.getAppList(projectId));
-            request.setAttribute("aiLlmEnabled", aiLlmEnabled);
-            setMascotPrimary(request, project);
             return true;
         }
         // 验证用户是否拥有项目权限
@@ -82,9 +73,6 @@ public class ProjectInterceptor implements HandlerInterceptor {
         List<AppVo> apps = appService.getAppList(projectId);
         request.setAttribute("apps", apps);
         request.setAttribute("project", project);
-        request.setAttribute("aiLlmEnabled", aiLlmEnabled);
-        setMascotPrimary(request, project);
-        request.setAttribute("aiTimeout", aiTimeout);
         return true;
     }
 
@@ -97,28 +85,6 @@ public class ProjectInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler,
                                 Exception ex) {
-    }
-
-    /**
-     * 根据 projectId 和 projectName 计算与 AIInteractive 页面一致的 mascotPrimary 颜色，
-     * 使所有页面的悬浮小人与 AIInteractive 页面的小人颜色统一。
-     */
-    private void setMascotPrimary(HttpServletRequest request, ProjectVo project) {
-        String mascotPrimary = computeMascotPrimary(project.getId(), project.getName());
-        request.setAttribute("mascotPrimary", mascotPrimary);
-    }
-
-    private String computeMascotPrimary(String projectId, String projectName) {
-        int seed = positiveHash(projectId + ":" + projectName);
-        return PaletteColors.pickPrimary(seed / 5 + 13);
-    }
-
-    private int positiveHash(String value) {
-        int hash = value == null ? 0 : value.hashCode();
-        if (hash == Integer.MIN_VALUE) {
-            return 0;
-        }
-        return Math.abs(hash);
     }
 
 }
