@@ -270,6 +270,10 @@
             <strong>{{ detail.baseline.name }}</strong>
             <span>{{ baselineStatusText(detail.baseline.status) }} · {{ freshnessText(detail.baseline.freshness) }} · {{ formatTime(detail.baseline.updateTime) }}</span>
             <small v-if="analysisJob">{{ analysisJobStatusText(analysisJob.status) }} · {{ analysisJob.message || '-' }}</small>
+            <div v-if="analysisJob && (analysisJob.status === 'QUEUED' || analysisJob.status === 'RUNNING')" class="analysis-progress" aria-live="polite">
+              <div class="analysis-progress-track"><span :style="{ width: `${analysisProgress(analysisJob)}%` }"></span></div>
+              <small>{{ analysisProgress(analysisJob) }}% · {{ analysisPhase(analysisJob) }}</small>
+            </div>
           </div>
           <div class="header-actions">
             <button type="button" class="secondary-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
@@ -281,27 +285,27 @@
 
         <section class="metrics-strip">
           <article>
-            <span class="with-help" :title="helpText.ac">验收标准数</span>
+            <span class="with-help" :data-help="helpText.ac" tabindex="0">验收标准数</span>
             <strong>{{ detail.metrics.totalCriteria }}</strong>
           </article>
           <article>
-            <span class="with-help" :title="helpText.testcaseCoverage">用例覆盖</span>
+            <span class="with-help" :data-help="helpText.testcaseCoverage" tabindex="0">用例覆盖</span>
             <strong>{{ percent(detail.metrics.testcaseCoverageRate) }}</strong>
           </article>
           <article>
-            <span class="with-help" :title="helpText.implementationEvidence">实现证据</span>
+            <span class="with-help" :data-help="helpText.implementationEvidence" tabindex="0">实现证据</span>
             <strong>{{ percent(detail.metrics.implementationCoverageRate) }}</strong>
           </article>
           <article>
-            <span class="with-help" :title="helpText.executionEvidence">执行证据</span>
+            <span class="with-help" :data-help="helpText.executionEvidence" tabindex="0">执行证据</span>
             <strong>{{ percent(detail.metrics.executionEvidenceRate) }}</strong>
           </article>
           <article>
-            <span class="with-help" :title="helpText.runtimeCoverage">运行覆盖</span>
+            <span class="with-help" :data-help="helpText.runtimeCoverage" tabindex="0">运行覆盖</span>
             <strong>{{ percent(detail.metrics.runtimeCoverageRate) }}</strong>
           </article>
           <article>
-            <span>开放问题</span>
+            <span class="with-help" :data-help="helpText.openFindings" tabindex="0">开放问题</span>
             <strong>{{ detail.metrics.openFindings }}</strong>
           </article>
         </section>
@@ -341,7 +345,7 @@
               </div>
               <div>
                 <span class="verdict" :class="row.verdict.toLowerCase()">{{ verdictText(row.verdict) }}</span>
-              <small class="with-help" :title="evidenceLevelHelp(row.evidenceLevel)">{{ evidenceLevelText(row.evidenceLevel) }}</small>
+              <small class="with-help" :data-help="evidenceLevelHelp(row.evidenceLevel)" tabindex="0">{{ evidenceLevelText(row.evidenceLevel) }}</small>
               </div>
           </article>
         </section>
@@ -358,7 +362,7 @@
           </div>
           <article v-for="finding in filteredFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
             <div class="finding-main">
-              <span>{{ finding.perspective }} · {{ finding.severity }} · {{ finding.reviewStatus }}</span>
+              <span>{{ perspectiveText(finding.perspective) }} · {{ severityText(finding.severity) }} · {{ reviewStatusText(finding.reviewStatus) }}</span>
               <h3>{{ finding.title }}</h3>
               <p>{{ finding.description }}</p>
               <small v-if="finding.suggestion">建议：{{ finding.suggestion }}</small>
@@ -413,7 +417,7 @@
             <span>{{ detail.baseline.sourceBranch || '-' }} / {{ detail.baseline.sourceCommit || '-' }}</span>
           </article>
           <article>
-              <strong class="with-help" :title="helpText.conclusionScope">结论口径</strong>
+              <strong class="with-help" :data-help="helpText.conclusionScope" tabindex="0">结论口径</strong>
               <span>没有测试执行或覆盖率证据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
           </article>
           <article v-for="action in writeBacks" :key="action.id">
@@ -558,6 +562,7 @@ const helpText = {
   implementationEvidence: '有多少验收标准在源码中找到了对应实现证据。找不到不一定代表没实现，但需要开发确认或补充关联。',
   executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
   runtimeCoverage: '有多少验收标准有覆盖率证据支撑，例如 JaCoCo、Istanbul 或流水线覆盖率。',
+  openFindings: '仍处于待确认或已确认状态的问题数。驳回、豁免和已回写的问题不计入开放问题。',
   conclusionScope: '结论口径用于防止误判。只有静态证据时只能说“静态一致”，不能说线上一定满足需求。',
 }
 
@@ -916,6 +921,43 @@ function analysisJobStatusText(value?: string) {
     FAILED: 'AI 分析失败',
   }
   return value ? map[value] || value : '-'
+}
+
+function analysisProgress(job: AnalysisJob) {
+  if (job.status === 'QUEUED') return 5
+  const message = job.message || ''
+  if (message.includes('准备') || message.includes('读取需求')) return 20
+  if (message.includes('源码') || message.includes('证据')) return 35
+  if (message.includes('请求 AI') || message.includes('生成')) return 55
+  if (message.includes('格式') || message.includes('校验') || message.includes('修复')) return 75
+  if (message.includes('保存')) return 90
+  return 50
+}
+
+function analysisPhase(job: AnalysisJob) {
+  if (job.status === 'QUEUED') return '等待分析任务开始'
+  return job.message || '正在处理分析结果'
+}
+
+function perspectiveText(value: string) {
+  const map: Record<string, string> = {
+    PRODUCT: '产品',
+    TEST: '测试',
+    DEVELOPMENT: '开发',
+    CROSS: '交叉',
+  }
+  return map[value] || value
+}
+
+function severityText(value: string) {
+  const map: Record<string, string> = {
+    CRITICAL: '严重',
+    HIGH: '高',
+    MEDIUM: '中',
+    LOW: '低',
+    INFO: '提示',
+  }
+  return map[value] || value
 }
 
 async function markStale() {
@@ -1514,6 +1556,36 @@ button,
   gap: 8px;
 }
 
+.metrics-strip article {
+  overflow: visible;
+}
+
+.metrics-strip .with-help::after {
+  top: calc(100% + 8px);
+  bottom: auto;
+}
+
+.metrics-strip .with-help::before {
+  top: calc(100% + 3px);
+  bottom: auto;
+  transform: rotate(225deg) translateY(4px);
+}
+
+.metrics-strip article:last-child .with-help::after {
+  right: 0;
+  left: auto;
+}
+
+.metrics-strip article:last-child .with-help::before {
+  right: 12px;
+  left: auto;
+}
+
+.metrics-strip .with-help:hover::before,
+.metrics-strip .with-help:focus-visible::before {
+  transform: rotate(225deg) translateY(0);
+}
+
 .metrics-strip span {
   color: var(--oat-text-muted);
   font-size: 12px;
@@ -1524,9 +1596,92 @@ button,
 }
 
 .with-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   cursor: help;
   text-decoration: underline dotted rgba(15, 118, 110, .45);
   text-underline-offset: 3px;
+}
+
+.analysis-progress {
+  display: grid;
+  grid-template-columns: minmax(160px, 280px) auto;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  margin-top: 6px;
+}
+
+.analysis-progress-track {
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, .12);
+}
+
+.analysis-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--oat-primary);
+  transition: width .35s ease;
+}
+
+.with-help::after {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  bottom: calc(100% + 8px);
+  width: max-content;
+  max-width: min(280px, 72vw);
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 118, 110, .22);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+  color: var(--oat-text);
+  content: attr(data-help);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.55;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+  white-space: normal;
+}
+
+.with-help::before {
+  position: absolute;
+  z-index: 41;
+  left: 12px;
+  bottom: calc(100% + 3px);
+  width: 10px;
+  height: 10px;
+  border-right: 1px solid rgba(15, 118, 110, .22);
+  border-bottom: 1px solid rgba(15, 118, 110, .22);
+  background: #fff;
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transform: rotate(45deg) translateY(4px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+
+.with-help:hover::after,
+.with-help:focus-visible::after,
+.with-help:hover::before,
+.with-help:focus-visible::before {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.with-help:hover::before,
+.with-help:focus-visible::before {
+  transform: rotate(45deg) translateY(0);
 }
 
 .gate-band.warning {
@@ -1566,7 +1721,7 @@ button,
   gap: 0;
   border: 1px solid var(--oat-border);
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .table-row {
@@ -1580,6 +1735,16 @@ button,
 
 .table-row:first-child {
   border-top: 0;
+}
+
+.table-row > div:last-child .with-help::after {
+  right: 0;
+  left: auto;
+}
+
+.table-row > div:last-child .with-help::before {
+  right: 12px;
+  left: auto;
 }
 
 .table-head {

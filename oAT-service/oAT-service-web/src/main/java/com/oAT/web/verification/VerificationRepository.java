@@ -28,7 +28,7 @@ public class VerificationRepository {
                 (id, project_id, asset_type, source_type, external_id, external_url, source_version,
                  file_name, content_hash, content_text, storage_type, storage_key, content_size,
                  content_preview, metadata_json, freshness, imported_by, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
                 """, asset.id(), asset.projectId(), asset.assetType().name(), asset.sourceType().name(),
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
                 asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(), asset.contentPreview(),

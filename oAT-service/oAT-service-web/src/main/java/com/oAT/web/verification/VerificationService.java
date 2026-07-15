@@ -195,21 +195,24 @@ public class VerificationService {
     }
 
     private void runAnalysisJob(String projectId, String baselineId, String jobId) {
-        repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.RUNNING, "AI分析执行中", null);
+        updateAnalysisProgress(jobId, "正在准备分析资料");
         try {
-            executeAnalysis(projectId, baselineId);
-            repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "AI分析完成", LocalDateTime.now());
+            executeAnalysis(projectId, baselineId, jobId);
+            repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "分析完成，结果已生成", LocalDateTime.now());
         } catch (RuntimeException e) {
+            String message = readableAnalysisFailure(e);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.FAILED,
-                    StringUtils.hasText(e.getMessage()) ? e.getMessage() : "AI分析失败", LocalDateTime.now());
+                    message, LocalDateTime.now());
         }
     }
 
-    private BaselineDetail executeAnalysis(String projectId, String baselineId) {
+    private BaselineDetail executeAnalysis(String projectId, String baselineId, String jobId) {
         try {
+            updateAnalysisProgress(jobId, "正在读取需求和测试用例资料");
             Baseline baseline = requiredBaseline(projectId, baselineId);
             AssetSnapshot requirement = requiredAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT);
             AssetSnapshot testcase = requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
+            updateAnalysisProgress(jobId, "正在读取源码、执行、覆盖率和缺陷证据");
             Map<String, StaticSourceInfo> sources = loadSources(baseline.sourceAppId());
             String sourceAssetContent = StringUtils.hasText(baseline.sourceAssetId())
                     ? loadAssetContent(requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE)) : "";
@@ -218,10 +221,13 @@ public class VerificationService {
             String coverageContent = StringUtils.hasText(baseline.coverageAssetId())
                     ? loadAssetContent(requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE)) : "";
             String defectContent = loadDefectAssets(projectId);
+            updateAnalysisProgress(jobId, "正在请求 AI 分析并建立追溯关系");
             VerificationAiOrchestrator.AiVerificationResult result = aiOrchestrator.analyze(
                     new VerificationAiOrchestrator.AiVerificationInput(baselineId, loadAssetContent(requirement),
                             loadAssetContent(testcase), defectContent, sourceAssetContent, executionContent, coverageContent,
-                            new ArrayList<>(sources.values())));
+                            new ArrayList<>(sources.values())),
+                    message -> updateAnalysisProgress(jobId, message));
+            updateAnalysisProgress(jobId, "AI 分析完成，正在保存验收标准、追溯关系和问题");
             repository.replaceAnalysis(baselineId, result.criteria(), result.testcases(),
                     result.traceLinks(), result.findings());
             repository.updateBaselineStatus(baselineId, BaselineStatus.WAITING_REVIEW);
@@ -230,6 +236,24 @@ public class VerificationService {
             repository.updateBaselineStatus(baselineId, BaselineStatus.FAILED);
             throw e;
         }
+    }
+
+    private void updateAnalysisProgress(String jobId, String message) {
+        repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.RUNNING, message, null);
+    }
+
+    private String readableAnalysisFailure(RuntimeException error) {
+        String detail = error.getMessage();
+        if (detail != null && detail.contains("AI分析返回格式不合法")) {
+            return "AI 已返回分析内容，但格式校验失败；系统已自动修复重试仍未成功。请检查模型是否支持 JSON 输出，或减少导入资料长度后重试。";
+        }
+        if (detail != null && detail.contains("AI分析没有返回结果")) {
+            return "AI 没有返回分析内容，请检查模型服务、网络和模型配置后重试。";
+        }
+        if (detail != null && detail.contains("AI服务不可用")) {
+            return "AI 服务当前不可用，请检查 AI 开关、接口地址、模型名称和 API Key。";
+        }
+        return StringUtils.hasText(detail) ? "分析失败：" + detail : "分析失败，请检查资料和模型配置后重试。";
     }
 
     public List<MatrixRow> matrix(String projectId, String baselineId) {

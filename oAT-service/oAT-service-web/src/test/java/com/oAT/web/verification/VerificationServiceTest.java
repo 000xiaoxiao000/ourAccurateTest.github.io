@@ -6,6 +6,7 @@ import com.oAT.web.verification.VerificationAiOrchestrator.AiVerificationResult;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.storage.AssetContentStore;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,12 +16,32 @@ import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.argThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class VerificationServiceTest {
+    @Test
+    void saveAssetBindsOneValueForEachSqlParameter() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        VerificationRepository repository = new VerificationRepository(jdbc);
+        doAnswer(invocation -> {
+            String sql = invocation.getArgument(0);
+
+            assertThat(countParameters(sql)).isEqualTo(invocation.getArguments().length - 1);
+            assertThat(sql).contains("VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)");
+            return 1;
+        }).when(jdbc).update(anyString(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(), any());
+
+        repository.saveAsset(new AssetSnapshot("asset-1", "project-1", AssetType.REQUIREMENT, SourceType.FILE,
+                "REQ-1", "https://example.com/REQ-1", "v1", "requirements.md", "hash",
+                "requirement content", "MYSQL", "asset-key", 19, "requirement content",
+                Map.of("source", "test"), Freshness.MANUAL, "u1", LocalDateTime.now()));
+    }
+
     @Test
     void writeBackFindingRecordsAuditAndMarksFindingWrittenBack() {
         VerificationRepository repository = mock(VerificationRepository.class);
@@ -73,7 +94,7 @@ class VerificationServiceTest {
         when(repository.findAssets("project-1", AssetType.DEFECT)).thenReturn(List.of());
         when(contentStore.load("req-key")).thenReturn("REQ-1 用户可以登录");
         when(contentStore.load("tc-key")).thenReturn("TC-1 登录成功");
-        when(orchestrator.analyze(any())).thenReturn(new AiVerificationResult(List.of(ac), List.of(), List.of(), List.of()));
+        when(orchestrator.analyze(any(), any())).thenReturn(new AiVerificationResult(List.of(ac), List.of(), List.of(), List.of()));
         when(repository.findCriteria("base-1")).thenReturn(List.of(ac));
         when(repository.findTestcases("base-1")).thenReturn(List.of());
         when(repository.findTraceLinks("base-1")).thenReturn(List.of());
@@ -83,12 +104,22 @@ class VerificationServiceTest {
 
         verify(orchestrator).analyze(argThat((AiVerificationInput input) ->
                 "REQ-1 用户可以登录".equals(input.requirementContent())
-                        && "TC-1 登录成功".equals(input.testcaseContent())));
+                        && "TC-1 登录成功".equals(input.testcaseContent())), any());
     }
 
     private static AssetSnapshot asset(String id, String projectId, AssetType type, String storageKey) {
         return new AssetSnapshot(id, projectId, type, SourceType.FILE, null, null, null,
                 id + ".txt", "hash", null, "MYSQL", storageKey, 128,
                 "preview", Map.of(), Freshness.MANUAL, "u1", LocalDateTime.now());
+    }
+
+    private static int countParameters(String sql) {
+        int count = 0;
+        for (int i = 0; i < sql.length(); i++) {
+            if (sql.charAt(i) == '?') {
+                count++;
+            }
+        }
+        return count;
     }
 }

@@ -269,6 +269,7 @@ public class AIConfig implements AIConfigProperties {
                 .maxTokens(maxTokens)
                 .temperature(temperature)
                 .parallelToolCalls(false)
+                .responseFormat("json_object")
                 .logRequests(logRequests)
                 .logResponses(logResponses)
                 .timeout(Duration.ofSeconds(timeout))

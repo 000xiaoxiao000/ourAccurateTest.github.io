@@ -2,10 +2,13 @@ package com.oAT.web.verification;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.esDao.entity.StaticSourceInfo;
 import com.oAT.web.verification.model.VerificationModels.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -15,9 +18,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Component
 public class VerificationAiOrchestrator {
+    private static final Logger logger = LoggerFactory.getLogger(VerificationAiOrchestrator.class);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
     private static final int MAX_REQUIREMENT_CHARS = 18_000;
     private static final int MAX_TESTCASE_CHARS = 18_000;
@@ -116,24 +121,54 @@ public class VerificationAiOrchestrator {
     }
 
     public AiVerificationResult analyze(AiVerificationInput input) {
+        return analyze(input, ignored -> { });
+    }
+
+    public AiVerificationResult analyze(AiVerificationInput input, Consumer<String> progress) {
         if (!llmService.isAvailable()) {
             throw new IllegalStateException("AI服务不可用，无法执行需求一致性分析");
         }
+        progress.accept("正在请求 AI 生成需求、用例和证据关系");
         String response = llmService.chat(SYSTEM_PROMPT, buildUserMessage(input));
         if (!StringUtils.hasText(response)) {
             throw new IllegalStateException("AI分析没有返回结果");
         }
-        return parse(input.baselineId(), response);
+        try {
+            progress.accept("AI 已返回内容，正在校验分析结果");
+            return parse(input.baselineId(), response);
+        } catch (RuntimeException firstFailure) {
+            progress.accept("AI 返回格式不完整，正在自动修复并重试");
+            String repaired = llmService.chat(SYSTEM_PROMPT, buildRepairMessage(response));
+            if (!StringUtils.hasText(repaired)) throw firstFailure;
+            try {
+                progress.accept("正在校验修复后的分析结果");
+                return parse(input.baselineId(), repaired);
+            } catch (RuntimeException repairFailure) {
+                repairFailure.addSuppressed(firstFailure);
+                throw repairFailure;
+            }
+        }
+    }
+
+    private String buildRepairMessage(String response) {
+        return """
+                下面是一次 AI 分析的原始返回，但它不是可直接解析的完整 JSON。
+                请从中保留有效分析内容，修复截断、Markdown 包裹、解释文本、字段格式问题，重新输出完整 JSON。
+                只能输出 JSON 对象，不能输出 Markdown、代码围栏或任何解释文本。
+                如果原始结果没有有效内容，仍需返回 {\"criteria\":[],\"testcases\":[],\"traceLinks\":[],\"findings\":[]}。
+
+                原始返回：
+                """ + value(response);
     }
 
     private AiVerificationResult parse(String baselineId, String response) {
         try {
-            JsonNode root = UtilJson.getObjectMapper().readTree(stripFence(response));
-            List<AcceptanceCriterion> criteria = parseCriteria(baselineId, root.path("criteria"));
+            JsonNode root = normalizeResponseRoot(UtilJson.getObjectMapper().readTree(extractJsonObject(response)));
+            List<AcceptanceCriterion> criteria = parseCriteria(baselineId, firstArray(root, "criteria", "acceptanceCriteria", "acceptance_criteria", "acs"));
             if (criteria.isEmpty()) {
                 throw new IllegalArgumentException("AI分析结果缺少验收标准");
             }
-            List<TestcaseProjection> testcases = parseTestcases(baselineId, root.path("testcases"));
+            List<TestcaseProjection> testcases = parseTestcases(baselineId, firstArray(root, "testcases", "testCases", "test_cases", "cases"));
             Map<String, String> acIdByKey = new LinkedHashMap<>();
             for (AcceptanceCriterion criterion : criteria) {
                 acIdByKey.put(normalKey(criterion.acKey()), criterion.id());
@@ -144,12 +179,18 @@ public class VerificationAiOrchestrator {
                 testcaseIdByKey.put(normalKey(testcase.externalKey()), testcase.id());
                 testcaseIdByKey.put(normalKey(testcase.title()), testcase.id());
             }
-            List<TraceLink> traceLinks = parseTraceLinks(baselineId, root.path("traceLinks"), acIdByKey, testcaseIdByKey);
-            List<Finding> findings = parseFindings(baselineId, root.path("findings"), acIdByKey);
+            List<TraceLink> traceLinks = parseTraceLinks(baselineId,
+                    firstArray(root, "traceLinks", "trace_links", "links", "traceability"), acIdByKey, testcaseIdByKey);
+            List<Finding> findings = parseFindings(baselineId,
+                    firstArray(root, "findings", "issues", "problems", "risks"), acIdByKey);
+            findings = ensureFindings(baselineId, criteria, traceLinks, findings);
             return new AiVerificationResult(criteria, testcases, traceLinks, findings);
         } catch (RuntimeException e) {
-            throw e;
+            if (e instanceof IllegalArgumentException) throw e;
+            logger.warn("无法解析 AI 需求验证结果: {}, 原因: {}", responseSummary(response), e.toString());
+            throw new IllegalStateException("AI分析返回格式不合法，请重试或检查模型配置", e);
         } catch (Exception e) {
+            logger.warn("无法解析 AI 需求验证结果: {}, 原因: {}", responseSummary(response), e.toString());
             throw new IllegalStateException("AI分析返回格式不合法，请重试或检查模型配置", e);
         }
     }
@@ -159,16 +200,16 @@ public class VerificationAiOrchestrator {
         List<AcceptanceCriterion> result = new ArrayList<>();
         int index = 1;
         for (JsonNode item : node) {
-            String content = text(item, "content");
+            String content = text(item, "content", "description", "text", "acceptanceCriterion");
             if (!StringUtils.hasText(content)) continue;
-            String acKey = textOrDefault(item, "acKey", "AC-" + index);
+            String acKey = textOrDefault(item, "AC-" + index, "acKey", "acId", "key", "id");
             result.add(new AcceptanceCriterion(UUID.randomUUID().toString(), baselineId,
-                    textOrDefault(item, "requirementKey", "REQ-" + index),
+                    textOrDefault(item, "REQ-" + index, "requirementKey", "requirementId", "requirementRef", "reqKey"),
                     acKey,
-                    truncate(textOrDefault(item, "title", acKey), 512),
+                    truncate(textOrDefault(item, acKey, "title", "name"), 512),
                     truncate(content, 4000),
-                    truncate(text(item, "sourceLocator"), 512),
-                    normalizePriority(textOrDefault(item, "priority", "MEDIUM")),
+                    truncate(text(item, "sourceLocator", "locator", "source"), 512),
+                    normalizePriority(textOrDefault(item, "MEDIUM", "priority")),
                     !item.has("testable") || item.path("testable").asBoolean(true),
                     item.path("ambiguity").asBoolean(false),
                     confidence(item.path("confidence").asDouble(0.75))));
@@ -182,20 +223,20 @@ public class VerificationAiOrchestrator {
         List<TestcaseProjection> result = new ArrayList<>();
         int index = 1;
         for (JsonNode item : node) {
-            String title = text(item, "title");
-            String steps = text(item, "steps");
-            String expected = text(item, "expected");
+            String title = text(item, "title", "name");
+            String steps = text(item, "steps", "step", "actions");
+            String expected = text(item, "expected", "expectation", "expectedResult");
             if (!StringUtils.hasText(title) && !StringUtils.hasText(steps) && !StringUtils.hasText(expected)) continue;
-            String externalKey = textOrDefault(item, "externalKey", "TC-" + index);
+            String externalKey = textOrDefault(item, "TC-" + index, "externalKey", "caseKey", "testcaseKey", "id", "key");
             result.add(new TestcaseProjection(UUID.randomUUID().toString(), baselineId,
                     truncate(externalKey, 128),
                     truncate(StringUtils.hasText(title) ? title : externalKey, 512),
-                    truncate(text(item, "preconditions"), 2000),
+                    truncate(text(item, "preconditions", "precondition"), 2000),
                     truncate(steps, 4000),
-                    truncate(text(item, "testData"), 2000),
+                    truncate(text(item, "testData", "data"), 2000),
                     truncate(expected, 4000),
-                    truncate(text(item, "requirementRefs"), 1000),
-                    truncate(text(item, "sourceLocator"), 512)));
+                    truncate(text(item, "requirementRefs", "requirementRef", "requirementKey"), 1000),
+                    truncate(text(item, "sourceLocator", "locator", "source"), 512)));
             index++;
         }
         return result;
@@ -206,20 +247,20 @@ public class VerificationAiOrchestrator {
         if (!node.isArray()) return List.of();
         List<TraceLink> result = new ArrayList<>();
         for (JsonNode item : node) {
-            String sourceId = acIdByKey.get(normalKey(text(item, "sourceKey")));
+            String sourceId = acIdByKey.get(normalKey(text(item, "sourceKey", "acKey", "criterionKey", "from")));
             if (!StringUtils.hasText(sourceId)) continue;
-            String targetType = normalizeTargetType(textOrDefault(item, "targetType", "TESTCASE"));
-            String targetKey = text(item, "targetKey");
+            String targetType = normalizeTargetType(textOrDefault(item, "TESTCASE", "targetType", "type"));
+            String targetKey = text(item, "targetKey", "targetId", "target", "to");
             String targetId = "TESTCASE".equals(targetType)
                     ? testcaseIdByKey.getOrDefault(normalKey(targetKey), targetKey)
                     : targetKey;
             if (!StringUtils.hasText(targetId)) continue;
             result.add(new TraceLink(UUID.randomUUID().toString(), baselineId, "AC", sourceId,
                     targetType, truncate(targetId, 512),
-                    normalizeRelationType(textOrDefault(item, "relationType", "VERIFIED_BY")),
+                    normalizeRelationType(textOrDefault(item, "VERIFIED_BY", "relationType", "relation")),
                     "AI", confidence(item.path("confidence").asDouble(0.70)),
-                    enumValue(EvidenceLevel.class, text(item, "evidenceLevel"), EvidenceLevel.E1),
-                    enumValue(ReviewStatus.class, text(item, "reviewStatus"), ReviewStatus.PENDING),
+                    enumValue(EvidenceLevel.class, text(item, "evidenceLevel", "level"), EvidenceLevel.E1),
+                    enumValue(ReviewStatus.class, text(item, "reviewStatus", "status"), ReviewStatus.PENDING),
                     objectMap(item.path("evidence"))));
         }
         return result;
@@ -229,22 +270,55 @@ public class VerificationAiOrchestrator {
         if (!node.isArray()) return List.of();
         List<Finding> result = new ArrayList<>();
         for (JsonNode item : node) {
-            String title = text(item, "title");
-            String description = text(item, "description");
+            String title = text(item, "title", "name");
+            String description = text(item, "description", "detail", "summary");
             if (!StringUtils.hasText(title) && !StringUtils.hasText(description)) continue;
             result.add(new Finding(UUID.randomUUID().toString(), baselineId,
-                    acIdByKey.get(normalKey(text(item, "acKey"))),
-                    truncate(textOrDefault(item, "findingType", "OTHER").toUpperCase(Locale.ROOT), 64),
-                    enumValue(Perspective.class, text(item, "perspective"), Perspective.CROSS),
+                    acIdByKey.get(normalKey(text(item, "acKey", "sourceKey", "criterionKey"))),
+                    truncate(textOrDefault(item, "OTHER", "findingType", "type").toUpperCase(Locale.ROOT), 64),
+                    normalizePerspective(text(item, "perspective")),
                     enumValue(Severity.class, text(item, "severity"), Severity.MEDIUM),
-                    truncate(StringUtils.hasText(title) ? title : textOrDefault(item, "findingType", "AI分析问题"), 512),
+                    truncate(StringUtils.hasText(title) ? title : textOrDefault(item, "AI分析问题", "findingType", "type"), 512),
                     truncate(description, 4000),
-                    truncate(text(item, "suggestion"), 4000),
+                    truncate(text(item, "suggestion", "recommendation"), 4000),
                     confidence(item.path("confidence").asDouble(0.70)),
-                    enumValue(EvidenceLevel.class, text(item, "evidenceLevel"), EvidenceLevel.E1),
-                    enumValue(Verdict.class, text(item, "verdict"), Verdict.PARTIAL),
+                    enumValue(EvidenceLevel.class, text(item, "evidenceLevel", "level"), EvidenceLevel.E1),
+                    enumValue(Verdict.class, text(item, "verdict", "conclusion"), Verdict.PARTIAL),
                     ReviewStatus.PENDING,
                     objectList(item.path("evidence")), null, null, null));
+        }
+        return result;
+    }
+
+    private List<Finding> ensureFindings(String baselineId, List<AcceptanceCriterion> criteria,
+                                         List<TraceLink> traceLinks, List<Finding> findings) {
+        List<Finding> result = new ArrayList<>(findings);
+        for (AcceptanceCriterion criterion : criteria) {
+            if (result.stream().anyMatch(finding -> criterion.id().equals(finding.acId()))) continue;
+            boolean hasTestcase = traceLinks.stream()
+                    .anyMatch(link -> criterion.id().equals(link.sourceId()) && "TESTCASE".equals(link.targetType()));
+            boolean hasImplementation = traceLinks.stream()
+                    .anyMatch(link -> criterion.id().equals(link.sourceId()) && "SOURCE_SYMBOL".equals(link.targetType()));
+            boolean hasExecutionOrCoverage = traceLinks.stream()
+                    .anyMatch(link -> criterion.id().equals(link.sourceId())
+                            && ("EXECUTION".equals(link.targetType()) || "COVERAGE".equals(link.targetType())));
+            Verdict verdict = hasTestcase && hasImplementation && hasExecutionOrCoverage
+                    ? Verdict.SATISFIED
+                    : hasTestcase || hasImplementation ? Verdict.PARTIAL : Verdict.NOT_VERIFIABLE;
+            Severity severity = verdict == Verdict.SATISFIED ? Severity.INFO : Severity.MEDIUM;
+            EvidenceLevel level = hasExecutionOrCoverage ? EvidenceLevel.E3
+                    : hasImplementation ? EvidenceLevel.E2 : hasTestcase ? EvidenceLevel.E1 : EvidenceLevel.E0;
+            String type = verdict == Verdict.SATISFIED ? "SATISFIED_SUMMARY" : "MISSING_EVIDENCE";
+            String title = verdict == Verdict.SATISFIED ? "验收标准证据完整" : "验收标准缺少完整证据";
+            String description = verdict == Verdict.SATISFIED
+                    ? "AI 返回了追溯证据，平台自动补充满足结论。"
+                    : "AI 未返回该验收标准的问题结论，平台根据现有追溯证据自动标记为证据不足。";
+            Perspective perspective = verdict == Verdict.SATISFIED ? Perspective.CROSS
+                    : !hasTestcase ? Perspective.TEST
+                    : !hasImplementation ? Perspective.DEVELOPMENT : Perspective.CROSS;
+            result.add(new Finding(UUID.randomUUID().toString(), baselineId, criterion.id(), type, perspective,
+                    severity, title, description, "补充测试用例、源码、执行或覆盖率证据后重新分析。",
+                    0.55, level, verdict, ReviewStatus.PENDING, List.of(), null, null, null));
         }
         return result;
     }
@@ -311,16 +385,96 @@ public class VerificationAiOrchestrator {
         return result;
     }
 
-    private String stripFence(String value) {
-        String trimmed = value.trim();
+    private JsonNode firstArray(JsonNode root, String... fields) {
+        if (root.isArray()) return root;
+        for (String field : fields) {
+            JsonNode value = root.path(field);
+            if (value.isArray()) return value;
+        }
+        return MissingNode.getInstance();
+    }
+
+    private String extractJsonObject(String value) {
+        String trimmed = stripThinking(value).trim();
         if (trimmed.startsWith("```")) {
             int firstLine = trimmed.indexOf('\n');
             int end = trimmed.lastIndexOf("```");
             if (firstLine > 0 && end > firstLine) return trimmed.substring(firstLine + 1, end).trim();
         }
         int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        return start >= 0 && end > start ? trimmed.substring(start, end + 1) : trimmed;
+        if (start < 0) return trimmed;
+        int fallbackEnd = -1;
+        for (int candidateStart = start; candidateStart >= 0 && candidateStart < trimmed.length();
+             candidateStart = trimmed.indexOf('{', candidateStart + 1)) {
+            int candidateEnd = matchingObjectEnd(trimmed, candidateStart);
+            if (candidateEnd <= candidateStart) continue;
+            if (fallbackEnd < 0) fallbackEnd = candidateEnd;
+            String candidate = trimmed.substring(candidateStart, candidateEnd + 1);
+            if (candidate.matches("(?s).*\\\"(criteria|acceptanceCriteria|acceptance_criteria|acs)\\\"\\s*:.*")) {
+                return candidate;
+            }
+        }
+        return fallbackEnd > start ? trimmed.substring(start, fallbackEnd + 1) : trimmed;
+    }
+
+    private String stripThinking(String value) {
+        String result = value(value);
+        int end = result.lastIndexOf("</think>");
+        if (end >= 0) return result.substring(end + "</think>".length());
+        int start = result.indexOf("<think>");
+        return start >= 0 ? result.substring(start + "<think>".length()) : result;
+    }
+
+    private int matchingObjectEnd(String value, int start) {
+        boolean quoted = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int index = start; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (quoted) {
+                if (escaped) escaped = false;
+                else if (current == '\\') escaped = true;
+                else if (current == '"') quoted = false;
+                continue;
+            }
+            if (current == '"') quoted = true;
+            else if (current == '{') depth++;
+            else if (current == '}' && --depth == 0) return index;
+        }
+        return -1;
+    }
+
+    private JsonNode normalizeResponseRoot(JsonNode root) throws Exception {
+        JsonNode current = root;
+        for (int depth = 0; depth < 4; depth++) {
+            if (current.isTextual()) {
+                String embedded = extractJsonObject(current.asText());
+                current = UtilJson.getObjectMapper().readTree(embedded);
+                continue;
+            }
+            if (!current.isObject()) return current;
+            if (hasAnalysisArrays(current)) return current;
+            JsonNode nested = firstObject(current, "result", "data", "output", "analysis", "payload", "content", "response");
+            if (nested == null) return current;
+            current = nested;
+        }
+        return current;
+    }
+
+    private boolean hasAnalysisArrays(JsonNode node) {
+        return firstArray(node, "criteria", "acceptanceCriteria", "acceptance_criteria", "acs").isArray();
+    }
+
+    private JsonNode firstObject(JsonNode root, String... fields) {
+        for (String field : fields) {
+            JsonNode value = root.path(field);
+            if (value.isObject() || value.isTextual() || value.isArray()) return value;
+        }
+        return null;
+    }
+
+    private String responseSummary(String response) {
+        return "回复长度=" + value(response).length();
     }
 
     private <T extends Enum<T>> T enumValue(Class<T> type, String value, T defaultValue) {
@@ -338,6 +492,16 @@ public class VerificationAiOrchestrator {
             case "CRITICAL", "P0", "P1", "HIGH" -> "HIGH";
             case "LOW", "P3", "P4" -> "LOW";
             default -> "MEDIUM";
+        };
+    }
+
+    private Perspective normalizePerspective(String value) {
+        String normalized = value(value).trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "PRODUCT", "PM", "PRODUCT_MANAGER", "产品", "产品视角" -> Perspective.PRODUCT;
+            case "TEST", "QA", "TESTING", "测试", "测试视角" -> Perspective.TEST;
+            case "DEVELOPMENT", "DEV", "DEVELOPER", "开发", "开发视角" -> Perspective.DEVELOPMENT;
+            default -> Perspective.CROSS;
         };
     }
 
@@ -365,14 +529,18 @@ public class VerificationAiOrchestrator {
         return Math.max(0, Math.min(1, value));
     }
 
-    private String text(JsonNode item, String field) {
-        JsonNode value = item.path(field);
-        if (value.isMissingNode() || value.isNull()) return "";
-        return value.isTextual() ? value.asText().trim() : value.toString();
+    private String text(JsonNode item, String... fields) {
+        for (String field : fields) {
+            JsonNode value = item.path(field);
+            if (value.isMissingNode() || value.isNull()) continue;
+            String text = value.isTextual() ? value.asText().trim() : value.toString();
+            if (StringUtils.hasText(text)) return text;
+        }
+        return "";
     }
 
-    private String textOrDefault(JsonNode item, String field, String defaultValue) {
-        String value = text(item, field);
+    private String textOrDefault(JsonNode item, String defaultValue, String... fields) {
+        String value = text(item, fields);
         return StringUtils.hasText(value) ? value : defaultValue;
     }
 
