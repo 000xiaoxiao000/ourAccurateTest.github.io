@@ -3,7 +3,7 @@ package com.oAT.web.config;
 import com.oAT.web.control.LoginInterceptor;
 import com.oAT.web.control.ProjectInterceptor;
 import com.oAT.web.service.ResourceService;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.jspecify.annotations.NonNull;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -15,13 +15,20 @@ import java.io.File;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    @Autowired
-    ProjectInterceptor projectInterceptor;
-    LoginInterceptor loginInterceptor;
-    @Autowired
-    ResourceService resourceService;
-    @Autowired
-    FrontendProperties frontendProperties;
+    private final ProjectInterceptor projectInterceptor;
+    private final LoginInterceptor loginInterceptor;
+    private final ResourceService resourceService;
+    private final FrontendProperties frontendProperties;
+
+    public WebConfig(ProjectInterceptor projectInterceptor,
+                     LoginInterceptor loginInterceptor,
+                     ResourceService resourceService,
+                     FrontendProperties frontendProperties) {
+        this.projectInterceptor = projectInterceptor;
+        this.loginInterceptor = loginInterceptor;
+        this.resourceService = resourceService;
+        this.frontendProperties = frontendProperties;
+    }
 
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
@@ -51,7 +58,7 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
+    public void addResourceHandlers(@NonNull ResourceHandlerRegistry registry) {
         File resourceRoot = new File(resourceService.getCacheRoot());
         if (!resourceRoot.exists()) {
             resourceRoot.mkdirs();
