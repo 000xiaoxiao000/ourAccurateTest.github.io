@@ -420,7 +420,7 @@
         <section v-else class="evidence-panel">
           <div class="list-toolbar">
             <input v-model.trim="evidenceSearch" type="search" placeholder="搜索证据记录、状态、连接器或内容" />
-            <span>共 {{ filteredWriteBacks.length }} 条回写记录</span>
+            <span>共 {{ filteredEvidenceRecords.length }} 条证据记录</span>
           </div>
           <article>
             <strong>输入新鲜度</strong>
@@ -434,17 +434,18 @@
               <strong class="with-help" :data-help="helpText.conclusionScope" tabindex="0">结论口径</strong>
               <span>没有测试执行或覆盖率证据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
           </article>
-          <article v-for="action in pagedWriteBacks" :key="action.id">
+          <article v-for="record in pagedEvidenceRecords" :key="record.id" class="evidence-record">
             <div class="evidence-heading">
-              <strong>AI 回写记录：{{ writeBackStatusText(action.status) }}</strong>
-              <button type="button" class="ghost-button" @click="copyWriteBack(action.message || '')">复制内容</button>
+              <strong>{{ record.title }}</strong>
+              <button v-if="record.copyText" type="button" class="ghost-button" @click="copyWriteBack(record.copyText)">复制内容</button>
             </div>
-            <span>{{ action.connectorType }} · {{ formatTime(action.createTime) }}</span>
-            <a v-if="action.externalUrl" :href="action.externalUrl" target="_blank" rel="noreferrer">{{ action.externalUrl }}</a>
-            <pre v-if="action.message" class="writeback-message">{{ action.message }}</pre>
+            <span>{{ record.meta }}</span>
+            <p v-if="record.summary">{{ record.summary }}</p>
+            <a v-if="record.url" :href="record.url" target="_blank" rel="noreferrer">{{ record.url }}</a>
+            <pre v-if="record.detail" class="writeback-message">{{ record.detail }}</pre>
           </article>
-          <div v-if="!filteredWriteBacks.length" class="empty-state compact">没有匹配的证据记录。</div>
-          <PaginationControls v-if="filteredWriteBacks.length" :page="evidencePage" :page-count="evidencePageCount" :total="filteredWriteBacks.length" @update:page="evidencePage = $event" />
+          <div v-if="!filteredEvidenceRecords.length" class="empty-state compact">没有匹配的证据记录。</div>
+          <PaginationControls v-if="filteredEvidenceRecords.length" :page="evidencePage" :page-count="evidencePageCount" :total="filteredEvidenceRecords.length" @update:page="evidencePage = $event" />
         </section>
       </template>
     </section>
@@ -491,6 +492,16 @@ import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
 
 type WorkspaceKey = 'library' | 'baseline' | 'result'
+type EvidenceRecord = {
+  id: string
+  title: string
+  meta: string
+  summary: string
+  detail?: string
+  url?: string
+  copyText?: string
+  searchable: string
+}
 
 const route = useRoute()
 const toast = useToast()
@@ -608,19 +619,96 @@ const filteredMatrix = computed(() => {
     || evidenceLevelText(row.evidenceLevel).toLowerCase().includes(query))
 })
 
-const filteredWriteBacks = computed(() => {
+const evidenceRecords = computed<EvidenceRecord[]>(() => {
+  const current = detail.value
+  if (!current) return []
+  const criteriaById = new Map(current.criteria.map((item) => [item.id, item]))
+  const testcasesById = new Map(current.testcases.map((item) => [item.id, item]))
+  const records: EvidenceRecord[] = []
+
+  current.traceLinks.forEach((link) => {
+    const criterion = criteriaById.get(link.sourceId)
+    const target = testcasesById.get(link.targetId)
+    const evidence = link.evidence || {}
+    const reason = stringValue(evidence.reason) || stringValue(evidence.summary) || stringValue(evidence.value)
+    const locator = stringValue(evidence.locator)
+    const targetText = target ? `${target.externalKey} ${target.title}` : link.targetId
+    const title = `${traceTargetText(link.targetType)}：${criterion?.acKey || '验收标准'} -> ${targetText}`
+    const meta = [
+      evidenceLevelText(link.evidenceLevel),
+      reviewStatusText(link.reviewStatus),
+      `置信度 ${Math.round((link.confidence || 0) * 100)}%`,
+      link.generationMethod,
+    ].filter(Boolean).join(' · ')
+    const summary = reason || locator || criterion?.content || ''
+    records.push({
+      id: `trace-${link.id}`,
+      title,
+      meta,
+      summary,
+      detail: locator && locator !== summary ? locator : undefined,
+      searchable: [title, meta, summary, locator, criterion?.content].filter(Boolean).join(' '),
+    })
+  })
+
+  current.findings.forEach((finding) => {
+    const criterion = finding.acId ? criteriaById.get(finding.acId) : undefined
+    const evidenceItems = finding.evidence?.length ? finding.evidence : []
+    evidenceItems.forEach((item, index) => {
+      const type = stringValue(item.type) || 'AI 发现证据'
+      const evidenceId = stringValue(item.id)
+      const locator = stringValue(item.locator)
+      const summary = stringValue(item.summary) || finding.description
+      const title = `${finding.title} · ${type}${evidenceId ? ` ${evidenceId}` : ''}`
+      const meta = [
+        perspectiveText(finding.perspective),
+        severityText(finding.severity),
+        evidenceLevelText(finding.evidenceLevel),
+        reviewStatusText(finding.reviewStatus),
+        criterion?.acKey,
+      ].filter(Boolean).join(' · ')
+      records.push({
+        id: `finding-${finding.id}-${index}`,
+        title,
+        meta,
+        summary,
+        detail: locator && locator !== summary ? locator : undefined,
+        searchable: [title, meta, summary, locator, finding.suggestion, criterion?.content].filter(Boolean).join(' '),
+      })
+    })
+  })
+
+  writeBacks.value.forEach((action) => {
+    const title = `AI 回写记录：${writeBackStatusText(action.status)}`
+    const meta = `${action.connectorType} · ${formatTime(action.createTime)}`
+    const summary = action.message || action.externalUrl || ''
+    records.push({
+      id: `writeback-${action.id}`,
+      title,
+      meta,
+      summary,
+      detail: action.message,
+      url: action.externalUrl,
+      copyText: action.message,
+      searchable: [title, meta, action.message, action.externalUrl].filter(Boolean).join(' '),
+    })
+  })
+
+  return records
+})
+
+const filteredEvidenceRecords = computed(() => {
   const query = evidenceSearch.value.toLowerCase()
-  if (!query) return writeBacks.value
-  return writeBacks.value.filter((action) => [action.connectorType, action.status, action.message, action.externalUrl]
-    .filter(Boolean).join(' ').toLowerCase().includes(query))
+  if (!query) return evidenceRecords.value
+  return evidenceRecords.value.filter((record) => record.searchable.toLowerCase().includes(query))
 })
 
 const matrixPageCount = computed(() => Math.max(1, Math.ceil(filteredMatrix.value.length / pageSize)))
 const findingPageCount = computed(() => Math.max(1, Math.ceil(filteredFindings.value.length / pageSize)))
-const evidencePageCount = computed(() => Math.max(1, Math.ceil(filteredWriteBacks.value.length / pageSize)))
+const evidencePageCount = computed(() => Math.max(1, Math.ceil(filteredEvidenceRecords.value.length / pageSize)))
 const pagedMatrix = computed(() => pageSlice(filteredMatrix.value, matrixPage.value))
 const pagedFindings = computed(() => pageSlice(filteredFindings.value, findingPage.value))
-const pagedWriteBacks = computed(() => pageSlice(filteredWriteBacks.value, evidencePage.value))
+const pagedEvidenceRecords = computed(() => pageSlice(filteredEvidenceRecords.value, evidencePage.value))
 
 function pageSlice<T>(items: T[], page: number) {
   const start = (Math.max(1, page) - 1) * pageSize
@@ -1107,6 +1195,17 @@ function writeBackStatusText(status: string) {
   if (status === 'AI_GENERATED') return 'AI 已生成'
   if (status === 'RECORDED') return '已记录'
   return status || '-'
+}
+
+function stringValue(value: unknown) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
 }
 
 async function confirmTrace(id: string) {
@@ -1923,7 +2022,7 @@ button,
 
 .finding-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--oat-border);
@@ -1947,9 +2046,23 @@ button,
   font-size: 16px;
 }
 
+.finding-main {
+  min-width: 0;
+}
+
+.finding-main p,
+.finding-main small {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
 .finding-actions {
-  justify-content: flex-end;
-  max-width: 220px;
+  justify-content: flex-start;
+}
+
+.finding-actions button {
+  flex: 0 0 auto;
 }
 
 .writeback-form {

@@ -1,14 +1,19 @@
 package com.oAT.web.verification;
 
 import com.oAT.ai.service.LLMService;
+import com.oAT.web.esDao.entity.StaticSourceClassInfo;
+import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.esDao.entity.StaticSourceMethodInfo;
 import com.oAT.web.verification.VerificationAiOrchestrator.AiVerificationInput;
 import com.oAT.web.verification.VerificationAiOrchestrator.AiVerificationResult;
 import com.oAT.web.verification.model.VerificationModels.EvidenceLevel;
+import com.oAT.web.verification.model.VerificationModels.Perspective;
 import com.oAT.web.verification.model.VerificationModels.Severity;
 import com.oAT.web.verification.model.VerificationModels.Verdict;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -77,11 +82,13 @@ class VerificationAiOrchestratorTest {
         assertThat(result.traceLinks().get(0).sourceId()).isEqualTo(result.criteria().get(0).id());
         assertThat(result.traceLinks().get(0).targetId()).isEqualTo(result.testcases().get(0).id());
         assertThat(result.traceLinks().get(0).evidenceLevel()).isEqualTo(EvidenceLevel.E1);
-        assertThat(result.findings()).hasSize(1);
+        assertThat(result.findings()).hasSize(3);
         assertThat(result.findings().get(0).severity()).isEqualTo(Severity.HIGH);
-        assertThat(result.findings().get(0).perspective()).isEqualTo(com.oAT.web.verification.model.VerificationModels.Perspective.DEVELOPMENT);
+        assertThat(result.findings().get(0).perspective()).isEqualTo(Perspective.DEVELOPMENT);
         assertThat(result.findings().get(0).verdict()).isEqualTo(Verdict.NOT_VERIFIABLE);
         assertThat(result.findings().get(0).acId()).isEqualTo(result.criteria().get(0).id());
+        assertThat(result.findings()).extracting("perspective")
+                .contains(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
     }
 
     @Test
@@ -124,9 +131,12 @@ class VerificationAiOrchestratorTest {
         assertThat(result.testcases()).hasSize(1);
         assertThat(result.traceLinks()).hasSize(1);
         assertThat(result.traceLinks().get(0).targetId()).isEqualTo(result.testcases().get(0).id());
-        assertThat(result.findings()).hasSize(1);
-        assertThat(result.findings().get(0).findingType()).isEqualTo("MISSING_EVIDENCE");
-        assertThat(result.findings().get(0).verdict()).isEqualTo(Verdict.PARTIAL);
+        assertThat(result.findings()).hasSize(3);
+        assertThat(result.findings()).extracting("perspective")
+                .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
+        assertThat(result.findings()).extracting("findingType")
+                .contains("REQUIREMENT_CONFIRMATION", "MISSING_RUNTIME_EVIDENCE", "MISSING_IMPLEMENTATION");
+        assertThat(result.findings()).allMatch(finding -> finding.verdict() == Verdict.PARTIAL);
     }
 
     @Test
@@ -148,7 +158,9 @@ class VerificationAiOrchestratorTest {
         assertThat(result.criteria()).hasSize(1);
         assertThat(result.testcases()).hasSize(1);
         assertThat(result.traceLinks()).hasSize(1);
-        assertThat(result.findings()).hasSize(1);
+        assertThat(result.findings()).hasSize(3);
+        assertThat(result.findings()).extracting("perspective")
+                .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
     }
 
     @Test
@@ -166,8 +178,27 @@ class VerificationAiOrchestratorTest {
                 "用户可以登录", "", "", "", "", "", List.of()));
 
         assertThat(result.criteria()).hasSize(1);
-        assertThat(result.findings()).hasSize(1);
+        assertThat(result.findings()).hasSize(3);
+        assertThat(result.findings()).extracting("perspective")
+                .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
         org.mockito.Mockito.verify(llmService, times(2)).chat(anyString(), anyString());
+    }
+
+    @Test
+    void recoversCompletedItemsWhenProviderCutsOffClosingJsonMarkers() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn(
+                "{\"criteria\":[{\"acKey\":\"AC-1\",\"content\":\"用户可以登录\"}]" );
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", "用户可以登录", "", "", "", "", "", List.of()));
+
+        assertThat(result.criteria()).hasSize(1);
+        assertThat(result.findings()).hasSize(3);
+        assertThat(result.findings()).extracting("perspective")
+                .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
+        org.mockito.Mockito.verify(llmService, times(1)).chat(anyString(), anyString());
     }
 
     @Test
@@ -183,5 +214,150 @@ class VerificationAiOrchestratorTest {
                 new AiVerificationInput("base-1", "用户可以登录", "", "", "", "", "", List.of()));
 
         assertThat(result.criteria()).hasSize(1);
+    }
+
+    @Test
+    void fillsMissingCriteriaAndTestcasesFromMarkdownTables() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("{\"criteria\":[]}");
+
+        String requirements = """
+                | 编号 | 功能 | 接口 | 需求描述 |
+                | --- | --- | --- | --- |
+                | U-001 | 获取用户列表 | POST /user/UserList | 根据 num1 返回用户列表 |
+                | W3-001 | 数字参数分支 | GET /web3/testWeb3 | 执行比较和分支逻辑 |
+                """;
+        String testcases = """
+                | 用例编号 | 接口 | 前置条件 | 输入 | 预期结果 | 优先级 |
+                | --- | --- | --- | --- | --- | --- |
+                | TC-U-001 | 用户列表正常 | 服务已启动 | body: 2 | HTTP 200，返回数组 | P0 |
+                | TC-W3-001 | 分支验证 | 服务已启动 | num1=2 | HTTP 200 | P1 |
+                """;
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", requirements, testcases, "", "", "", "", List.of()));
+
+        assertThat(result.criteria()).hasSize(2);
+        assertThat(result.testcases()).hasSize(2);
+        assertThat(result.traceLinks()).hasSize(2);
+    }
+
+    @Test
+    void extractsNumberedAcceptanceCriteriaSectionInAdditionToRequirementTables() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("{\"criteria\":[]}");
+
+        String requirements = """
+                | 编号 | 功能 | 接口 | 需求描述 |
+                | --- | --- | --- | --- |
+                | U-001 | 获取用户列表 | POST /user/UserList | 根据 num1 返回用户列表 |
+
+                ## 8. 验收标准
+
+                1. Maven 后端模块可编译，核心接口在本地 18083 端口可访问。
+                2. 用户、明细、Web3 演示接口按接口定义返回预期状态码和响应体。
+                """;
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", requirements, "", "", "", "", "", List.of()));
+
+        assertThat(result.criteria()).hasSize(3);
+        assertThat(result.criteria()).extracting("requirementKey").contains("U-001", "G-001", "G-002");
+    }
+
+    @Test
+    void fallsBackToDocumentExtractionWhenAiAndRepairJsonAreTruncated() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn(
+                "{\"criteria\":[",
+                "{\"criteria\":[{\"acKey\":\"AC-U-001\",\"content\":\"用户列表需要返回数组\"}");
+
+        String requirements = """
+                | 编号 | 功能 | 接口 | 需求描述 |
+                | --- | --- | --- | --- |
+                | U-001 | 获取用户列表 | POST /user/UserList | 根据 num1 返回用户列表 |
+                """;
+        String testcases = """
+                | 用例编号 | 接口 | 前置条件 | 输入 | 预期结果 | 优先级 |
+                | --- | --- | --- | --- | --- | --- |
+                | TC-U-001 | 用户列表正常 | 服务已启动 | body: 2 | HTTP 200，返回数组 | P0 |
+                """;
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", requirements, testcases, "", "", "", "", List.of()));
+
+        assertThat(result.criteria()).hasSize(1);
+        assertThat(result.criteria().get(0).requirementKey()).isEqualTo("U-001");
+        assertThat(result.testcases()).hasSize(1);
+        assertThat(result.traceLinks()).hasSize(1);
+        assertThat(result.findings()).hasSize(3);
+        assertThat(result.findings()).extracting("perspective")
+                .containsExactlyInAnyOrder(Perspective.PRODUCT, Perspective.TEST, Perspective.DEVELOPMENT);
+        org.mockito.Mockito.verify(llmService, times(1)).chat(anyString(), anyString());
+    }
+
+    @Test
+    void addsPendingSourceLinkFromStaticSourceIndexWhenAiOmitsIt() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn(
+                "{\"criteria\":[{\"acKey\":\"AC-1\",\"content\":\"GET /web3/testWeb3 执行分支验证\"}]}" );
+        StaticSourceClassInfo classInfo = new StaticSourceClassInfo();
+        classInfo.setClassName("Web3Controller");
+        StaticSourceMethodInfo methodInfo = new StaticSourceMethodInfo();
+        methodInfo.setMethodName("testWeb3");
+        classInfo.setMethodMaps(Map.of("testWeb3", methodInfo));
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", "", "", "", "", "", "", List.of(new StaticSourceInfo(classInfo))));
+
+        assertThat(result.traceLinks()).anyMatch(link -> "SOURCE_SYMBOL".equals(link.targetType())
+                && "Web3Controller#testWeb3".equals(link.targetId())
+                && link.reviewStatus() == com.oAT.web.verification.model.VerificationModels.ReviewStatus.PENDING);
+    }
+
+    @Test
+    void enrichesTraceabilityAcrossRequirementTestcaseSourceRuntimeAndDefectAssets() {
+        LLMService llmService = mock(LLMService.class);
+        when(llmService.isAvailable()).thenReturn(true);
+        when(llmService.chat(anyString(), anyString())).thenReturn("{\"criteria\":[],\"testcases\":[]}");
+
+        String requirements = """
+                | 编号 | 功能 | 接口 | 需求描述 |
+                | --- | --- | --- | --- |
+                | W3-001 | 数字参数分支验证 | GET /web3/testWeb3 | 接收 num1、num2，执行比较、差值、switch、集合遍历等逻辑 |
+                """;
+        String testcases = """
+                | 用例编号 | 接口 | 输入 | 预期结果 | 优先级 |
+                | --- | --- | --- | --- | --- |
+                | TC-W3-001 | GET /web3/testWeb3 | num1=2&num2=1 | HTTP 200 | P1 |
+                """;
+        String source = """
+                @RestController
+                @RequestMapping("/web3")
+                class Web3Controller {
+                  @GetMapping("/testWeb3")
+                  public Map<String,Object> testWeb3(Integer num1, Integer num2) { return new HashMap<>(); }
+                }
+                """;
+        String execution = "执行报告: TC-W3-001 GET /web3/testWeb3 PASS";
+        String coverage = "coverage: /web3/testWeb3 Web3Controller.testWeb3 lines covered";
+        String defect = "RISK-006 GET /web3/testWeb3 现有 WebMvc 测试与代码路径不一致";
+
+        AiVerificationResult result = new VerificationAiOrchestrator(llmService).analyze(
+                new AiVerificationInput("base-1", requirements, testcases, defect, source, execution, coverage, List.of()));
+
+        assertThat(result.criteria()).hasSize(1);
+        assertThat(result.testcases()).hasSize(1);
+        assertThat(result.traceLinks()).extracting("targetType")
+                .contains("TESTCASE", "SOURCE_SYMBOL", "EXECUTION", "COVERAGE", "DEFECT");
+        assertThat(result.findings()).anyMatch(finding -> "SATISFIED_SUMMARY".equals(finding.findingType())
+                && finding.evidenceLevel() == EvidenceLevel.E4
+                && finding.verdict() == Verdict.SATISFIED);
+        assertThat(result.findings()).noneMatch(finding -> "MISSING_TESTCASE".equals(finding.findingType()));
+        assertThat(result.findings()).noneMatch(finding -> "MISSING_RUNTIME_EVIDENCE".equals(finding.findingType()));
     }
 }

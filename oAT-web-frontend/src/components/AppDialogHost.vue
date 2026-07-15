@@ -122,6 +122,7 @@ watch(
 .dialog-main {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .dialog-main h2 {
@@ -132,10 +133,13 @@ watch(
 }
 
 .dialog-main p {
+  max-width: 100%;
   margin: 0;
   color: #64748b;
   line-height: 1.65;
+  overflow-wrap: anywhere;
   white-space: pre-line;
+  word-break: break-word;
 }
 
 .dialog-input {
@@ -155,6 +159,7 @@ watch(
 
 .dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
   margin-top: 4px;

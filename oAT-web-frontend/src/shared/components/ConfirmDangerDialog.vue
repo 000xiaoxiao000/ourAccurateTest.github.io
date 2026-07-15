@@ -76,15 +76,22 @@ defineEmits<{
   color: #172033;
 }
 
+.confirm-copy {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .confirm-copy p {
   margin: 0;
   color: #64748b;
   line-height: 1.7;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 .confirm-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
   width: 100%;
