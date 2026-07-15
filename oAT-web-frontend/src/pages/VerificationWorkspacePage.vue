@@ -285,8 +285,24 @@
 
         <section class="metrics-strip">
           <article>
-            <span class="with-help" :data-help="helpText.ac" tabindex="0">验收标准数</span>
-            <strong>{{ detail.metrics.totalCriteria }}</strong>
+            <span class="with-help" :data-help="helpText.requirementCount" tabindex="0">需求数量</span>
+            <strong>{{ analysisCounts.requirements }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :data-help="helpText.testcaseCount" tabindex="0">测试用例</span>
+            <strong>{{ analysisCounts.testcases }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :data-help="helpText.defectCount" tabindex="0">缺陷(Bug)</span>
+            <strong>{{ analysisCounts.defects }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :data-help="helpText.staticCodeCount" tabindex="0">静态代码</span>
+            <strong>{{ analysisCounts.staticCode }}</strong>
+          </article>
+          <article>
+            <span class="with-help" :data-help="helpText.dynamicCodeCount" tabindex="0">动态代码</span>
+            <strong>{{ analysisCounts.dynamicCode }}</strong>
           </article>
           <article>
             <span class="with-help" :data-help="helpText.testcaseCoverage" tabindex="0">用例覆盖</span>
@@ -319,6 +335,22 @@
         <section v-if="activeTab === 'matrix'" class="tab-content">
           <div class="list-toolbar">
             <input v-model.trim="matrixSearch" type="search" placeholder="搜索验收标准、测试用例、证据或结论" />
+            <select v-model="matrixVerdict">
+              <option value="">全部结论</option>
+              <option v-for="option in matrixVerdictOptions" :key="option" :value="option">{{ verdictText(option) }}</option>
+            </select>
+            <select v-model="matrixEvidenceLevel">
+              <option value="">全部证据等级</option>
+              <option v-for="option in evidenceLevelOptions" :key="option" :value="option">{{ evidenceLevelText(option) }}</option>
+            </select>
+            <select v-model="matrixTraceTargetType">
+              <option value="">全部证据类型</option>
+              <option v-for="option in traceTargetTypeOptions" :key="option" :value="option">{{ traceTargetText(option) }}</option>
+            </select>
+            <select v-model="matrixTraceReviewStatus">
+              <option value="">全部追溯状态</option>
+              <option v-for="option in traceReviewStatusOptions" :key="option" :value="option">{{ reviewStatusText(option) }}</option>
+            </select>
             <span>共 {{ filteredMatrix.length }} 条</span>
           </div>
           <div class="matrix-table">
@@ -360,7 +392,7 @@
 
         <section v-else-if="activeTab === 'findings'" class="finding-list">
           <div class="finding-toolbar">
-            <input v-model.trim="findingSearch" type="search" placeholder="搜索问题标题、描述、角色或严重程度" />
+            <input v-model.trim="findingSearch" type="search" placeholder="搜索问题标题、描述、类型、角色、结论或证据" />
             <select v-model="findingPerspective">
               <option value="">全部视角</option>
               <option value="PRODUCT">产品</option>
@@ -368,13 +400,37 @@
               <option value="DEVELOPMENT">开发</option>
               <option value="CROSS">交叉</option>
             </select>
+            <select v-model="findingSeverity">
+              <option value="">全部严重程度</option>
+              <option v-for="option in findingSeverityOptions" :key="option" :value="option">{{ severityText(option) }}</option>
+            </select>
+            <select v-model="findingReviewStatus">
+              <option value="">全部审核状态</option>
+              <option v-for="option in findingReviewStatusOptions" :key="option" :value="option">{{ reviewStatusText(option) }}</option>
+            </select>
+            <select v-model="findingVerdict">
+              <option value="">全部结论</option>
+              <option v-for="option in findingVerdictOptions" :key="option" :value="option">{{ verdictText(option) }}</option>
+            </select>
+            <select v-model="findingType">
+              <option value="">全部问题类型</option>
+              <option v-for="option in findingTypeOptions" :key="option" :value="option">{{ findingTypeText(option) }}</option>
+            </select>
           </div>
           <article v-for="finding in pagedFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
             <div class="finding-main">
-              <span>{{ perspectiveText(finding.perspective) }} · {{ severityText(finding.severity) }} · {{ reviewStatusText(finding.reviewStatus) }}</span>
+              <span>
+                {{ perspectiveText(finding.perspective) }} · {{ severityText(finding.severity) }} · {{ reviewStatusText(finding.reviewStatus) }}
+                · {{ verdictText(finding.verdict) }} · {{ evidenceLevelText(finding.evidenceLevel) }} · {{ findingTypeText(finding.findingType) }}
+              </span>
               <h3>{{ finding.title }}</h3>
               <p>{{ finding.description }}</p>
               <small v-if="finding.suggestion">建议：{{ finding.suggestion }}</small>
+              <div v-if="findingContextItems(finding).length" class="finding-context">
+                <span v-for="item in findingContextItems(finding)" :key="item.key">
+                  {{ item.label }}：{{ item.value }}
+                </span>
+              </div>
               <a v-if="finding.externalWorkItemUrl" :href="finding.externalWorkItemUrl" target="_blank" rel="noreferrer">外部事项</a>
             </div>
             <div class="finding-actions">
@@ -420,6 +476,24 @@
         <section v-else class="evidence-panel">
           <div class="list-toolbar">
             <input v-model.trim="evidenceSearch" type="search" placeholder="搜索证据记录、状态、连接器或内容" />
+            <select v-model="evidenceSource">
+              <option value="">全部来源</option>
+              <option value="TRACE">追溯关系</option>
+              <option value="FINDING">AI 发现证据</option>
+              <option value="WRITEBACK">AI 回写记录</option>
+            </select>
+            <select v-model="evidenceTargetType">
+              <option value="">全部证据类型</option>
+              <option v-for="option in evidenceTargetTypeOptions" :key="option" :value="option">{{ evidenceRecordTypeText(option) }}</option>
+            </select>
+            <select v-model="evidenceLevelFilter">
+              <option value="">全部证据等级</option>
+              <option v-for="option in evidenceLevelOptions" :key="option" :value="option">{{ evidenceLevelText(option) }}</option>
+            </select>
+            <select v-model="evidenceReviewStatus">
+              <option value="">全部状态</option>
+              <option v-for="option in evidenceReviewStatusOptions" :key="option" :value="option">{{ evidenceStatusText(option) }}</option>
+            </select>
             <span>共 {{ filteredEvidenceRecords.length }} 条证据记录</span>
           </div>
           <article>
@@ -478,11 +552,14 @@ import {
   type AnalysisJob,
   type AssetType,
   type BaselineDetail,
+  type EvidenceLevel,
   type MatrixRow,
   type ReviewStatus,
+  type Severity,
   type TraceLink,
   type VerificationAsset,
   type VerificationBaseline,
+  type VerificationFinding,
   type VerificationOverview,
   type Verdict,
   type WriteBackAction,
@@ -494,6 +571,10 @@ import { useProjectStore } from '@/stores/project'
 type WorkspaceKey = 'library' | 'baseline' | 'result'
 type EvidenceRecord = {
   id: string
+  source: 'TRACE' | 'FINDING' | 'WRITEBACK'
+  targetType?: string
+  evidenceLevel?: string
+  reviewStatus?: string
   title: string
   meta: string
   summary: string
@@ -520,6 +601,18 @@ const activeWorkspace = ref<WorkspaceKey>('library')
 const selectedBaselineId = ref('')
 const activeTab = ref<'matrix' | 'findings' | 'evidence'>('matrix')
 const findingPerspective = ref('')
+const findingSeverity = ref('')
+const findingReviewStatus = ref('')
+const findingVerdict = ref('')
+const findingType = ref('')
+const matrixVerdict = ref('')
+const matrixEvidenceLevel = ref('')
+const matrixTraceTargetType = ref('')
+const matrixTraceReviewStatus = ref('')
+const evidenceSource = ref('')
+const evidenceTargetType = ref('')
+const evidenceLevelFilter = ref('')
+const evidenceReviewStatus = ref('')
 const matrixSearch = ref('')
 const findingSearch = ref('')
 const evidenceSearch = ref('')
@@ -590,8 +683,21 @@ const tabs = [
   { key: 'evidence', label: '证据与口径' },
 ] as const
 
+const findingSeverityOptions: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
+const findingReviewStatusOptions: ReviewStatus[] = ['PENDING', 'CONFIRMED', 'REJECTED', 'WRITTEN_BACK', 'EXEMPTED', 'STALE']
+const findingVerdictOptions: Verdict[] = ['NOT_SATISFIED', 'AMBIGUOUS', 'NOT_VERIFIABLE', 'PARTIAL', 'STATICALLY_CONSISTENT', 'SATISFIED', 'STALE', 'EXEMPTED']
+const matrixVerdictOptions: Verdict[] = ['NOT_SATISFIED', 'AMBIGUOUS', 'NOT_VERIFIABLE', 'PARTIAL', 'STATICALLY_CONSISTENT', 'SATISFIED', 'STALE', 'EXEMPTED']
+const evidenceLevelOptions: EvidenceLevel[] = ['E0', 'E1', 'E2', 'E3', 'E4']
+const traceTargetTypeOptions = ['TESTCASE', 'SOURCE_SYMBOL', 'EXECUTION', 'COVERAGE', 'DEFECT'] as const
+const traceReviewStatusOptions: ReviewStatus[] = ['PENDING', 'CONFIRMED', 'REJECTED', 'STALE', 'EXEMPTED']
+
 const helpText = {
   ac: 'AC 是 Acceptance Criteria，指需求中的可验收标准。平台会按这些标准检查用例和代码是否覆盖。',
+  requirementCount: 'AI 从需求资料中抽取并落库的验收标准数量。',
+  testcaseCount: 'AI 从测试用例资料中抽取并落库的测试用例数量。',
+  defectCount: '资料库中已导入的缺陷/Bug 资料数量。缺陷资料会进入 AI 分析证据池。',
+  staticCodeCount: '静态代码证据数量，来自源码资料或静态源码索引匹配到的类、方法、接口。',
+  dynamicCodeCount: '动态代码证据数量，来自测试执行报告和覆盖率报告中的运行证据。',
   testcaseCoverage: '有多少验收标准找到了对应测试用例。低于 100% 说明测试用例需要补充。',
   implementationEvidence: '有多少验收标准在源码中找到了对应实现证据。找不到不一定代表没实现，但需要开发确认或补充关联。',
   executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
@@ -600,23 +706,71 @@ const helpText = {
   conclusionScope: '结论口径用于防止误判。只有静态证据时只能说“静态一致”，不能说线上一定满足需求。',
 }
 
+const analysisCounts = computed(() => {
+  const current = detail.value
+  if (!current) {
+    return { requirements: 0, testcases: 0, defects: 0, staticCode: 0, dynamicCode: 0 }
+  }
+  const staticLinks = current.traceLinks.filter((link) => link.targetType === 'SOURCE_SYMBOL')
+  const dynamicLinks = current.traceLinks.filter((link) => link.targetType === 'EXECUTION' || link.targetType === 'COVERAGE')
+  return {
+    requirements: current.criteria.length,
+    testcases: current.testcases.length,
+    defects: overview.value.defects.length,
+    staticCode: uniqueCount(staticLinks.map((link) => link.targetId || link.id)),
+    dynamicCode: uniqueCount(dynamicLinks.map((link) => `${link.targetType}:${link.targetId || link.id}`)),
+  }
+})
+
 const filteredFindings = computed(() => {
   const findings = detail.value?.findings || []
   const query = findingSearch.value.toLowerCase()
   return findings.filter((finding) => {
     const matchesPerspective = !findingPerspective.value || finding.perspective === findingPerspective.value
-    const searchable = [finding.title, finding.description, finding.suggestion, perspectiveText(finding.perspective), severityText(finding.severity), reviewStatusText(finding.reviewStatus)]
+    const matchesSeverity = !findingSeverity.value || finding.severity === findingSeverity.value
+    const matchesReviewStatus = !findingReviewStatus.value || finding.reviewStatus === findingReviewStatus.value
+    const matchesVerdict = !findingVerdict.value || finding.verdict === findingVerdict.value
+    const matchesType = !findingType.value || finding.findingType === findingType.value
+    const searchable = [
+      finding.title,
+      finding.description,
+      finding.suggestion,
+      finding.findingType,
+      findingTypeText(finding.findingType),
+      perspectiveText(finding.perspective),
+      severityText(finding.severity),
+      reviewStatusText(finding.reviewStatus),
+      verdictText(finding.verdict),
+      evidenceLevelText(finding.evidenceLevel),
+    ]
       .join(' ').toLowerCase()
-    return matchesPerspective && (!query || searchable.includes(query))
+    return matchesPerspective && matchesSeverity && matchesReviewStatus && matchesVerdict && matchesType
+      && (!query || searchable.includes(query))
   })
 })
 
+const findingTypeOptions = computed(() => Array.from(new Set((detail.value?.findings || [])
+  .map((finding) => finding.findingType)
+  .filter(Boolean))).sort())
+
 const filteredMatrix = computed(() => {
   const query = matrixSearch.value.toLowerCase()
-  if (!query) return matrix.value
-  return matrix.value.filter((row) => JSON.stringify(row).toLowerCase().includes(query)
-    || verdictText(row.verdict).toLowerCase().includes(query)
-    || evidenceLevelText(row.evidenceLevel).toLowerCase().includes(query))
+  return matrix.value.filter((row) => {
+    const links = evidenceLinks(row.criterion.id)
+    const matchesVerdict = !matrixVerdict.value || row.verdict === matrixVerdict.value
+    const matchesEvidenceLevel = !matrixEvidenceLevel.value || row.evidenceLevel === matrixEvidenceLevel.value
+      || links.some((link) => link.evidenceLevel === matrixEvidenceLevel.value)
+    const matchesTraceTargetType = !matrixTraceTargetType.value || links.some((link) => link.targetType === matrixTraceTargetType.value)
+    const matchesTraceReviewStatus = !matrixTraceReviewStatus.value || links.some((link) => link.reviewStatus === matrixTraceReviewStatus.value)
+    const searchable = [
+      JSON.stringify(row),
+      verdictText(row.verdict),
+      evidenceLevelText(row.evidenceLevel),
+      links.map((link) => `${traceTargetText(link.targetType)} ${evidenceLevelText(link.evidenceLevel)} ${reviewStatusText(link.reviewStatus)} ${link.targetId}`).join(' '),
+    ].join(' ').toLowerCase()
+    return matchesVerdict && matchesEvidenceLevel && matchesTraceTargetType && matchesTraceReviewStatus
+      && (!query || searchable.includes(query))
+  })
 })
 
 const evidenceRecords = computed<EvidenceRecord[]>(() => {
@@ -643,6 +797,10 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
     const summary = reason || locator || criterion?.content || ''
     records.push({
       id: `trace-${link.id}`,
+      source: 'TRACE',
+      targetType: link.targetType,
+      evidenceLevel: link.evidenceLevel,
+      reviewStatus: link.reviewStatus,
       title,
       meta,
       summary,
@@ -669,6 +827,10 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
       ].filter(Boolean).join(' · ')
       records.push({
         id: `finding-${finding.id}-${index}`,
+        source: 'FINDING',
+        targetType: type,
+        evidenceLevel: finding.evidenceLevel,
+        reviewStatus: finding.reviewStatus,
         title,
         meta,
         summary,
@@ -684,6 +846,8 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
     const summary = action.message || action.externalUrl || ''
     records.push({
       id: `writeback-${action.id}`,
+      source: 'WRITEBACK',
+      reviewStatus: action.status,
       title,
       meta,
       summary,
@@ -699,9 +863,22 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
 
 const filteredEvidenceRecords = computed(() => {
   const query = evidenceSearch.value.toLowerCase()
-  if (!query) return evidenceRecords.value
-  return evidenceRecords.value.filter((record) => record.searchable.toLowerCase().includes(query))
+  return evidenceRecords.value.filter((record) => {
+    const matchesSource = !evidenceSource.value || record.source === evidenceSource.value
+    const matchesTargetType = !evidenceTargetType.value || record.targetType === evidenceTargetType.value
+    const matchesEvidenceLevel = !evidenceLevelFilter.value || record.evidenceLevel === evidenceLevelFilter.value
+    const matchesReviewStatus = !evidenceReviewStatus.value || record.reviewStatus === evidenceReviewStatus.value
+    return matchesSource && matchesTargetType && matchesEvidenceLevel && matchesReviewStatus
+      && (!query || record.searchable.toLowerCase().includes(query))
+  })
 })
+
+const evidenceTargetTypeOptions = computed(() => Array.from(new Set(evidenceRecords.value
+  .map((record) => record.targetType)
+  .filter((value): value is string => Boolean(value)))).sort())
+const evidenceReviewStatusOptions = computed(() => Array.from(new Set(evidenceRecords.value
+  .map((record) => record.reviewStatus)
+  .filter((value): value is string => Boolean(value)))).sort())
 
 const matrixPageCount = computed(() => Math.max(1, Math.ceil(filteredMatrix.value.length / pageSize)))
 const findingPageCount = computed(() => Math.max(1, Math.ceil(filteredFindings.value.length / pageSize)))
@@ -715,7 +892,24 @@ function pageSlice<T>(items: T[], page: number) {
   return items.slice(start, start + pageSize)
 }
 
-watch([matrixSearch, findingSearch, evidenceSearch, findingPerspective], () => {
+watch([
+  matrixSearch,
+  matrixVerdict,
+  matrixEvidenceLevel,
+  matrixTraceTargetType,
+  matrixTraceReviewStatus,
+  findingSearch,
+  findingPerspective,
+  findingSeverity,
+  findingReviewStatus,
+  findingVerdict,
+  findingType,
+  evidenceSearch,
+  evidenceSource,
+  evidenceTargetType,
+  evidenceLevelFilter,
+  evidenceReviewStatus,
+], () => {
   matrixPage.value = 1
   findingPage.value = 1
   evidencePage.value = 1
@@ -1130,6 +1324,53 @@ function severityText(value: string) {
   return map[value] || value
 }
 
+function findingTypeText(value: string) {
+  const map: Record<string, string> = {
+    SATISFIED_SUMMARY: '满足结论',
+    MISSING_TESTCASE: '缺少测试用例',
+    WEAK_ASSERTION: '断言不足',
+    WRONG_EXPECTATION: '预期错误',
+    MISSING_IMPLEMENTATION: '缺少源码实现',
+    LOGIC_DEVIATION: '实现偏差',
+    AMBIGUOUS_REQUIREMENT: '需求不明确',
+    REQUIREMENT_CONFIRMATION: '需求口径确认',
+    TRACEABILITY_BREAK: '追溯断点',
+    MISSING_EVIDENCE: '缺少证据',
+    MISSING_RUNTIME_EVIDENCE: '缺少执行/覆盖证据',
+    ORPHAN_TESTCASE: '用例未关联',
+    ORPHAN_SOURCE: '代码未关联',
+    BUG_RISK: '缺陷风险',
+    OTHER: '其他问题',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function findingContextItems(finding: VerificationFinding) {
+  const items: Array<{ key: string; label: string; value: string }> = []
+  const criterion = finding.acId ? detail.value?.criteria.find((item) => item.id === finding.acId) : undefined
+  if (criterion) {
+    items.push({
+      key: `criterion-${criterion.id}`,
+      label: '需求',
+      value: `${criterion.requirementKey} / ${criterion.acKey} ${criterion.title || criterion.content}`,
+    })
+  }
+  ;(finding.evidence || []).forEach((item, index) => {
+    const type = stringValue(item.type)
+    const id = stringValue(item.id)
+    const locator = stringValue(item.locator)
+    const summary = stringValue(item.summary)
+    const value = [id, locator, summary].filter(Boolean).join(' · ')
+    if (!value) return
+    items.push({
+      key: `evidence-${finding.id}-${index}`,
+      label: evidenceRecordTypeText(type || 'AI 发现证据'),
+      value,
+    })
+  })
+  return items
+}
+
 async function markStale() {
   if (!selectedBaselineId.value) return
   await markVerificationBaselineStale(projectId.value, selectedBaselineId.value)
@@ -1206,6 +1447,10 @@ function stringValue(value: unknown) {
   } catch {
     return String(value)
   }
+}
+
+function uniqueCount(values: Array<string | undefined>) {
+  return new Set(values.filter((value): value is string => Boolean(value))).size
 }
 
 async function confirmTrace(id: string) {
@@ -1335,6 +1580,26 @@ function traceTargetText(value?: string) {
     DEFECT: '缺陷证据',
   }
   return value ? map[value] || value : '-'
+}
+
+function evidenceRecordTypeText(value?: string) {
+  const map: Record<string, string> = {
+    REQUIREMENT: '需求证据',
+    TESTCASE: '测试用例',
+    SOURCE: '源码证据',
+    SOURCE_SYMBOL: '源码证据',
+    EXECUTION: '执行证据',
+    COVERAGE: '覆盖率证据',
+    DEFECT: '缺陷证据',
+    WRITEBACK: 'AI 回写',
+  }
+  return value ? map[value] || traceTargetText(value) : '-'
+}
+
+function evidenceStatusText(value?: string) {
+  if (value === 'AI_GENERATED') return 'AI 已生成'
+  if (value === 'RECORDED') return '已记录'
+  return reviewStatusText(value)
 }
 
 function evidenceLevelText(value?: string) {
@@ -1916,6 +2181,12 @@ button,
   min-width: 220px;
 }
 
+.list-toolbar select,
+.finding-toolbar select {
+  flex: 0 1 150px;
+  min-width: 132px;
+}
+
 .list-toolbar > span {
   color: var(--oat-text-muted);
   font-size: 12px;
@@ -2055,6 +2326,25 @@ button,
   overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.6;
+}
+
+.finding-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.finding-context span {
+  max-width: 100%;
+  padding: 4px 8px;
+  border: 1px solid rgba(var(--oat-primary-rgb), .16);
+  border-radius: 999px;
+  background: rgba(var(--oat-primary-rgb), .05);
+  color: var(--oat-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .finding-actions {

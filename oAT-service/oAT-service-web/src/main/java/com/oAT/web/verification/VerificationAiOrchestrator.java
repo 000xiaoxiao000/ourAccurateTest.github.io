@@ -317,7 +317,7 @@ public class VerificationAiOrchestrator {
                     "DEFECT", "AFFECTED_BY", EvidenceLevel.E1, "缺陷资料");
             List<Finding> findings = parseFindings(baselineId,
                     firstArray(root, "findings", "issues", "problems", "risks"), acIdByKey);
-            findings = ensureFindings(baselineId, criteria, traceLinks, findings);
+            findings = ensureFindings(baselineId, criteria, testcases, traceLinks, findings, input.staticSources());
             return new AiVerificationResult(criteria, testcases, traceLinks, findings);
         } catch (RuntimeException e) {
             throw e;
@@ -665,7 +665,8 @@ public class VerificationAiOrchestrator {
     }
 
     private List<Finding> ensureFindings(String baselineId, List<AcceptanceCriterion> criteria,
-                                         List<TraceLink> traceLinks, List<Finding> findings) {
+                                         List<TestcaseProjection> testcases, List<TraceLink> traceLinks,
+                                         List<Finding> findings, List<StaticSourceInfo> staticSources) {
         List<Finding> result = new ArrayList<>(findings);
         for (AcceptanceCriterion criterion : criteria) {
             List<Finding> existing = result.stream()
@@ -699,8 +700,9 @@ public class VerificationAiOrchestrator {
 
             if (existing.stream().noneMatch(finding -> finding.perspective() == Perspective.PRODUCT)) {
                 result.add(autoFinding(baselineId, criterion, "REQUIREMENT_CONFIRMATION", Perspective.PRODUCT,
-                        severity, "确认验收口径和优先级",
-                        "当前验收标准尚未形成完整证据链。产品需要确认该标准是否属于本轮验收范围、验收口径是否清晰，以及是否需要拆分更具体的验收条件。",
+                        severity, criterion.acKey() + " 确认验收口径和优先级",
+                        "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
+                                + " 尚未形成完整证据链。产品需要确认该标准是否属于本轮验收范围、验收口径是否清晰，以及是否需要拆分更具体的验收条件。验收标准：" + criterion.content(),
                         "补充验收边界、业务规则、优先级和不满足时的业务影响，再重新运行分析。",
                         0.55, level, verdict));
             }
@@ -708,23 +710,88 @@ public class VerificationAiOrchestrator {
                     && existing.stream().noneMatch(finding -> finding.perspective() == Perspective.TEST)) {
                 String title = !hasTestcase ? "补充覆盖该验收标准的测试用例" : "补充测试执行或覆盖率证据";
                 String description = !hasTestcase
-                        ? "未找到可追溯到该验收标准的测试用例。测试人员需要补充用例编号、前置条件、步骤、测试数据和明确预期结果。"
-                        : "已找到静态追溯证据，但缺少测试执行结果或覆盖率记录。测试人员需要补充最近一次执行状态、报告链接或覆盖率证据。";
+                        ? "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
+                        + " 没有对应测试用例。测试人员需要补充用例编号、前置条件、步骤、测试数据和明确预期结果。验收标准：" + criterion.content()
+                        : "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
+                        + " 已有关联用例或静态证据，但缺少测试执行结果或覆盖率记录。测试人员需要补充最近一次执行状态、报告链接或覆盖率证据。验收标准：" + criterion.content();
                 String suggestion = !hasTestcase
                         ? "新增或关联测试用例，并在预期结果中写清可判断的验收条件。"
                         : "导入测试执行报告或覆盖率报告，确保记录能关联到该验收标准或对应测试用例。";
                 result.add(autoFinding(baselineId, criterion, !hasTestcase ? "MISSING_TESTCASE" : "MISSING_RUNTIME_EVIDENCE",
-                        Perspective.TEST, severity, title, description, suggestion, 0.55, level, verdict));
+                        Perspective.TEST, severity, criterion.acKey() + " " + title, description, suggestion, 0.55, level, verdict));
             }
             if (!hasImplementation && existing.stream().noneMatch(finding -> finding.perspective() == Perspective.DEVELOPMENT)) {
                 result.add(autoFinding(baselineId, criterion, "MISSING_IMPLEMENTATION", Perspective.DEVELOPMENT,
-                        severity, "关联或补充源码实现证据",
-                        "未找到可追溯到该验收标准的源码类、方法或接口实现。开发人员需要确认是否已实现，以及实现位置是否已被导入或关联。",
+                        severity, criterion.acKey() + " 关联或补充源码实现证据",
+                        "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
+                                + " 没有对应静态源码类、方法或接口实现证据。开发人员需要确认是否已实现，以及实现位置是否已被导入或关联。验收标准：" + criterion.content(),
                         "补充源码包、源码工程版本、接口/类/方法定位；如尚未实现，请创建开发任务。",
                         0.55, level, verdict));
             }
         }
+        addOrphanTestcaseFindings(baselineId, testcases, traceLinks, result);
+        addOrphanSourceFindings(baselineId, staticSources, traceLinks, result);
         return result;
+    }
+
+    private void addOrphanTestcaseFindings(String baselineId, List<TestcaseProjection> testcases,
+                                           List<TraceLink> traceLinks, List<Finding> result) {
+        for (TestcaseProjection testcase : testcases) {
+            boolean linked = traceLinks.stream().anyMatch(link -> "TESTCASE".equals(link.targetType())
+                    && (testcase.id().equals(link.targetId()) || testcase.externalKey().equals(link.targetId())));
+            if (linked) continue;
+            result.add(new Finding(UUID.randomUUID().toString(), baselineId, null, "ORPHAN_TESTCASE",
+                    Perspective.TEST, Severity.MEDIUM,
+                    testcase.externalKey() + " 测试用例未关联需求和代码证据",
+                    "测试用例 " + testcase.externalKey() + " / " + testcase.title()
+                            + " 没有追溯到任何需求验收标准，也没有形成对应源码、执行或覆盖率证据链。",
+                    "确认该测试用例覆盖哪个需求；如是无效或过期用例，请清理或标记；如有效，请补充需求编号和代码/执行证据关联。",
+                    0.60, EvidenceLevel.E1, Verdict.NOT_VERIFIABLE, ReviewStatus.PENDING,
+                    List.of(Map.of("type", "TESTCASE", "id", testcase.externalKey(),
+                            "locator", value(testcase.sourceLocator()),
+                            "summary", truncate(testcase.title() + " " + testcase.steps() + " " + testcase.expected(), 500))),
+                    null, null, null));
+        }
+    }
+
+    private void addOrphanSourceFindings(String baselineId, List<StaticSourceInfo> staticSources,
+                                         List<TraceLink> traceLinks, List<Finding> result) {
+        if (staticSources == null || staticSources.isEmpty()) return;
+        int count = 0;
+        for (StaticSourceInfo source : staticSources) {
+            if (source == null || source.getClassInfo() == null) continue;
+            String className = value(source.getClassInfo().getClassName());
+            if (!StringUtils.hasText(className)) continue;
+            if (source.getClassInfo().getMethodMaps() == null || source.getClassInfo().getMethodMaps().isEmpty()) {
+                if (isSourceSymbolLinked(traceLinks, className)) continue;
+                result.add(orphanSourceFinding(baselineId, className, className, "源码类未关联需求或测试用例"));
+                if (++count >= 20) return;
+                continue;
+            }
+            for (String methodName : source.getClassInfo().getMethodMaps().keySet()) {
+                String symbol = className + "#" + methodName;
+                if (isSourceSymbolLinked(traceLinks, symbol) || isSourceSymbolLinked(traceLinks, className)) continue;
+                result.add(orphanSourceFinding(baselineId, symbol, className, "源码方法未关联需求或测试用例"));
+                if (++count >= 20) return;
+            }
+        }
+    }
+
+    private boolean isSourceSymbolLinked(List<TraceLink> traceLinks, String symbol) {
+        String normalized = value(symbol).toLowerCase(Locale.ROOT);
+        return traceLinks.stream().anyMatch(link -> "SOURCE_SYMBOL".equals(link.targetType())
+                && value(link.targetId()).toLowerCase(Locale.ROOT).contains(normalized));
+    }
+
+    private Finding orphanSourceFinding(String baselineId, String symbol, String locator, String title) {
+        return new Finding(UUID.randomUUID().toString(), baselineId, null, "ORPHAN_SOURCE",
+                Perspective.DEVELOPMENT, Severity.MEDIUM, symbol + " " + title,
+                "代码 " + symbol + " 没有追溯到任何需求验收标准或测试用例。需要确认该代码是否属于本次分析范围，或补充需求/用例关联。",
+                "补充需求编号、测试用例编号、接口路径或覆盖率/执行记录；如该代码不在本次范围，可标记豁免。",
+                0.55, EvidenceLevel.E2, Verdict.NOT_VERIFIABLE, ReviewStatus.PENDING,
+                List.of(Map.of("type", "SOURCE", "id", symbol, "locator", locator,
+                        "summary", "未关联需求和测试用例的静态源码符号")),
+                null, null, null);
     }
 
     private Finding autoFinding(String baselineId, AcceptanceCriterion criterion, String type, Perspective perspective,
