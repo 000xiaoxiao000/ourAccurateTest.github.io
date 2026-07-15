@@ -21,7 +21,7 @@
         <section class="asset-group testcase-group"><div class="group-head"><strong>测试用例</strong><span>{{ traceStats.testcases }}</span></div><button v-for="item in detail?.testcases || []" :key="item.id" :class="['asset-card', 'testcase', { active: selectedNode?.id === testcaseNodeId(item.id) }]" @click="selectAsset(testcaseNodeId(item.id))"><b>{{ item.externalKey || item.id }}</b><strong>{{ item.title || '未命名测试用例' }}</strong><small>{{ testcaseRequirementCount(item.id) }} 个关联需求 · {{ testcaseSourceCount(item.id) }} 个关联代码</small></button></section>
       </aside>
       <main class="map-pane"><RelationBoard compact hide-lists eyebrow="Traceability Map" title="追溯关系画布" :loading="loading" :error="error" :nodes="nodes" :edges="edges" :selected-node-id="selectedNode?.id" :show-edge-labels="showRelationLabels" :highlight-related="highlightRelated" @node-select="handleNodeSelect" /></main>
-      <aside class="code-pane"><div class="pane-head"><strong>代码树</strong><span>{{ traceStats.sources }} 个符号</span></div><div v-if="!sourceNodes.length" class="empty-card">暂无关联源码数据</div><div v-else class="code-tree"><button v-for="node in sourceNodes" :key="node.id" :class="['code-item', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>{{ node.type?.includes('dynamic') ? '◌' : '●' }}</i><span><strong>{{ node.label }}</strong><small>{{ node.type?.includes('dynamic') ? '动态运行命中' : '静态源码实现' }}</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></div></aside>
+      <aside class="code-pane"><div class="pane-head"><strong>代码树</strong><span>{{ traceStats.sources }} 个符号</span></div><div v-if="!sourceNodes.length" class="empty-card">暂无方法级追溯链接。请执行静态分析后生成代码符号关联。</div><div v-else class="code-tree"><section v-if="staticSourceNodes.length" class="code-group"><div class="code-group-head">▾ 静态代码 <small>{{ staticSourceNodes.length }}</small></div><button v-for="node in staticSourceNodes" :key="node.id" :class="['code-item', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>●</i><span><strong>{{ node.label }}</strong><small>静态源码实现</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section><section v-if="dynamicSourceNodes.length" class="code-group"><div class="code-group-head">▾ 动态调用链 <small>{{ dynamicSourceNodes.length }}</small></div><button v-for="node in dynamicSourceNodes" :key="node.id" :class="['code-item', 'dynamic', { active: selectedNode?.id === node.id }]" @click="selectAsset(node.id)"><i>◌</i><span><strong>{{ node.label }}</strong><small>动态运行命中</small></span><em>{{ sourceLinkCount(node.id) }}</em></button></section></div></aside>
     </div>
   </section>
 </template>
@@ -79,6 +79,8 @@ const traceGraph = computed(() => buildTraceGraph(detail.value))
 const nodes = computed(() => traceGraph.value.nodes)
 const edges = computed(() => traceGraph.value.edges)
 const sourceNodes = computed(() => nodes.value.filter((node) => node.id.startsWith('src:')))
+const staticSourceNodes = computed(() => sourceNodes.value.filter((node) => !node.type?.includes('dynamic')))
+const dynamicSourceNodes = computed(() => sourceNodes.value.filter((node) => node.type?.includes('dynamic')))
 const traceStats = computed(() => ({
   requirements: detail.value?.criteria.length || 0,
   testcases: detail.value?.testcases.length || 0,
@@ -215,21 +217,9 @@ function buildTraceGraph(current: BaselineDetail | null): { nodes: RelationNode[
     })
   })
 
-  current.traceLinks.forEach((link) => {
-    const sourceId = resolveTraceNodeId(link.sourceType, link.sourceId)
-    const targetId = ensureTraceTargetNode(graphNodes, link, testcasesById)
-    if (!sourceId || !targetId || !graphNodes.has(sourceId) || !graphNodes.has(targetId)) return
-    const label = relationLabel(link)
-    graphEdges.set(`trace:${link.id}`, {
-      id: `trace:${link.id}`,
-      source: sourceId,
-      target: targetId,
-      label,
-      action: link.relationType,
-      sourceLabel: graphNodes.get(sourceId)?.label,
-      targetLabel: graphNodes.get(targetId)?.label,
-    })
-  })
+  current.traceLinks.forEach((link) => addNormalizedTraceLink(graphNodes, graphEdges, link))
+  addDerivedTestcaseCodeLinks(graphNodes, graphEdges)
+  addSourceAssetFallbacks(graphNodes, current)
 
   current.findings.forEach((finding) => {
     const bugId = bugNodeId(finding.id)
@@ -279,6 +269,71 @@ function buildTraceGraph(current: BaselineDetail | null): { nodes: RelationNode[
   return { nodes: Array.from(graphNodes.values()), edges: Array.from(graphEdges.values()) }
 }
 
+function addNormalizedTraceLink(nodesMap: Map<string, RelationNode>, edgesMap: Map<string, RelationEdge>, link: TraceLink) {
+  const sourceId = resolveTraceNodeId(link.sourceType, link.sourceId)
+  const targetId = resolveTraceNodeId(link.targetType, link.targetId)
+  if (!sourceId || !targetId) return
+  ensureTraceNode(nodesMap, sourceId, link.sourceType, link.sourceId, link)
+  ensureTraceNode(nodesMap, targetId, link.targetType, link.targetId, link)
+  if (!nodesMap.has(sourceId) || !nodesMap.has(targetId)) return
+  const pair = normalizeTracePair(sourceId, targetId)
+  if (!pair) return
+  edgesMap.set(`trace:${link.id}`, {
+    id: `trace:${link.id}`,
+    source: pair.source,
+    target: pair.target,
+    label: pair.label,
+    action: pair.label,
+    sourceLabel: nodesMap.get(pair.source)?.label,
+    targetLabel: nodesMap.get(pair.target)?.label,
+  })
+}
+
+function ensureTraceNode(nodesMap: Map<string, RelationNode>, id: string, type: string, rawId: string, link: TraceLink) {
+  if (nodesMap.has(id) || !id.startsWith('src:')) return
+  const dynamic = /EXECUTION|RUNTIME|DYNAMIC/.test(`${type} ${link.relationType} ${JSON.stringify(link.evidence || {})}`.toUpperCase())
+  nodesMap.set(id, {
+    id,
+    label: sourceLabel(rawId),
+    type: dynamic ? 'source dynamic' : 'source code',
+    classes: ['source', dynamic ? 'dynamic' : 'static'],
+    description: evidenceText(link.evidence) || (dynamic ? '动态执行链路' : '静态源码实现符号'),
+    raw: link.evidence || {},
+    meta: [dynamic ? '动态运行证据' : '静态源码实现', `置信度 ${Math.round(link.confidence * 100)}%`],
+  })
+}
+
+function normalizeTracePair(first: string, second: string) {
+  if (first.startsWith('req:') && second.startsWith('tc:')) return { source: first, target: second, label: '验收覆盖' }
+  if (first.startsWith('tc:') && second.startsWith('req:')) return { source: second, target: first, label: '验收覆盖' }
+  if (first.startsWith('req:') && second.startsWith('src:')) return { source: first, target: second, label: '需求实现' }
+  if (first.startsWith('src:') && second.startsWith('req:')) return { source: second, target: first, label: '需求实现' }
+  if (first.startsWith('tc:') && second.startsWith('src:')) return { source: first, target: second, label: '测试覆盖' }
+  if (first.startsWith('src:') && second.startsWith('tc:')) return { source: second, target: first, label: '测试覆盖' }
+  if (first.startsWith('src:') && second.startsWith('src:')) return { source: first, target: second, label: '调用' }
+  return null
+}
+
+function addDerivedTestcaseCodeLinks(nodesMap: Map<string, RelationNode>, edgesMap: Map<string, RelationEdge>) {
+  const requirementsToTests = new Map<string, string[]>()
+  const requirementsToSources = new Map<string, string[]>()
+  edgesMap.forEach((edge) => {
+    if (edge.source.startsWith('req:') && edge.target.startsWith('tc:')) requirementsToTests.set(edge.source, [...(requirementsToTests.get(edge.source) || []), edge.target])
+    if (edge.source.startsWith('req:') && edge.target.startsWith('src:')) requirementsToSources.set(edge.source, [...(requirementsToSources.get(edge.source) || []), edge.target])
+  })
+  requirementsToTests.forEach((testcases, requirementId) => (requirementsToSources.get(requirementId) || []).forEach((sourceId) => testcases.forEach((testcaseId) => {
+    const id = `derived:${testcaseId}:${sourceId}`
+    if (edgesMap.has(id)) return
+    edgesMap.set(id, { id, source: testcaseId, target: sourceId, label: '测试覆盖', action: '测试覆盖', sourceLabel: nodesMap.get(testcaseId)?.label, targetLabel: nodesMap.get(sourceId)?.label })
+  })))
+}
+
+function addSourceAssetFallbacks(nodesMap: Map<string, RelationNode>, current: BaselineDetail) {
+  if (nodesMap.size === current.criteria.length + current.testcases.length && current.baseline.sourceAssetId) {
+    nodesMap.set(sourceNodeId(current.baseline.sourceAssetId), { id: sourceNodeId(current.baseline.sourceAssetId), label: '源码资产', type: 'source code', classes: ['source', 'static'], description: '已导入源码，但尚未生成方法级追溯链接', meta: ['静态源码实现'] })
+  }
+}
+
 function ensureTraceTargetNode(nodesMap: Map<string, RelationNode>, link: TraceLink, testcasesById: Map<string, { title: string; externalKey: string }>) {
   if (link.targetType === 'TESTCASE') {
     return testcaseNodeId(link.targetId)
@@ -309,7 +364,7 @@ function ensureTraceTargetNode(nodesMap: Map<string, RelationNode>, link: TraceL
 function resolveTraceNodeId(sourceType: string, sourceId: string) {
   if (sourceType === 'AC' || sourceType === 'REQUIREMENT') return requirementNodeId(sourceId)
   if (sourceType === 'TESTCASE') return testcaseNodeId(sourceId)
-  if (sourceType.includes('SOURCE') || sourceType === 'CODE') return sourceNodeId(sourceId)
+  if (['SOURCE_SYMBOL', 'SOURCE', 'CODE', 'METHOD', 'CLASS', 'FILE', 'EXECUTION', 'RUNTIME'].includes(sourceType) || sourceType.includes('SOURCE')) return sourceNodeId(sourceId)
   return ''
 }
 
@@ -380,6 +435,6 @@ onMounted(load)
 .workspace-toolbar { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:14px; padding:15px 17px; border:1px solid rgba(15,23,42,.08); border-radius:22px; background:rgba(255,255,255,.94); }
 .workspace-toolbar > div:first-child { display:grid; gap:4px; }.workspace-toolbar > div:first-child > strong { color:#172033; font-size:19px; }.workspace-toolbar span { color:#64748b; font-size:13px; }.eyebrow { color:#0f766e !important; font-size:11px !important; font-weight:900; letter-spacing:.12em; text-transform:uppercase; }
 .toolbar-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }.toolbar-actions button { border:0; border-radius:999px; padding:9px 13px; background:#eef2f5; font-weight:800; cursor:pointer; }.toolbar-actions button.active,.toolbar-actions button:hover:not(:disabled) { background:#0f766e; color:#fff; }.toolbar-actions button:disabled { opacity:.5; cursor:not-allowed; }.baseline-select { display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #e2e8f0; border-radius:999px; font-weight:800; }.baseline-select select { max-width:260px; border:0; background:transparent; outline:0; }
-.workspace-notice { margin-bottom:14px; padding:11px 14px; border-radius:14px; background:#f0fdfa; color:#0f766e; font-weight:700; }.trace-columns { display:grid; grid-template-columns:minmax(220px,.7fr) minmax(450px,1.65fr) minmax(230px,.76fr); gap:14px; min-height:calc(100vh - 245px); }.asset-pane,.code-pane { overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:22px; background:rgba(255,255,255,.94); box-shadow:0 14px 36px rgba(15,23,42,.05); }.asset-pane { display:flex; flex-direction:column; }.pane-head { display:flex; justify-content:space-between; gap:8px; padding:15px; border-bottom:1px solid #eef2f5; color:#172033; }.pane-head span { color:#64748b; font-size:11px; font-weight:700; }.asset-group { display:grid; gap:8px; padding:12px; min-height:0; overflow:auto; }.testcase-group { flex:1; border-top:1px solid #eef2f5; }.group-head { display:flex; justify-content:space-between; align-items:center; color:#334155; font-size:14px; }.group-head span { display:grid; place-items:center; min-width:22px; height:22px; border-radius:999px; background:#eff6ff; color:#2563eb; font-size:12px; }.asset-card { display:grid; gap:4px; border:1px solid transparent; border-radius:13px; padding:10px; background:#f8fafc; color:#172033; text-align:left; cursor:pointer; }.asset-card:hover,.asset-card.active { border-color:rgba(15,118,110,.4); background:#f0fdfa; }.asset-card b { color:#0f766e; font-size:11px; }.asset-card.testcase b { color:#2563eb; }.asset-card strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.asset-card small { color:#64748b; font-size:11px; }.map-pane { min-width:0; }.map-pane :deep(.compact-board .graph-panel) { min-height:calc(100vh - 245px); }.map-pane :deep(.compact-board .relation-graph) { min-height:490px; }.code-tree { display:grid; gap:4px; padding:10px; }.code-item { display:flex; align-items:center; gap:8px; width:100%; border:1px solid transparent; border-radius:10px; padding:9px; background:transparent; text-align:left; cursor:pointer; }.code-item:hover,.code-item.active { border-color:#c4b5fd; background:#f5f3ff; }.code-item i { color:#7c3aed; font-style:normal; }.code-item span { display:grid; min-width:0; gap:2px; }.code-item strong,.code-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.code-item strong { color:#172033; font-size:12px; }.code-item small { color:#64748b; font-size:11px; }.code-item em { margin-left:auto; border-radius:999px; padding:2px 6px; background:#ede9fe; color:#6d28d9; font-size:10px; font-style:normal; font-weight:900; }.empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
+.workspace-notice { margin-bottom:14px; padding:11px 14px; border-radius:14px; background:#f0fdfa; color:#0f766e; font-weight:700; }.trace-columns { display:grid; grid-template-columns:minmax(220px,.7fr) minmax(450px,1.65fr) minmax(230px,.76fr); gap:14px; min-height:calc(100vh - 245px); }.asset-pane,.code-pane { overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:22px; background:rgba(255,255,255,.94); box-shadow:0 14px 36px rgba(15,23,42,.05); }.asset-pane { display:flex; flex-direction:column; }.pane-head { display:flex; justify-content:space-between; gap:8px; padding:15px; border-bottom:1px solid #eef2f5; color:#172033; }.pane-head span { color:#64748b; font-size:11px; font-weight:700; }.asset-group { display:grid; gap:8px; padding:12px; min-height:0; overflow:auto; }.testcase-group { flex:1; border-top:1px solid #eef2f5; }.group-head { display:flex; justify-content:space-between; align-items:center; color:#334155; font-size:14px; }.group-head span { display:grid; place-items:center; min-width:22px; height:22px; border-radius:999px; background:#eff6ff; color:#2563eb; font-size:12px; }.asset-card { display:grid; gap:4px; border:1px solid transparent; border-radius:13px; padding:10px; background:#f8fafc; color:#172033; text-align:left; cursor:pointer; }.asset-card:hover,.asset-card.active { border-color:rgba(15,118,110,.4); background:#f0fdfa; }.asset-card b { color:#0f766e; font-size:11px; }.asset-card.testcase b { color:#2563eb; }.asset-card strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }.asset-card small { color:#64748b; font-size:11px; }.map-pane { min-width:0; }.map-pane :deep(.compact-board .graph-panel) { min-height:calc(100vh - 245px); }.map-pane :deep(.compact-board .relation-graph) { min-height:490px; }.code-tree { display:grid; gap:10px; padding:10px; }.code-group { display:grid; gap:4px; }.code-group-head { padding:6px 4px; color:#475569; font-size:12px; font-weight:900; }.code-group-head small { float:right; color:#94a3b8; }.code-item { display:flex; align-items:center; gap:8px; width:100%; border:1px solid transparent; border-radius:10px; padding:9px; background:transparent; text-align:left; cursor:pointer; }.code-item:hover,.code-item.active { border-color:#c4b5fd; background:#f5f3ff; }.code-item i { color:#7c3aed; font-style:normal; }.code-item span { display:grid; min-width:0; gap:2px; }.code-item strong,.code-item small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.code-item strong { color:#172033; font-size:12px; }.code-item small { color:#64748b; font-size:11px; }.code-item em { margin-left:auto; border-radius:999px; padding:2px 6px; background:#ede9fe; color:#6d28d9; font-size:10px; font-style:normal; font-weight:900; }.empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
 @media(max-width:1100px) { .trace-columns { grid-template-columns:minmax(210px,.7fr) minmax(400px,1.5fr); }.code-pane { grid-column:1/-1; }.code-tree { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media(max-width:760px) { .workspace-toolbar { align-items:flex-start; flex-direction:column; }.toolbar-actions { justify-content:flex-start; }.trace-columns { grid-template-columns:1fr; }.code-pane { grid-column:auto; }.code-tree { grid-template-columns:1fr; }.asset-pane { max-height:500px; } }
 </style>

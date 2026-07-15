@@ -877,14 +877,20 @@ public class VerificationAiOrchestrator {
     }
 
     private List<Finding> normalizeMissingImplementationFindings(List<Finding> findings) {
-        return findings.stream().map(finding -> "MISSING_IMPLEMENTATION".equalsIgnoreCase(finding.findingType())
-                ? new Finding(finding.id(), finding.baselineId(), finding.acId(), "MISSING_IMPLEMENTATION_EVIDENCE",
-                finding.perspective(), finding.severity(), "未识别到源码实现关联证据",
-                "当前分析未关联到足以证明该验收标准的源码实现证据。这不等同于代码尚未实现；请确认源码快照、应用静态索引和接口/类/方法定位是否覆盖实现位置。原始分析说明：" + finding.description(),
-                "补充或选择正确的源码版本和静态索引后重新分析；仅在确认源码范围完整且仍无实现时创建开发任务。",
-                finding.confidence(), finding.evidenceLevel(), Verdict.NOT_VERIFIABLE, finding.reviewStatus(),
-                finding.evidence(), finding.externalWorkItemUrl(), finding.reviewedBy(), finding.reviewReason())
-                : finding).toList();
+        List<Finding> result = new ArrayList<>();
+        for (Finding finding : findings) {
+            if (!"MISSING_IMPLEMENTATION".equalsIgnoreCase(finding.findingType())) {
+                result.add(finding);
+                continue;
+            }
+            result.add(new Finding(finding.id(), finding.baselineId(), finding.acId(), "MISSING_IMPLEMENTATION_EVIDENCE",
+                    finding.perspective(), finding.severity(), "未识别到源码实现关联证据",
+                    "当前分析未关联到足以证明该验收标准的源码实现证据。这不等同于代码尚未实现；请确认源码快照、应用静态索引和接口/类/方法定位是否覆盖实现位置。原始分析说明：" + finding.description(),
+                    "补充或选择正确的源码版本和静态索引后重新分析；仅在确认源码范围完整且仍无实现时创建开发任务。",
+                    finding.confidence(), finding.evidenceLevel(), Verdict.NOT_VERIFIABLE, finding.reviewStatus(),
+                    finding.evidence(), finding.externalWorkItemUrl(), finding.reviewedBy(), finding.reviewReason()));
+        }
+        return result;
     }
 
     private boolean isContradictedMissingFinding(AcceptanceCriterion criterion, Finding finding,
