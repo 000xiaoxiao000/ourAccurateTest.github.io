@@ -54,7 +54,7 @@ export function useTraceabilityMap(projectId: () => string) {
   const selectedNode = computed(() => focusId.value ? nodeById.value.get(focusId.value) || null : null)
   const focusedGroups = computed(() => buildFocusedGroups(focusId.value, filteredEdges.value, nodeById.value))
 
-  async function load(options: { baselineId?: string; focusId?: string } = {}) {
+  async function load(options: { baselineId?: string; focusId?: string; view?: 'trace' | 'calls' | 'full' } = {}) {
     loading.value = true
     error.value = ''
     try {
@@ -66,6 +66,7 @@ export function useTraceabilityMap(projectId: () => string) {
         includeStatic: true,
         includeDynamic: true,
         includeAiCalls: includeAiCalls.value,
+        view: options.view || 'full',
       })
       response.value = data
       activeBaselineId.value = data.baseline.id

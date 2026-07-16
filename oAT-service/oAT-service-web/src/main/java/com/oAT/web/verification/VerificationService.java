@@ -2,6 +2,8 @@ package com.oAT.web.verification;
 
 import com.oAT.web.esDao.StaticInfoRepository;
 import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.service.AppService;
+import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.verification.model.VerificationModels;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.storage.AssetContentStore;
@@ -36,17 +38,20 @@ public class VerificationService {
     private final VerificationAiWriteBackComposer writeBackComposer;
     private final AssetContentStore assetContentStore;
     private final Executor verificationAiExecutor;
+    private final AppService appService;
 
     public VerificationService(VerificationRepository repository, StaticInfoRepository staticInfoRepository,
                                VerificationAiOrchestrator aiOrchestrator, VerificationAiWriteBackComposer writeBackComposer,
                                AssetContentStore assetContentStore,
-                               @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
+                               @Qualifier("verificationAiExecutor") Executor verificationAiExecutor,
+                               AppService appService) {
         this.repository = repository;
         this.staticInfoRepository = staticInfoRepository;
         this.aiOrchestrator = aiOrchestrator;
         this.writeBackComposer = writeBackComposer;
         this.assetContentStore = assetContentStore;
         this.verificationAiExecutor = verificationAiExecutor;
+        this.appService = appService;
     }
 
     public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
@@ -218,8 +223,9 @@ public class VerificationService {
             AssetSnapshot testcase = requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
             updateAnalysisProgress(jobId, "正在读取源码、执行、覆盖率和缺陷证据");
             Map<String, StaticSourceInfo> sources = loadSources(baseline.sourceAppId());
+            AppVo sourceApp = StringUtils.hasText(baseline.sourceAppId()) ? appService.getApp(baseline.sourceAppId()) : null;
             String sourceAssetContent = StringUtils.hasText(baseline.sourceAssetId())
-                    ? loadAssetContent(requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE)) : "";
+                    ? loadSourceAssetContent(requiredAsset(projectId, baseline.sourceAssetId(), AssetType.SOURCE), sourceApp) : "";
             String executionContent = StringUtils.hasText(baseline.executionAssetId())
                     ? loadAssetContent(requiredAsset(projectId, baseline.executionAssetId(), AssetType.EXECUTION)) : "";
             String coverageContent = StringUtils.hasText(baseline.coverageAssetId())
@@ -363,6 +369,10 @@ public class VerificationService {
             if (StringUtils.hasText(stored)) return stored;
         }
         return value(asset.content());
+    }
+
+    private String loadSourceAssetContent(AssetSnapshot asset, AppVo sourceApp) {
+        return SourceAssetFilter.filterContent(loadAssetContent(asset), SourceAssetFilter.fromApp(sourceApp));
     }
 
     private AssetSnapshot withoutContent(AssetSnapshot asset) {

@@ -74,8 +74,9 @@ public class MapApiControl {
                                                 @RequestParam(defaultValue = "4") Integer depth,
                                                 @RequestParam(defaultValue = "true") boolean includeStatic,
                                                 @RequestParam(defaultValue = "true") boolean includeDynamic,
-                                                @RequestParam(defaultValue = "true") boolean includeAiCalls) {
-        return traceabilityMapService.build(projectId, baselineId, focusId, direction, depth, includeStatic, includeDynamic, includeAiCalls);
+                                                @RequestParam(defaultValue = "true") boolean includeAiCalls,
+                                                @RequestParam(defaultValue = "full") String view) {
+        return traceabilityMapService.build(projectId, baselineId, focusId, direction, depth, includeStatic, includeDynamic, includeAiCalls, view);
     }
 
     @GetMapping("/apps/{appId}")

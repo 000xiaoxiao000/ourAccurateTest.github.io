@@ -38,7 +38,7 @@
 
     <div class="trace-controls">
       <label class="search-box">
-        <input v-model.trim="map.keyword.value" placeholder="搜索需求、用例、文件、类、方法" />
+        <input ref="searchInput" v-model.trim="map.keyword.value" placeholder="搜索需求、用例、文件、类、方法" />
       </label>
       <div class="filter-tabs">
         <button v-for="item in filters" :key="item.value" :class="{ active: map.filter.value === item.value }" type="button" @click="map.filter.value = item.value">
@@ -102,6 +102,16 @@
         </div>
       </main>
 
+      <section v-if="selectedTraceNode" class="node-detail-card" :class="nodeTone(selectedTraceNode)">
+        <div>
+          <span>{{ nodeKindLabel(selectedTraceNode.kind) }}</span>
+          <strong>{{ selectedTraceNode.label }}</strong>
+          <small>{{ selectedTraceNode.locator || selectedTraceNode.symbol || selectedTraceNode.id }}</small>
+        </div>
+        <p>{{ selectedTraceNode.description || '暂无描述' }}</p>
+        <button type="button" @click="selectedTraceId = ''">关闭</button>
+      </section>
+
       <div class="trace-reference-grid">
         <section class="reference-panel">
           <h2>图例说明</h2>
@@ -139,19 +149,36 @@
 
     <section v-else class="tab-page calls-tab">
       <main class="call-graph-pane">
-        <div class="pane-head call-head">
-          <div>
-            <strong>{{ callViewMode === 'graph' ? '代码间调用链路图' : '覆盖率数据' }}</strong>
-            <span>{{ callViewMode === 'graph' ? '按调用边展示代码节点关系，动态确认、静态补全、静态调用分层标识' : '展示覆盖/执行证据匹配到的代码节点' }}</span>
+        <div class="call-head">
+          <div class="call-head-main">
+            <div>
+              <strong>{{ callViewMode === 'graph' ? '代码间调用链路图' : '覆盖率数据' }}</strong>
+              <span>{{ callViewMode === 'graph' ? '按调用边展示代码节点关系，动态确认、静态补全、静态调用分层标识' : '展示覆盖/执行证据匹配到的代码节点' }}</span>
+            </div>
+            <span v-if="callViewMode === 'graph'" class="call-count">{{ callGraph.edges.length }} 条调用</span>
           </div>
-          <div class="call-actions">
-            <div class="segmented-control">
+          <div class="call-toolbar">
+            <div class="segmented-control mode-control">
               <button type="button" :class="{ active: callViewMode === 'graph' }" @click="callViewMode = 'graph'">方法调用图</button>
               <button type="button" :class="{ active: callViewMode === 'dependency' }" @click="callViewMode = 'dependency'">依赖关系图</button>
               <button type="button" :class="{ active: callViewMode === 'control' }" @click="callViewMode = 'control'">控制流图</button>
               <button type="button" :class="{ active: callViewMode === 'coverage' }" @click="callViewMode = 'coverage'">覆盖率数据</button>
             </div>
-            <span v-if="callViewMode === 'graph'">{{ callGraph.edges.length }} 条调用</span>
+            <div v-if="callViewMode === 'graph'" class="segmented-control compact-control">
+              <button type="button" :class="{ active: callGraphScope === 'overview' }" @click="callGraphScope = 'overview'">全局</button>
+              <button type="button" :class="{ active: callGraphScope === 'impact' }" :disabled="!map.focusId.value" @click="callGraphScope = 'impact'">影响范围</button>
+              <button type="button" :class="{ active: callGraphScope === 'context' }" :disabled="!map.focusId.value" @click="callGraphScope = 'context'">上下文</button>
+            </div>
+            <button
+              v-if="callViewMode === 'graph'"
+              type="button"
+              :class="['ai-call-toggle', { active: aiCallAnalysisEnabled }]"
+              :disabled="map.loading.value"
+              title="基于源码方法体补推候选调用关系，源码较多时会更慢"
+              @click="toggleAiCallAnalysis"
+            >
+              AI 调用分析
+            </button>
           </div>
         </div>
         <div v-if="callViewMode === 'graph'" class="call-graph-legend">
@@ -244,7 +271,17 @@
             <strong>代码树</strong>
             <span>{{ map.response.value?.summary.codeCount || 0 }} 个符号</span>
           </div>
+          <div class="tree-actions">
+            <button type="button" @click="expandTree">展开</button>
+            <button type="button" @click="collapseTree">折叠</button>
+          </div>
         </div>
+        <section v-if="map.selectedNode.value" class="code-node-detail" :class="nodeTone(map.selectedNode.value)">
+          <span>{{ nodeKindLabel(map.selectedNode.value.kind) }}</span>
+          <strong>{{ map.selectedNode.value.label }}</strong>
+          <small>{{ map.selectedNode.value.locator || map.selectedNode.value.symbol || map.selectedNode.value.id }}</small>
+          <p>{{ selectedCodeContextText }}</p>
+        </section>
         <div class="legend-row">
           <span><i class="legend static"></i>静态</span>
           <span><i class="legend dynamic"></i>动态</span>
@@ -257,8 +294,8 @@
             :key="node.key"
             :node="node"
             :depth="0"
-            :open-dirs="openDirs"
-            :open-classes="openClasses"
+            :open-dirs="displayOpenDirs"
+            :open-classes="displayOpenClasses"
             :selected-id="map.focusId.value"
             :linked-ids="map.linkedNodeIds.value"
             :get-link-count="map.linkCount"
@@ -324,14 +361,22 @@ const openDirs = ref<Set<string>>(new Set())
 const openClasses = ref<Set<string>>(new Set())
 const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
+const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
 const selectedTraceId = ref('')
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
 const slowLoading = ref(false)
+const loadedCodeDataKey = ref('')
+const loadingCodeDataKey = ref('')
+const aiCallAnalysisEnabled = ref(false)
+const searchInput = ref<HTMLInputElement | null>(null)
 let slowLoadingTimer: number | undefined
 
 watch([activeTab, callViewMode], () => {
   exitCallGraphFullscreen()
+  if (activeTab.value === 'calls') {
+    void ensureCodeDataLoaded()
+  }
 })
 
 watch(() => map.loading.value, (loading) => {
@@ -344,6 +389,8 @@ watch(() => map.loading.value, (loading) => {
     slowLoadingTimer = window.setTimeout(() => {
       slowLoading.value = true
     }, 8000)
+  } else if (activeTab.value === 'calls') {
+    void ensureCodeDataLoaded()
   }
 })
 
@@ -363,11 +410,32 @@ const baselineStatusText = computed(() => {
   return `当前基线：${baseline.name || baseline.id}${version ? ` · ${version}` : ''}`
 })
 
-const treeNodes = computed(() => (map.codeTree.value || []).map(toTreeNode))
+const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
+const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value).map(toTreeNode))
+const displayOpenDirs = computed(() => {
+  if (!codeKeyword.value) return openDirs.value
+  const dirs = new Set<string>()
+  treeNodes.value.forEach((node) => collectTreeOpenKeys(node, dirs, new Set()))
+  return dirs
+})
+const displayOpenClasses = computed(() => {
+  if (!codeKeyword.value) return openClasses.value
+  const classes = new Set<string>()
+  treeNodes.value.forEach((node) => collectTreeOpenKeys(node, new Set(), classes))
+  return classes
+})
+const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
-const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value))
-const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || []))
-const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value))
+const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, callGraphScope.value, codeKeyword.value))
+const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value))
+const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value))
+const selectedCodeContextText = computed(() => {
+  const node = map.selectedNode.value
+  if (!node) return ''
+  const outgoing = (map.outgoingByNode.value.get(node.id) || []).filter((edge) => edge.relation === 'CALLS').length
+  const incoming = (map.incomingByNode.value.get(node.id) || []).filter((edge) => edge.relation === 'CALLS').length
+  return `上游 ${incoming} 个，下游 ${outgoing} 个，追溯关系 ${map.linkCount(node.id)} 条`
+})
 const coverageRows = computed(() => {
   const edgeNodeIds = new Set<string>()
   map.edges.value.forEach((edge) => {
@@ -379,6 +447,7 @@ const coverageRows = computed(() => {
   return map.nodes.value
     .filter((node) => node.kind.startsWith('CODE_'))
     .filter((node) => node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH' || edgeNodeIds.has(node.id))
+    .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
     .map((node) => ({
       id: node.id,
       label: node.label || node.symbol || node.id,
@@ -419,10 +488,13 @@ async function reload() {
     selectedBaselineId.value = ''
     return
   }
-  // The call graph is an independent source-code analysis view. It is loaded
-  // from the baseline source snapshot and does not depend on verification AI analysis.
-  map.includeAiCalls.value = true
-  await map.load({ baselineId: selectedBaselineId.value })
+  loadedCodeDataKey.value = ''
+  loadingCodeDataKey.value = ''
+  if (activeTab.value === 'calls') {
+    await loadCodeData()
+  } else {
+    await loadTraceData()
+  }
   if (map.activeBaselineId.value) {
     selectedBaselineId.value = map.activeBaselineId.value
   }
@@ -431,8 +503,50 @@ async function reload() {
 async function reloadBaseline() {
   map.focusId.value = ''
   selectedTraceId.value = ''
-  map.includeAiCalls.value = true
-  await map.load({ baselineId: selectedBaselineId.value })
+  loadedCodeDataKey.value = ''
+  loadingCodeDataKey.value = ''
+  if (activeTab.value === 'calls') {
+    await loadCodeData()
+    return
+  }
+  await loadTraceData()
+}
+
+async function loadTraceData() {
+  map.includeAiCalls.value = false
+  await map.load({ baselineId: selectedBaselineId.value, view: 'trace' })
+}
+
+async function loadCodeData(focusId = map.focusId.value) {
+  const key = codeDataKey(focusId)
+  if (loadedCodeDataKey.value === key || loadingCodeDataKey.value === key) return
+  loadingCodeDataKey.value = key
+  map.includeAiCalls.value = aiCallAnalysisEnabled.value
+  try {
+    await map.load({ baselineId: selectedBaselineId.value, focusId, view: 'calls' })
+    loadedCodeDataKey.value = key
+  } finally {
+    if (loadingCodeDataKey.value === key) loadingCodeDataKey.value = ''
+  }
+}
+
+async function ensureCodeDataLoaded() {
+  const key = codeDataKey(map.focusId.value)
+  if (!selectedBaselineId.value || loadedCodeDataKey.value === key || loadingCodeDataKey.value === key || map.loading.value) return
+  await loadCodeData(map.focusId.value)
+}
+
+function codeDataKey(focusId = '') {
+  return `${selectedBaselineId.value || map.activeBaselineId.value}|${focusId || ''}|ai:${aiCallAnalysisEnabled.value}`
+}
+
+async function toggleAiCallAnalysis() {
+  aiCallAnalysisEnabled.value = !aiCallAnalysisEnabled.value
+  loadedCodeDataKey.value = ''
+  loadingCodeDataKey.value = ''
+  if (activeTab.value === 'calls') {
+    await loadCodeData(map.focusId.value)
+  }
 }
 
 function selectTraceNode(id: string) {
@@ -443,7 +557,7 @@ async function selectCodeNode(id: string) {
   map.select(id)
   openAncestors(id, map.codeTree.value)
   if (selectedBaselineId.value) {
-    await map.load({ baselineId: selectedBaselineId.value, focusId: id })
+    await loadCodeData(id)
     openAncestors(id, map.codeTree.value)
   }
 }
@@ -458,6 +572,28 @@ function toggleClass(id: string) {
   const next = new Set(openClasses.value)
   next.has(id) ? next.delete(id) : next.add(id)
   openClasses.value = next
+}
+
+function expandTree() {
+  const dirs = new Set<string>()
+  const classes = new Set<string>()
+  treeNodes.value.forEach((node) => collectTreeOpenKeys(node, dirs, classes))
+  openDirs.value = dirs
+  openClasses.value = classes
+}
+
+function collapseTree() {
+  openDirs.value = new Set()
+  openClasses.value = new Set()
+}
+
+function collectTreeOpenKeys(node: TreeNode, dirs: Set<string>, classes: Set<string>) {
+  if (node.isDir) {
+    dirs.add(node.key)
+    node.children.forEach((child) => collectTreeOpenKeys(child, dirs, classes))
+    return
+  }
+  if (node.file) classes.add(node.file.id)
 }
 
 function openAncestors(id: string, nodes: CodeTreeNode[], parents: string[] = []) {
@@ -497,6 +633,23 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
   return { key: node.id, name: node.label, displayName: node.label, isDir: false, children: [] }
 }
 
+function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNode[] {
+  if (!keyword) return nodes
+  return nodes
+    .map((node) => {
+      const children = filterCodeTreeNodes(node.children || [], keyword)
+      if (children.length || searchableCodeTreeNode(node).includes(keyword)) {
+        return { ...node, children }
+      }
+      return null
+    })
+    .filter((node): node is CodeTreeNode => Boolean(node))
+}
+
+function searchableCodeTreeNode(node: CodeTreeNode) {
+  return normalizeSearch([node.id, node.label, node.path, node.parentId, node.language, node.kind].join(' '))
+}
+
 function flattenMethods(nodes: CodeTreeNode[]): Array<{ nodeId: string; name: string; line?: number }> {
   return nodes.flatMap((node) => {
     if (node.kind === 'METHOD') return [{ nodeId: node.id, name: node.label, line: lineFromLocator(node.path) }]
@@ -530,13 +683,13 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[]) {
     edgeIds.add(edge.target)
   })
 
-  const requirements = pickLayerNodes(nodes, 'REQUIREMENT', edgeIds, 40)
-  const testcases = pickLayerNodes(nodes, 'TESTCASE', edgeIds, 50)
-  const code = pickLayerNodes(nodes.filter((node) => node.kind === 'CODE_FILE'), 'CODE_', edgeIds, 80)
+  const requirements = pickLayerNodes(nodes, 'REQUIREMENT', edgeIds, 18)
+  const testcases = pickLayerNodes(nodes, 'TESTCASE', edgeIds, 24)
+  const code = pickLayerNodes(nodes.filter((node) => node.kind === 'CODE_FILE'), 'CODE_', edgeIds, 24)
   const rawLayers = [
-    { key: 'requirements', title: '需求层 (Requirements)', nodes: requirements, tone: 'req' },
-    { key: 'testcases', title: '测试用例层 (Test Cases)', nodes: testcases, tone: 'tc' },
-    { key: 'code', title: '代码层 (Source Code)', nodes: code, tone: 'code' },
+    { key: 'requirements', title: layerTitle('需求层 (Requirements)', requirements), nodes: requirements.nodes, tone: 'req' },
+    { key: 'testcases', title: layerTitle('测试用例层 (Test Cases)', testcases), nodes: testcases.nodes, tone: 'tc' },
+    { key: 'code', title: layerTitle('代码层 (Source Code)', code), nodes: code.nodes, tone: 'code' },
   ]
   const width = 1180
   const nodeWidth = 154
@@ -583,7 +736,7 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[]) {
   const height = Math.max(560, currentY + 4)
   const graphEdges = traceEdges
     .filter((edge) => positioned.has(edge.source) && positioned.has(edge.target))
-    .slice(0, 180)
+    .slice(0, 96)
     .map((edge): SvgEdge => {
       const source = positioned.get(edge.source)!
       const target = positioned.get(edge.target)!
@@ -632,13 +785,18 @@ function traceLayerNodeId(id: string, nodeMap: Map<string, TraceabilityNode>) {
 function pickLayerNodes(nodes: TraceabilityNode[], kindPrefix: string, edgeIds: Set<string>, limit: number) {
   const matches = nodes.filter((node) => node.kind === kindPrefix || node.kind.startsWith(kindPrefix))
   const linked = matches.filter((node) => edgeIds.has(node.id))
-  const unlinked = matches.filter((node) => !edgeIds.has(node.id))
-  return [...linked, ...unlinked].slice(0, limit)
+  return { nodes: linked.slice(0, limit), total: linked.length }
 }
 
-function buildDependencyGraph(dependencies: Array<{ source: string; target: string; kind: string }>) {
+function layerTitle(title: string, layer: { nodes: TraceabilityNode[]; total: number }) {
+  return layer.total > layer.nodes.length ? `${title} · ${layer.nodes.length}/${layer.total}` : title
+}
+
+function buildDependencyGraph(dependencies: Array<{ source: string; target: string; kind: string }>, keyword: string) {
   const unique = new Map<string, { source: string; target: string; kind: string }>()
-  dependencies.forEach((item) => unique.set(`${item.source}|${item.target}`, item))
+  dependencies
+    .filter((item) => !keyword || normalizeSearch([item.source, item.target, item.kind].join(' ')).includes(keyword))
+    .forEach((item) => unique.set(`${item.source}|${item.target}`, item))
   const items = [...unique.values()].slice(0, 160)
   const sources = [...new Set(items.map((item) => item.source))]
   const targets = [...new Set(items.map((item) => item.target))]
@@ -661,9 +819,12 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
   return { width: 860, height: Math.max(420, Math.max(sources.length * 76, targets.length * 58) + 80), nodes, edges }
 }
 
-function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string) {
+function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, keyword: string) {
   const selected = focusId ? steps.filter((step) => step.methodId === focusId) : steps
-  const visible = (selected.length ? selected : steps).slice(0, 80)
+  const source = keyword ? steps : selected.length ? selected : steps
+  const visible = source
+    .filter((step) => !keyword || normalizeSearch([step.methodId, step.methodLabel, step.kind, step.expression].join(' ')).includes(keyword))
+    .slice(0, 80)
   const nodes: MiniGraphNode[] = visible.map((step, index) => ({
     id: `${step.methodId}:${step.order}`,
     x: 100 + (index % 2) * 390,
@@ -683,19 +844,32 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
   return { width: 860, height: Math.max(420, Math.ceil(nodes.length / 2) * 78 + 70), nodes, edges }
 }
 
-function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string) {
+function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
-  const selectedIsCode = focusId ? nodeMap.get(focusId)?.kind.startsWith('CODE_') : false
-  const scopedIds = selectedIsCode ? collectCodeScopeIds(nodes, focusId) : new Set<string>()
+  const selectedNode = focusId ? nodeMap.get(focusId) : null
+  const selectedIsCode = Boolean(selectedNode?.kind.startsWith('CODE_'))
+  const graphScopeIds = selectedIsCode ? collectCallScopeIds(nodes, edges, focusId, scope) : new Set<string>()
+  const strictScope = selectedIsCode && (scope !== 'overview' || selectedNode?.kind === 'CODE_FILE' || selectedNode?.kind === 'CODE_CLASS')
+  const matchedNodeIds = keyword
+    ? new Set(nodes.filter((node) => node.kind.startsWith('CODE_') && searchableCodeNode(node).includes(keyword)).map((node) => node.id))
+    : new Set<string>()
   const callEdges = edges
     .filter((edge) => edge.relation === 'CALLS' && nodeMap.has(edge.source) && nodeMap.has(edge.target))
-    .filter((edge) => !selectedIsCode || scopedIds.has(edge.source) || scopedIds.has(edge.target))
-    .sort((left, right) => callEdgePriority(left, scopedIds) - callEdgePriority(right, scopedIds))
+    .filter((edge) => {
+      if (!selectedIsCode) return true
+      if (scope === 'overview' && (selectedNode?.kind === 'CODE_FILE' || selectedNode?.kind === 'CODE_CLASS')) {
+        return graphScopeIds.has(edge.source) && graphScopeIds.has(edge.target)
+      }
+      return true
+    })
+    .filter((edge) => !strictScope || graphScopeIds.has(edge.source) || graphScopeIds.has(edge.target))
+    .filter((edge) => !keyword || matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target) || searchableCallEdge(edge).includes(keyword))
+    .sort((left, right) => callEdgePriority(left, graphScopeIds) - callEdgePriority(right, graphScopeIds))
     .slice(0, 64)
   const ids = new Set<string>()
   if (selectedIsCode) {
     nodes
-      .filter((node) => scopedIds.has(node.id) && node.kind.startsWith('CODE_'))
+      .filter((node) => graphScopeIds.has(node.id) && node.kind.startsWith('CODE_'))
       .sort((left, right) => codeNodePriority(left, focusId) - codeNodePriority(right, focusId))
       .slice(0, 28)
       .forEach((node) => ids.add(node.id))
@@ -708,8 +882,14 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
   const graphNodes = [...ids].map((id) => nodeMap.get(id)).filter((node): node is TraceabilityNode => Boolean(node)).slice(0, 56)
   if (!graphNodes.length) {
     const fallbackNodes = selectedIsCode
-      ? nodes.filter((node) => scopedIds.has(node.id) && (node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS')).slice(0, 24)
-      : nodes.filter((node) => node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS').slice(0, 24)
+      ? nodes
+        .filter((node) => graphScopeIds.has(node.id) && (node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS'))
+        .filter((node) => !keyword || searchableCodeNode(node).includes(keyword))
+        .slice(0, 24)
+      : nodes
+        .filter((node) => node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS')
+        .filter((node) => !keyword || searchableCodeNode(node).includes(keyword))
+        .slice(0, 24)
     graphNodes.push(...fallbackNodes)
   }
   const nodeWidth = 184
@@ -835,8 +1015,30 @@ function callGraphLevels(graphNodes: TraceabilityNode[], edges: TraceabilityEdge
   return levels
 }
 
-function collectCodeScopeIds(nodes: TraceabilityNode[], rootId: string) {
+function collectCallScopeIds(nodes: TraceabilityNode[], edges: TraceabilityEdge[], rootId: string, scope: 'overview' | 'impact' | 'context') {
   const ids = new Set<string>([rootId])
+  const root = nodes.find((node) => node.id === rootId)
+  if (root?.kind === 'CODE_FILE' || root?.kind === 'CODE_CLASS') {
+    collectCodeDescendantIds(nodes, rootId, ids)
+  }
+  if (scope === 'overview' && (root?.kind === 'CODE_FILE' || root?.kind === 'CODE_CLASS')) return ids
+  const callEdges = edges.filter((edge) => edge.relation === 'CALLS')
+  const rounds = scope === 'impact' ? 3 : 1
+  for (let round = 0; round < rounds; round++) {
+    const snapshot = new Set(ids)
+    callEdges.forEach((edge) => {
+      if (scope === 'impact') {
+        if (snapshot.has(edge.source)) ids.add(edge.target)
+      } else {
+        if (snapshot.has(edge.source)) ids.add(edge.target)
+        if (snapshot.has(edge.target)) ids.add(edge.source)
+      }
+    })
+  }
+  return ids
+}
+
+function collectCodeDescendantIds(nodes: TraceabilityNode[], rootId: string, ids: Set<string>) {
   let changed = true
   while (changed) {
     changed = false
@@ -847,7 +1049,6 @@ function collectCodeScopeIds(nodes: TraceabilityNode[], rootId: string) {
       }
     })
   }
-  return ids
 }
 
 function nodeTone(node?: TraceabilityNode | null) {
@@ -877,6 +1078,36 @@ function evidenceTone(edge: TraceabilityEdge) {
   if (edge.callEvidence === 'STATIC_BRIDGED') return 'bridged'
   if (edge.evidenceType === 'DERIVED') return 'derived'
   return 'static'
+}
+
+function searchableCodeNode(node: TraceabilityNode) {
+  return normalizeSearch([
+    node.id,
+    node.kind,
+    node.label,
+    node.description,
+    node.locator,
+    node.layer,
+    node.language,
+    node.symbol,
+    node.parentId,
+    node.evidenceState,
+    JSON.stringify(node.metadata || {}),
+  ].join(' '))
+}
+
+function searchableCallEdge(edge: TraceabilityEdge) {
+  return normalizeSearch([
+    edge.id,
+    edge.source,
+    edge.target,
+    edge.relation,
+    edge.evidenceType,
+    edge.callEvidence,
+    edge.generationMethod,
+    edge.reviewStatus,
+    JSON.stringify(edge.evidence || []),
+  ].join(' '))
 }
 
 function edgeEvidenceText(edge: TraceabilityEdge) {
@@ -927,6 +1158,12 @@ function exitCallGraphFullscreen() {
 }
 
 function handleCallGraphKeydown(event: KeyboardEvent) {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    searchInput.value?.focus()
+    searchInput.value?.select()
+    return
+  }
   if (event.key === 'Escape' && callGraphFullscreen.value) {
     exitCallGraphFullscreen()
   }
@@ -935,6 +1172,10 @@ function handleCallGraphKeydown(event: KeyboardEvent) {
 function shorten(value: string, max: number) {
   const normalized = String(value || '').trim()
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized
+}
+
+function normalizeSearch(value?: string) {
+  return String(value || '').trim().toLowerCase()
 }
 
 function percent(value: number) {
@@ -998,6 +1239,13 @@ onBeforeUnmount(() => {
 .reference-panel th { color:#172033; font-weight:900; background:#f8fafc; }
 .reference-panel td { color:#334155; }
 .relation-summary { overflow:auto; }
+.node-detail-card { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px 14px; align-items:start; padding:13px 15px; border:1px solid; border-radius:12px; }
+.node-detail-card > div { display:grid; gap:3px; min-width:0; }
+.node-detail-card span, .code-node-detail span { font-size:10px; font-weight:900; letter-spacing:.04em; text-transform:uppercase; opacity:.76; }
+.node-detail-card strong, .code-node-detail strong { color:#172033; overflow-wrap:anywhere; }
+.node-detail-card small, .code-node-detail small { color:#64748b; overflow-wrap:anywhere; }
+.node-detail-card p { grid-column:1 / -1; margin:0; color:#475569; font-size:12px; line-height:1.5; }
+.node-detail-card button { border:0; border-radius:8px; padding:6px 10px; background:rgba(15,23,42,.08); color:#334155; font-size:12px; font-weight:900; cursor:pointer; }
 .line-cell { display:inline-block; width:36px; margin-right:8px; vertical-align:middle; border-top:2px solid #475569; }
 .line-cell.dashed { border-top-style:dashed; }
 .dot { display:inline-block; width:16px; height:16px; margin-right:8px; border-radius:999px; vertical-align:middle; }
@@ -1008,7 +1256,13 @@ onBeforeUnmount(() => {
 .pane-head { display:flex; justify-content:space-between; gap:8px; padding:14px 15px; border-bottom:1px solid #eef2f5; color:#172033; font-size:14px; }
 .pane-head > div { display:grid; gap:3px; min-width:0; }
 .pane-head span { color:#64748b; font-size:11px; font-weight:700; }
-.call-head { align-items:center; }
+.call-head { display:grid; gap:10px; padding:14px 15px 12px; border-bottom:1px solid #eef2f5; color:#172033; }
+.call-head-main { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
+.call-head-main > div { display:grid; gap:3px; min-width:0; }
+.call-head-main strong { font-size:14px; }
+.call-head-main span { color:#64748b; font-size:11px; font-weight:700; line-height:1.45; }
+.call-count { flex:0 0 auto; align-self:center; border-radius:999px; padding:3px 9px; background:#f1f5f9; color:#475569 !important; font-size:11px; font-weight:900; }
+.call-toolbar { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:8px; min-width:0; }
 .call-graph-legend { display:flex; flex-wrap:wrap; gap:12px; padding:8px 15px; border-bottom:1px solid #eef2f5; color:#64748b; font-size:11px; font-weight:800; }
 .call-graph-legend span { display:flex; align-items:center; gap:5px; }
 .call-color { width:10px; height:10px; border:1px solid; border-radius:2px; }
@@ -1018,11 +1272,15 @@ onBeforeUnmount(() => {
 .call-color.static { background:#fed7aa; border-color:#f97316; }
 .call-color.recursive { background:#fecaca; border-color:#dc2626; }
 .call-actions { display:flex !important; grid-template-columns:none !important; grid-auto-flow:column; align-items:center; justify-content:flex-end; gap:8px; }
-.segmented-control { display:flex; max-width:100%; overflow-x:auto; border:1px solid #dbe4ee; border-radius:9px; background:#f8fafc; }
+.segmented-control { display:flex; flex-wrap:wrap; max-width:100%; overflow:visible; border:1px solid #dbe4ee; border-radius:9px; background:#f8fafc; }
 .segmented-control button { flex:0 0 auto; border:0; padding:7px 10px; background:transparent; color:#475569; font-size:12px; font-weight:900; cursor:pointer; white-space:nowrap; }
 .segmented-control button.active { background:#0f766e; color:#fff; }
-.ai-button { border:0; border-radius:9px; padding:8px 11px; background:#172033; color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
-.ai-button:disabled { opacity:.55; cursor:not-allowed; }
+.segmented-control button:disabled { cursor:not-allowed; opacity:.45; }
+.mode-control { max-width:420px; }
+.compact-control button { padding:7px 8px; font-size:11px; }
+.ai-call-toggle { flex:0 0 auto; border:1px solid #dbe4ee; border-radius:8px; padding:7px 9px; background:#fff; color:#475569; font-size:12px; font-weight:900; cursor:pointer; white-space:nowrap; }
+.ai-call-toggle.active { border-color:#0f766e; background:#ecfdf5; color:#0f766e; }
+.ai-call-toggle:disabled { opacity:.56; cursor:not-allowed; }
 .graph-loading-state { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; flex:1; min-height:520px; padding:28px; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; color:#64748b; text-align:center; }
 .graph-loading-state .spin { color:#0f766e; font-size:30px; }
 .graph-loading-state strong { color:#172033; font-size:15px; }
@@ -1076,6 +1334,11 @@ onBeforeUnmount(() => {
 .tlc-rel.derived { background:#f1f5f9; color:#475569; }
 .trace-empty-links { color:#94a3b8; font-size:13px; text-align:center; padding:24px 0; }
 .legend-row { display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid #eef2f5; color:#64748b; font-size:11px; font-weight:800; }
+.tree-actions { display:flex !important; grid-template-columns:none !important; gap:6px; justify-content:flex-end; }
+.tree-actions button { border:1px solid #dbe4ee; border-radius:7px; padding:5px 8px; background:#fff; color:#475569; font-size:11px; font-weight:900; cursor:pointer; }
+.tree-actions button:hover { border-color:#0f766e; color:#0f766e; }
+.code-node-detail { display:grid; gap:4px; margin:10px 12px 0; padding:10px 12px; border:1px solid; border-radius:10px; }
+.code-node-detail p { margin:2px 0 0; color:#475569; font-size:12px; }
 .legend-row span { display:flex; align-items:center; gap:5px; }
 .legend { display:inline-block; width:8px; height:8px; border-radius:999px; }
 .legend.req { background:#2563eb; }

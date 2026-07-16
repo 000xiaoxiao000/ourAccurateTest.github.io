@@ -9,6 +9,8 @@ import com.oAT.web.exceptions.FriendlyException;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.verification.VerificationRepository;
+import com.oAT.web.verification.SourceAssetFilter;
+import com.oAT.web.verification.SourceAssetFilter.SourceProfile;
 import com.oAT.web.verification.model.VerificationModels;
 import com.oAT.web.verification.model.VerificationModels.AcceptanceCriterion;
 import com.oAT.web.verification.model.VerificationModels.AssetSnapshot;
@@ -96,7 +98,17 @@ public class TraceabilityMapService {
     public TraceabilityMapResponse build(String projectId, String baselineId, String focusId, String direction,
                                          Integer requestedDepth, boolean includeStatic, boolean includeDynamic,
                                          boolean includeAiCalls) {
+        return build(projectId, baselineId, focusId, direction, requestedDepth, includeStatic, includeDynamic, includeAiCalls, "full");
+    }
+
+    public TraceabilityMapResponse build(String projectId, String baselineId, String focusId, String direction,
+                                         Integer requestedDepth, boolean includeStatic, boolean includeDynamic,
+                                         boolean includeAiCalls, String view) {
         int depth = normalizeDepth(requestedDepth);
+        boolean traceOnlyView = "trace".equalsIgnoreCase(value(view));
+        boolean includeCallEdges = !traceOnlyView;
+        boolean includeCodeTree = !traceOnlyView;
+        boolean includeCodeGraph = !traceOnlyView;
         Baseline baseline = resolveBaseline(projectId, baselineId);
         List<String> warnings = new ArrayList<>();
         List<AcceptanceCriterion> criteria = verificationRepository.findCriteria(baseline.id());
@@ -115,7 +127,7 @@ public class TraceabilityMapService {
             graph.putNode(testcaseNode(item));
         });
 
-        CodeIndex codeIndex = buildCodeIndex(projectId, baseline, includeStatic, warnings);
+        CodeIndex codeIndex = buildCodeIndex(projectId, baseline, includeStatic, includeCallEdges || includeCodeGraph, warnings);
         codeIndex.nodes.values().forEach(graph::putNode);
 
         normalizeTraceLinks(graph, codeIndex, criteriaById, testcaseById, links);
@@ -126,7 +138,7 @@ public class TraceabilityMapService {
         dynamicEvidence.coveredNodeIds.forEach(graph::markDynamic);
 
         if (includeStatic) {
-            if (includeAiCalls) {
+            if (includeCallEdges && includeAiCalls) {
                 int inferred = codeIndex.inferSourceCallPairs();
                 if (inferred == 0) {
                     warnings.add("源码静态调用解析未发现可关联的代码调用关系");
@@ -134,14 +146,16 @@ public class TraceabilityMapService {
                     warnings.add("源码静态调用解析已生成 " + inferred + " 条代码调用关系");
                 }
             }
-            addStaticCallEdges(graph, codeIndex, dynamicEvidence.coveredNodeIds);
+            if (includeCallEdges) {
+                addStaticCallEdges(graph, codeIndex, dynamicEvidence.coveredNodeIds);
+            }
         }
-        if (includeDynamic) {
+        if (includeDynamic && includeCallEdges) {
             addDynamicCallEdges(graph, codeIndex, dynamicEvidence.callPairs, warnings);
         }
 
         GraphView clipped = graph.focus(focusId, direction, depth, MAX_NODES, MAX_EDGES, warnings);
-        List<CodeTreeNode> codeTree = buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes);
+        List<CodeTreeNode> codeTree = includeCodeTree ? buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes) : List.of();
         TraceabilitySummary summary = summarize(criteria, testcases, clipped.nodes(), clipped.edges(), graph.dynamicNodes, warnings);
 
         return new TraceabilityMapResponse(
@@ -154,7 +168,7 @@ public class TraceabilityMapService {
                 clipped.nodes(),
                 clipped.edges(),
                 codeTree,
-                new CodeGraphData(codeIndex.dependencies, codeIndex.controlFlows),
+                includeCodeGraph ? new CodeGraphData(codeIndex.dependencies, codeIndex.controlFlows) : null,
                 warnings);
     }
 
@@ -221,12 +235,14 @@ public class TraceabilityMapService {
                 Map.of("requirementRefs", value(item.requirementRefs())));
     }
 
-    private CodeIndex buildCodeIndex(String projectId, Baseline baseline, boolean includeStatic, List<String> warnings) {
+    private CodeIndex buildCodeIndex(String projectId, Baseline baseline, boolean includeStatic, boolean collectCodeAnalysis, List<String> warnings) {
         CodeIndex index = new CodeIndex();
+        AppVo sourceApp = StringUtils.hasText(baseline.sourceAppId()) ? appService.getApp(baseline.sourceAppId()) : null;
+        SourceProfile sourceProfile = SourceAssetFilter.fromApp(sourceApp);
         if (includeStatic) {
             for (String appId : projectAppIds(projectId, baseline.sourceAppId())) {
                 for (StaticSourceInfo info : staticInfoRepository.findByAppId(appId)) {
-                    addStaticInfo(index, info);
+                    addStaticInfo(index, info, collectCodeAnalysis);
                 }
             }
         }
@@ -235,22 +251,27 @@ public class TraceabilityMapService {
         if (StringUtils.hasText(baseline.sourceAssetId())) {
             Optional<AssetSnapshot> selectedSource = verificationRepository.findAsset(projectId, baseline.sourceAssetId());
             selectedSource.ifPresent(asset -> {
-                warnIfTruncatedSource(asset, warnings, warnedAssetIds);
-                addSourceAsset(index, asset, loadedAssetIds);
+                if (SourceAssetFilter.assetMatchesApp(asset, sourceProfile)) {
+                    warnIfTruncatedSource(asset, warnings, warnedAssetIds);
+                    addSourceAsset(index, asset, loadedAssetIds, collectCodeAnalysis, sourceProfile);
+                } else {
+                    warnings.add("当前基线源码资产不属于所选源码工程，已按源码工程设置忽略该资产");
+                }
             });
         }
         List<String> appOrder = projectAppIds(projectId, baseline.sourceAppId());
         verificationRepository.findAssets(projectId, AssetType.SOURCE).stream()
+                .filter(asset -> SourceAssetFilter.assetMatchesApp(asset, sourceProfile))
                 .sorted(Comparator
                         .comparingInt((AssetSnapshot asset) -> sourceAssetOrder(asset, appOrder))
                         .thenComparing(AssetSnapshot::capturedAt, Comparator.nullsLast(Comparator.reverseOrder())))
                 .forEach(asset -> {
                     warnIfTruncatedSource(asset, warnings, warnedAssetIds);
-                    addSourceAsset(index, asset, loadedAssetIds);
+                    addSourceAsset(index, asset, loadedAssetIds, collectCodeAnalysis, sourceProfile);
                 });
         if (index.nodes.isEmpty() && includeStatic) {
             warnings.add("缺少可用源码索引或源码资产，仅返回需求与测试追溯关系");
-        } else if (includeStatic && index.pendingStaticCalls.isEmpty() && index.methodSpans.isEmpty()) {
+        } else if (includeStatic && collectCodeAnalysis && index.pendingStaticCalls.isEmpty() && index.methodSpans.isEmpty()) {
             warnings.add("缺少静态调用索引，代码调用图已降级为代码树展示");
         }
         return index;
@@ -260,6 +281,7 @@ public class TraceabilityMapService {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
         if (StringUtils.hasText(preferredAppId)) {
             ids.add(preferredAppId);
+            return new ArrayList<>(ids);
         }
         for (AppVo app : appService.getAppList(projectId)) {
             if (app != null && StringUtils.hasText(app.getId())) {
@@ -290,7 +312,7 @@ public class TraceabilityMapService {
         return value == null ? null : String.valueOf(value);
     }
 
-    private void addStaticInfo(CodeIndex index, StaticSourceInfo info) {
+    private void addStaticInfo(CodeIndex index, StaticSourceInfo info, boolean collectCodeAnalysis) {
         if (info.getClassInfo() == null) {
             return;
         }
@@ -330,15 +352,19 @@ public class TraceabilityMapService {
                 index.alias(className + "#" + methodName + desc, methodId);
                 index.alias(className + "." + methodName + desc, methodId);
             }
-            addInvocationPairs(index, methodId, method);
+            if (collectCodeAnalysis) {
+                addInvocationPairs(index, methodId, method);
+            }
         }
-        collectMethodSpans(info.getClassInfo().getSourceCode(), className)
-                .forEach(span -> {
-                    String methodId = index.resolve(className + "#" + span.methodName());
-                    if (methodId != null && index.nodes.containsKey(methodId)) {
-                        index.methodSpans.add(new MethodSpan(methodId, className, span.methodName(), span.body()));
-                    }
-                });
+        if (collectCodeAnalysis) {
+            collectMethodSpans(info.getClassInfo().getSourceCode(), className)
+                    .forEach(span -> {
+                        String methodId = index.resolve(className + "#" + span.methodName());
+                        if (methodId != null && index.nodes.containsKey(methodId)) {
+                            index.methodSpans.add(new MethodSpan(methodId, className, span.methodName(), span.body()));
+                        }
+                    });
+        }
     }
 
     private void addInvocationPairs(CodeIndex index, String callerId, StaticSourceMethodInfo method) {
@@ -354,11 +380,11 @@ public class TraceabilityMapService {
         }
     }
 
-    private void addSourceAsset(CodeIndex index, AssetSnapshot asset, Set<String> loadedAssetIds) {
+    private void addSourceAsset(CodeIndex index, AssetSnapshot asset, Set<String> loadedAssetIds, boolean collectCodeAnalysis, SourceProfile sourceProfile) {
         if (asset == null || !loadedAssetIds.add(asset.id())) {
             return;
         }
-        String content = assetContent(asset);
+        String content = SourceAssetFilter.filterContent(assetContent(asset), sourceProfile);
         if (!StringUtils.hasText(content)) {
             return;
         }
@@ -374,9 +400,11 @@ public class TraceabilityMapService {
                     "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
             index.alias(path, classId);
             index.alias(className, classId);
-            Matcher importMatcher = IMPORT_PATTERN.matcher(unit.content());
-            while (importMatcher.find() && index.dependencies.size() < 5000) {
-                index.dependencies.add(new CodeDependency(className, importMatcher.group(1), "IMPORT"));
+            if (collectCodeAnalysis) {
+                Matcher importMatcher = IMPORT_PATTERN.matcher(unit.content());
+                while (importMatcher.find() && index.dependencies.size() < 5000) {
+                    index.dependencies.add(new CodeDependency(className, importMatcher.group(1), "IMPORT"));
+                }
             }
             Matcher matcher = METHOD_PATTERN.matcher(unit.content());
             while (matcher.find()) {
@@ -392,10 +420,12 @@ public class TraceabilityMapService {
                 index.alias(methodName, methodId);
                 index.alias(className + "#" + methodName, methodId);
                 index.alias(path + "#" + methodName, methodId);
-                int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
-                String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
-                index.methodSpans.add(new MethodSpan(methodId, className, methodName, body));
-                addControlFlowSteps(index, methodId, methodName, body);
+                if (collectCodeAnalysis) {
+                    int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
+                    String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
+                    index.methodSpans.add(new MethodSpan(methodId, className, methodName, body));
+                    addControlFlowSteps(index, methodId, methodName, body);
+                }
             }
         }
     }

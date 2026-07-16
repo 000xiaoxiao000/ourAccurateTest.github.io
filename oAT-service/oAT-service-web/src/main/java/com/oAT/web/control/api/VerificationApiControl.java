@@ -15,6 +15,8 @@ import com.oAT.web.verification.VerificationService.ReviewTraceLink;
 import com.oAT.web.verification.VerificationService.UpdateAsset;
 import com.oAT.web.verification.VerificationService.UpdateBaseline;
 import com.oAT.web.verification.VerificationService.WriteBackFinding;
+import com.oAT.web.verification.SourceAssetFilter;
+import com.oAT.web.verification.SourceAssetFilter.SourceProfile;
 import com.oAT.web.verification.connector.ConnectorRegistry;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
@@ -158,6 +160,7 @@ public class VerificationApiControl {
         String branch = optionalText(StringUtils.hasText(effectiveRequest.branch()) ? effectiveRequest.branch() : credentials.branch());
         String commit = StringUtils.hasText(effectiveRequest.commit()) ? effectiveRequest.commit().trim() : credentials.commit();
         Assert.hasText(credentials.repoUrl(), "仓库地址不能为空");
+        AppVo sourceApp = resolveSourceApp(projectId, effectiveRequest.appId());
         if (!StringUtils.hasText(commit)) {
             try {
                 commit = gitService.getLatestCommitId(credentials.repoUrl(), credentials.username(), credentials.password(), branch);
@@ -175,7 +178,8 @@ public class VerificationApiControl {
             } catch (RuntimeException e) {
                 throw new IllegalArgumentException(e.getMessage() == null ? "Git 源码拉取失败" : e.getMessage(), e);
             }
-            SourceSnapshot source = summarizeSourceZip(tempZip, effectiveRequest.maxFiles(), effectiveRequest.maxBytes());
+            SourceSnapshot source = summarizeSourceZip(tempZip, effectiveRequest.maxFiles(), effectiveRequest.maxBytes(),
+                    SourceAssetFilter.fromApp(sourceApp));
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("automaticSync", false);
             metadata.put("inputMode", "GIT");
@@ -187,6 +191,7 @@ public class VerificationApiControl {
             metadata.put("sampledFileCount", source.sampledFileCount());
             metadata.put("truncated", source.truncated());
             metadata.put("appId", effectiveRequest.appId());
+            metadata.putAll(SourceAssetFilter.metadataForApp(sourceApp));
             AssetSnapshot asset = verificationService.importAsset(projectId, user.getId(), AssetType.SOURCE,
                     SourceType.GIT, "git-source-" + commit + ".txt", source.content(), effectiveRequest.appId(),
                     credentials.repoUrl(), commit, metadata);
@@ -399,7 +404,7 @@ public class VerificationApiControl {
             File tempZip = Files.createTempFile("oat-verification-upload-source-", ".zip").toFile();
             try {
                 file.transferTo(tempZip);
-                return summarizeSourceZip(tempZip, 120, 300_000).content();
+                return summarizeSourceZip(tempZip, 120, 300_000, SourceProfile.any()).content();
             } finally {
                 Files.deleteIfExists(tempZip.toPath());
             }
@@ -542,7 +547,7 @@ public class VerificationApiControl {
                 request == null ? null : request.branch(), request == null ? null : request.commit());
     }
 
-    private SourceSnapshot summarizeSourceZip(File zipFile, Integer maxFiles, Integer maxBytes) throws IOException {
+    private SourceSnapshot summarizeSourceZip(File zipFile, Integer maxFiles, Integer maxBytes, SourceProfile profile) throws IOException {
         int fileLimit = maxFiles == null || maxFiles <= 0 ? 1000 : Math.min(maxFiles, 2000);
         int byteLimit = maxBytes == null || maxBytes <= 0 ? 20_000_000 : Math.min(maxBytes, 50_000_000);
         StringBuilder manifestBuilder = new StringBuilder();
@@ -554,6 +559,7 @@ public class VerificationApiControl {
             List<? extends ZipEntry> entries = zip.stream()
                     .filter(entry -> !entry.isDirectory())
                     .filter(entry -> isSourceFile(entry.getName()))
+                    .filter(entry -> profile == null || profile.matches(entry.getName()))
                     .sorted((a, b) -> a.getName().compareToIgnoreCase(b.getName()))
                     .toList();
             totalCount = entries.size();
@@ -581,7 +587,7 @@ public class VerificationApiControl {
                 sampledCount++;
             }
         }
-        Assert.isTrue(totalCount > 0, "源码包中未找到可读取的源码文件");
+        Assert.isTrue(totalCount > 0, "源码包中未找到符合当前源码工程设置的源码文件");
         StringBuilder builder = new StringBuilder(manifestBuilder);
         builder.append(contentBuilder);
         builder.append("\n\n// SNAPSHOT_ID: ").append(UUID.randomUUID());
@@ -595,6 +601,14 @@ public class VerificationApiControl {
             return false;
         }
         return SOURCE_EXTENSIONS.stream().anyMatch(lower::endsWith);
+    }
+
+    private AppVo resolveSourceApp(String projectId, String appId) {
+        if (!StringUtils.hasText(appId)) return null;
+        AppVo app = appService.getApp(appId);
+        Assert.notNull(app, "找不到指定应用");
+        Assert.isTrue(projectId.equals(app.getCreateProjectId()), "应用不属于当前项目");
+        return app;
     }
 
 }

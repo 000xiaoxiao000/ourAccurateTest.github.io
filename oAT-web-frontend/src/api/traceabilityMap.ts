@@ -105,7 +105,7 @@ export interface TraceabilityMapResponse {
   nodes: TraceabilityNode[]
   edges: TraceabilityEdge[]
   codeTree: CodeTreeNode[]
-  codeGraph?: CodeGraphData
+  codeGraph?: CodeGraphData | null
   warnings: string[]
 }
 
@@ -125,6 +125,7 @@ export interface TraceabilityMapQuery {
   includeStatic?: boolean
   includeDynamic?: boolean
   includeAiCalls?: boolean
+  view?: 'trace' | 'calls' | 'full'
 }
 
 export function fetchTraceabilityMap(projectId: string, query: TraceabilityMapQuery = {}) {
@@ -136,6 +137,7 @@ export function fetchTraceabilityMap(projectId: string, query: TraceabilityMapQu
   if (query.includeStatic !== undefined) params.set('includeStatic', String(query.includeStatic))
   if (query.includeDynamic !== undefined) params.set('includeDynamic', String(query.includeDynamic))
   if (query.includeAiCalls !== undefined) params.set('includeAiCalls', String(query.includeAiCalls))
+  if (query.view) params.set('view', query.view)
   const suffix = params.toString() ? `?${params.toString()}` : ''
   return apiGetRaw<TraceabilityMapResponse>(`/api/projects/${projectId}/map/traceability${suffix}`)
 }
