@@ -31,11 +31,15 @@
           <strong>业务资产</strong>
           <span>{{ traceStats.requirements }} 需求 · {{ traceStats.testcases }} 用例</span>
         </div>
+        <label class="asset-search">
+          <input v-model.trim="assetKeyword" placeholder="搜索需求、用例…" />
+        </label>
         <section class="asset-group">
           <div class="group-head"><strong>需求</strong><span>{{ traceStats.requirements }}</span></div>
           <div v-if="!detail?.criteria.length" class="empty-card">暂无需求数据</div>
+          <div v-else-if="!filteredCriteria.length" class="empty-card">没有匹配的需求</div>
           <button
-            v-for="item in detail?.criteria || []"
+            v-for="item in filteredCriteria"
             :key="item.id"
             :class="['asset-card', 'requirement', { active: selectedId === requirementNodeId(item.id) }]"
             @click="selectId(requirementNodeId(item.id))"
@@ -48,8 +52,9 @@
         <section class="asset-group testcase-group">
           <div class="group-head"><strong>测试用例</strong><span>{{ traceStats.testcases }}</span></div>
           <div v-if="!detail?.testcases.length" class="empty-card">暂无测试用例数据</div>
+          <div v-else-if="!filteredTestcases.length" class="empty-card">没有匹配的用例</div>
           <button
-            v-for="item in detail?.testcases || []"
+            v-for="item in filteredTestcases"
             :key="item.id"
             :class="['asset-card', 'testcase', { active: selectedId === testcaseNodeId(item.id) }]"
             @click="selectId(testcaseNodeId(item.id))"
@@ -148,6 +153,7 @@ import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
 interface CodeTreeMethod { nodeId: string; name: string; line?: number }
 interface CodeTreeClass  { id: string; nodeId: string; name: string; methods: CodeTreeMethod[] }
 interface CodeTreeDir    { path: string; name: string; classes: CodeTreeClass[] }
+interface SourceSearchEntry { nodeId: string; label: string; type: string; searchable: string; className: string; methodName?: string }
 interface TreeNode {
   key:         string
   name:        string
@@ -158,6 +164,8 @@ interface TreeNode {
 }
 interface TraceGroup     { label: string; relLabel: string; tone: string; items: { id: string; label: string; sub?: string }[] }
 
+const SEARCH_RESULT_LIMIT = 300
+
 const route            = useRoute()
 const projectId        = computed(() => String(route.params.projectId || ''))
 const loading          = ref(false)
@@ -167,6 +175,7 @@ const detail           = ref<BaselineDetail | null>(null)
 const activeBaselineId = ref('')
 const sourceTree       = ref<SourceTreeClass[]>([])
 const selectedId       = ref('')
+const assetKeyword     = ref('')
 const codeKeyword      = ref('')
 const openDirs         = ref<Set<string>>(new Set())
 const openClasses      = ref<Set<string>>(new Set())
@@ -181,39 +190,61 @@ const baselineStatusText = computed(() => {
 })
 
 const sourceSymbolAliases = computed(() => buildSourceSymbolAliases(sourceTree.value))
-const traceGraph = computed(() => buildTraceGraph(detail.value, sourceSymbolAliases.value))
+const sourceNodeAncestors = computed(() => buildSourceNodeAncestors(sourceTree.value))
+const sourceNodeParents = computed(() => buildSourceNodeParents(sourceTree.value))
+const sourceSearchIndex = computed(() => buildSourceSearchIndex(sourceTree.value))
+const traceGraph = computed(() => buildTraceGraph(detail.value, sourceSymbolAliases.value, sourceSearchIndex.value))
 const nodes      = computed(() => traceGraph.value.nodes)
 const edges      = computed(() => traceGraph.value.edges)
 
+const filteredCriteria = computed(() => {
+  const kw = assetKeyword.value.toLowerCase()
+  const items = detail.value?.criteria || []
+  if (!kw) return items
+  return items.filter((item) => [
+    item.requirementKey,
+    item.acKey,
+    item.title,
+    item.content,
+    item.sourceLocator,
+  ].some((value) => String(value || '').toLowerCase().includes(kw)))
+})
+
+const filteredTestcases = computed(() => {
+  const kw = assetKeyword.value.toLowerCase()
+  const items = detail.value?.testcases || []
+  if (!kw) return items
+  return items.filter((item) => [
+    item.externalKey,
+    item.title,
+    item.preconditions,
+    item.steps,
+    item.testData,
+    item.expected,
+    item.requirementRefs,
+    item.sourceLocator,
+  ].some((value) => String(value || '').toLowerCase().includes(kw)))
+})
+
 // ── code tree hierarchy ──────────────────────────────────────────────────────
 
-function buildTrie(classes: SourceTreeClass[]): TreeNode[] {
-  // Each node's children stored as a Map keyed by segment name for O(1) lookup
-  interface MutableNode {
-    key:      string
-    name:     string
-    isDir:    boolean
-    childMap: Map<string, MutableNode>
-    file?:    { id: string; nodeId: string; name: string; methods: CodeTreeMethod[] }
-  }
+function buildVisibleTree(classes: SourceTreeClass[], expandedDirs: Set<string>): TreeNode[] {
+  const childrenByParent = new Map<string, TreeNode[]>()
+  const childKeyByParent = new Map<string, Set<string>>()
 
-  const rootMap = new Map<string, MutableNode>()
-
-  function ensureDir(map: Map<string, MutableNode>, segment: string, key: string): MutableNode {
-    if (!map.has(segment)) {
-      map.set(segment, { key, name: segment, isDir: true, childMap: new Map() })
-    }
-    return map.get(segment)!
+  function addChild(parentKey: string, child: TreeNode) {
+    const childKeys = childKeyByParent.get(parentKey) || new Set<string>()
+    if (childKeys.has(child.key)) return
+    childKeys.add(child.key)
+    childKeyByParent.set(parentKey, childKeys)
+    childrenByParent.set(parentKey, [...(childrenByParent.get(parentKey) || []), child])
   }
 
   classes.forEach((cls) => {
-    const rawPath = cls.filePath
-      ? cls.filePath.replace(/\\/g, '/')
-      : cls.className.replace(/\./g, '/').replace(/\$.*$/, '') + '.java'
-    const filePath = hasKnownSourceExtension(rawPath) ? rawPath : rawPath + '.java'
+    const filePath = normalizedSourceFilePath(cls)
     const parts = filePath.split('/').filter(Boolean)
 
-    let currentMap = rootMap
+    let parentKey = ''
     let prefix = ''
 
     parts.forEach((segment, idx) => {
@@ -223,72 +254,89 @@ function buildTrie(classes: SourceTreeClass[]): TreeNode[] {
 
       if (isLast) {
         const fileName = displayFileName(segment)
-        if (!currentMap.has(segment)) {
-          currentMap.set(segment, {
-            key,
-            name:     fileName,
-            isDir:    false,
-            childMap: new Map(),
-            file: {
-              id:      cls.id,
-              nodeId:  sourceNodeId(`class:${cls.id}`),
-              name:    fileName,
-              methods: cls.methods.map((m, i) => ({
-                nodeId: sourceNodeId(`method:${cls.id}:${i}`),
-                name:   m.methodName,
-                line:   m.lineNumber ?? undefined,
-              })),
-            },
-          })
-        }
+        addChild(parentKey, {
+          key,
+          name: fileName,
+          displayName: fileName,
+          isDir: false,
+          children: [],
+          file: {
+            id: cls.id,
+            nodeId: sourceNodeId(`class:${cls.id}`),
+            name: fileName,
+            methods: cls.methods.map((m, i) => ({
+              nodeId: sourceNodeId(`method:${cls.id}:${i}`),
+              name: m.methodName,
+              line: m.lineNumber ?? undefined,
+            })),
+          },
+        })
       } else {
-        const dirNode = ensureDir(currentMap, segment, key)
-        currentMap = dirNode.childMap
+        addChild(parentKey, {
+          key,
+          name: segment,
+          displayName: segment,
+          isDir: true,
+          children: [],
+        })
+        parentKey = key
       }
     })
   })
 
-  function toTreeNodes(map: Map<string, MutableNode>): TreeNode[] {
-    return [...map.values()]
-      .map((n): TreeNode => ({
-        key:         n.key,
-        name:        n.name,
-        displayName: n.name,
-        isDir:       n.isDir,
-        children:    toTreeNodes(n.childMap),
-        file:        n.file,
-      }))
+  function sortedChildren(parentKey: string) {
+    return [...(childrenByParent.get(parentKey) || [])]
       .sort((a, b) => {
         if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
         return a.name.localeCompare(b.name)
       })
   }
 
-  return toTreeNodes(rootMap)
+  function visibleChildren(parentKey: string): TreeNode[] {
+    return sortedChildren(parentKey).map((node) => {
+      if (!node.isDir || !expandedDirs.has(node.key)) return { ...node, children: [] }
+      return { ...node, children: visibleChildren(node.key) }
+    })
+  }
+
+  return visibleChildren('')
 }
 
 const codeTrieRoot = computed<TreeNode[]>(() => {
   if (!sourceTree.value.length) return []
-  return buildTrie(sourceTree.value)
+  return buildVisibleTree(sourceTree.value, openDirs.value)
 })
 
 const codeTreeFiltered = computed<TreeNode[]>(() => {
   const kw = codeKeyword.value.toLowerCase().trim()
   if (!kw) return codeTrieRoot.value
-
-  function filterNode(node: TreeNode): TreeNode | null {
-    if (!node.isDir) {
-      const matchFile    = node.name.toLowerCase().includes(kw)
-      const filtMethods  = node.file?.methods.filter((m) => m.name.toLowerCase().includes(kw)) ?? []
-      if (!matchFile && filtMethods.length === 0) return null
-      return { ...node, file: node.file ? { ...node.file, methods: matchFile ? node.file.methods : filtMethods } : undefined }
-    }
-    const filteredChildren = node.children.map(filterNode).filter(Boolean) as TreeNode[]
-    if (!filteredChildren.length) return null
-    return { ...node, children: filteredChildren }
-  }
-
-  return codeTrieRoot.value.map(filterNode).filter(Boolean) as TreeNode[]
+  const matched = sourceTree.value
+    .filter((cls) => {
+      const path = cls.filePath || cls.className
+      return path.toLowerCase().includes(kw)
+        || cls.className.toLowerCase().includes(kw)
+        || cls.methods.some((method) => method.methodName.toLowerCase().includes(kw))
+    })
+    .slice(0, SEARCH_RESULT_LIMIT)
+    .map((cls) => {
+      const pathMatch = (cls.filePath || cls.className).toLowerCase().includes(kw)
+        || cls.className.toLowerCase().includes(kw)
+      return {
+        ...cls,
+        methods: pathMatch ? cls.methods : cls.methods.filter((method) => method.methodName.toLowerCase().includes(kw)),
+      }
+    })
+  const expanded = new Set<string>()
+  matched.forEach((cls) => {
+    const filePath = normalizedSourceFilePath(cls)
+    const parts = filePath.split('/').filter(Boolean)
+    let prefix = ''
+    parts.slice(0, -1).forEach((segment) => {
+      prefix = prefix ? `${prefix}/${segment}` : segment
+      expanded.add(prefix)
+    })
+  })
+  return buildVisibleTree(matched, expanded)
 })
 
 const allCodeTreeDirs = computed<CodeTreeDir[]>(() => {
@@ -367,19 +415,98 @@ function displayFileName(path: string) {
   return name.replace(/\.[^.]+$/, '')
 }
 
+function normalizedSourceFilePath(cls: SourceTreeClass) {
+  const rawPath = cls.filePath
+    ? cls.filePath.replace(/\\/g, '/')
+    : cls.className.replace(/\./g, '/').replace(/\$.*$/, '') + '.java'
+  return hasKnownSourceExtension(rawPath) ? rawPath : rawPath + '.java'
+}
+
+function buildSourceNodeAncestors(classes: SourceTreeClass[]) {
+  const ancestors = new Map<string, string[]>()
+  classes.forEach((cls) => {
+    const filePath = normalizedSourceFilePath(cls)
+    const parts = filePath.split('/').filter(Boolean)
+    const dirs: string[] = []
+    let prefix = ''
+    parts.slice(0, -1).forEach((segment) => {
+      prefix = prefix ? `${prefix}/${segment}` : segment
+      dirs.push(prefix)
+    })
+    ancestors.set(sourceNodeId(`class:${cls.id}`), dirs)
+    cls.methods.forEach((_, index) => {
+      ancestors.set(sourceNodeId(`method:${cls.id}:${index}`), dirs)
+    })
+  })
+  return ancestors
+}
+
+function buildSourceNodeParents(classes: SourceTreeClass[]) {
+  const parents = new Map<string, string>()
+  classes.forEach((cls) => {
+    const classId = sourceNodeId(`class:${cls.id}`)
+    cls.methods.forEach((_, index) => {
+      parents.set(sourceNodeId(`method:${cls.id}:${index}`), classId)
+    })
+  })
+  return parents
+}
+
+function buildSourceSearchIndex(classes: SourceTreeClass[]): SourceSearchEntry[] {
+  return classes.flatMap((cls) => {
+    const filePath = normalizedSourceFilePath(cls)
+    const simpleName = displayFileName(filePath)
+    const className = cls.className || simpleName
+    const classNode: SourceSearchEntry = {
+      nodeId: sourceNodeId(`class:${cls.id}`),
+      label: className,
+      type: 'source code class',
+      className,
+      searchable: normalizeSearchText(`${className} ${simpleName} ${filePath}`),
+    }
+    const methodNodes = cls.methods.map((method, index): SourceSearchEntry => ({
+      nodeId: sourceNodeId(`method:${cls.id}:${index}`),
+      label: `${className}#${method.methodName}`,
+      type: 'source code method',
+      className,
+      methodName: method.methodName,
+      searchable: normalizeSearchText(`${className} ${simpleName} ${filePath} ${method.methodName}`),
+    }))
+    return [classNode, ...methodNodes]
+  })
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_#./-]+/g, ' ')
+    .toLowerCase()
+}
+
 // ── source nodes (for counts and fallback) ───────────────────────────────────
 
 const sourceNodes = computed<RelationNode[]>(() => {
-  if (sourceTree.value.length) {
-    return sourceTree.value.flatMap((cls) => [
-      { id: sourceNodeId(`class:${cls.id}`), label: cls.className, type: 'source code class', classes: ['source', 'static'] } as RelationNode,
-      ...cls.methods.map((m, idx) => ({ id: sourceNodeId(`method:${cls.id}:${idx}`), label: `${m.methodName}${m.lineNumber ? ` · L${m.lineNumber}` : ''}`, type: 'source code method', classes: ['source', 'static'] } as RelationNode)),
-    ])
-  }
-  const linked = nodes.value.filter((n) => n.id.startsWith('src:'))
-  if (linked.length) return linked
+  const visible = flattenVisibleSourceNodes(codeTreeFiltered.value)
+  const ids = new Set(visible.map((node) => node.id))
+  const linked = nodes.value.filter((node) => node.id.startsWith('src:') && !ids.has(node.id))
+  if (visible.length || linked.length) return [...visible, ...linked]
   return overview.value.sources.map((s) => ({ id: sourceNodeId(s.id), label: s.fileName || s.id, type: 'source code', classes: ['source', 'static'] }))
 })
+
+function flattenVisibleSourceNodes(tree: TreeNode[]) {
+  const result: RelationNode[] = []
+  const visit = (node: TreeNode) => {
+    if (node.file) {
+      result.push({ id: node.file.nodeId, label: node.file.name, type: 'source code class', classes: ['source', 'static'] })
+      node.file.methods.forEach((method) => {
+        result.push({ id: method.nodeId, label: `${method.name}${method.line ? ` · L${method.line}` : ''}`, type: 'source code method', classes: ['source', 'static'] })
+      })
+    }
+    node.children.forEach(visit)
+  }
+  tree.forEach(visit)
+  return result
+}
 
 // ── selected node info ───────────────────────────────────────────────────────
 
@@ -444,14 +571,21 @@ const focusedLinks = computed<TraceGroup[]>(() => {
 
 const linkedNodeIds = computed(() => {
   const ids = new Set<string>()
-  edges.value.forEach((e) => { ids.add(e.source); ids.add(e.target) })
+  edges.value.forEach((e) => {
+    ids.add(e.source)
+    ids.add(e.target)
+    const sourceParent = sourceNodeParents.value.get(e.source)
+    const targetParent = sourceNodeParents.value.get(e.target)
+    if (sourceParent) ids.add(sourceParent)
+    if (targetParent) ids.add(targetParent)
+  })
   return ids
 })
 
 const traceStats = computed(() => ({
   requirements: detail.value?.criteria.length || 0,
   testcases:    detail.value?.testcases.length  || 0,
-  sources:      sourceNodes.value.length,
+  sources:      sourceTree.value.reduce((sum, cls) => sum + 1 + cls.methods.length, 0),
 }))
 
 // ── tree interactions ───────────────────────────────────────────────────────
@@ -470,23 +604,19 @@ function toggleClass(id: string) {
 
 function selectId(id: string) {
   selectedId.value = id
-  function expandAncestors(nodes: TreeNode[], target: string): boolean {
-    for (const n of nodes) {
-      if (!n.isDir) {
-        if (n.file?.nodeId === target || n.file?.methods.some((m) => m.nodeId === target)) {
-          if (n.file) { const cs = new Set(openClasses.value); cs.add(n.file.id); openClasses.value = cs }
-          return true
-        }
-      } else {
-        if (expandAncestors(n.children, target)) {
-          const ds = new Set(openDirs.value); ds.add(n.key); openDirs.value = ds
-          return true
-        }
-      }
-    }
-    return false
+  const ancestors = sourceNodeAncestors.value.get(id)
+  if (ancestors?.length) {
+    const dirs = new Set(openDirs.value)
+    ancestors.forEach((path) => dirs.add(path))
+    openDirs.value = dirs
   }
-  expandAncestors(codeTrieRoot.value, id)
+  const classNode = sourceTree.value.find((cls) => sourceNodeId(`class:${cls.id}`) === id
+    || cls.methods.some((_, index) => sourceNodeId(`method:${cls.id}:${index}`) === id))
+  if (classNode) {
+    const classes = new Set(openClasses.value)
+    classes.add(classNode.id)
+    openClasses.value = classes
+  }
 }
 
 function requirementTestCount(criterionId: string) {
@@ -498,7 +628,10 @@ function testcaseRequirementCount(testcaseId: string) {
 }
 
 function sourceLinkCount(nodeId: string) {
-  return edges.value.filter((e) => e.target === nodeId || e.source === nodeId).length
+  return edges.value.filter((e) => {
+    if (e.target === nodeId || e.source === nodeId) return true
+    return sourceNodeParents.value.get(e.target) === nodeId || sourceNodeParents.value.get(e.source) === nodeId
+  }).length
 }
 
 // ── data loading ────────────────────────────────────────────────────────────
@@ -624,7 +757,7 @@ function pickBaselineId(baselines: VerificationBaseline[], current: string) {
 
 // ── graph building ──────────────────────────────────────────────────────────
 
-function buildTraceGraph(current: BaselineDetail | null, sourceAliases: Map<string, string>): { nodes: RelationNode[]; edges: RelationEdge[] } {
+function buildTraceGraph(current: BaselineDetail | null, sourceAliases: Map<string, string>, sourceIndex: SourceSearchEntry[]): { nodes: RelationNode[]; edges: RelationEdge[] } {
   if (!current) return { nodes: [], edges: [] }
   const ns = new Map<string, RelationNode>()
   const es = new Map<string, RelationEdge>()
@@ -633,6 +766,7 @@ function buildTraceGraph(current: BaselineDetail | null, sourceAliases: Map<stri
   current.criteria.forEach((c) => ns.set(requirementNodeId(c.id), { id: requirementNodeId(c.id), label: `${c.requirementKey}/${c.acKey}`, type: 'requirement', classes: ['requirement'], description: c.title || c.content }))
   current.testcases.forEach((t) => ns.set(testcaseNodeId(t.id), { id: testcaseNodeId(t.id), label: t.externalKey || t.title || t.id, type: 'testcase', classes: ['testcase'], description: t.title || t.expected || t.steps }))
   current.traceLinks.forEach((link) => addNormalizedTraceLink(ns, es, link, sourceAliases))
+  addEndpointCodeLinks(ns, es, current, sourceIndex)
   addDerivedTestcaseCodeLinks(ns, es)
   addSourceAssetFallbacks(ns, current)
   current.findings.forEach((finding) => {
@@ -650,6 +784,125 @@ function buildTraceGraph(current: BaselineDetail | null, sourceAliases: Map<stri
     }
   })
   return { nodes: [...ns.values()], edges: [...es.values()] }
+}
+
+function addEndpointCodeLinks(ns: Map<string, RelationNode>, es: Map<string, RelationEdge>, current: BaselineDetail, sourceIndex: SourceSearchEntry[]) {
+  if (!sourceIndex.length) return
+
+  current.criteria.forEach((criterion) => {
+    const reqId = requirementNodeId(criterion.id)
+    endpointTexts(criterionText(criterion)).forEach((endpoint) => {
+      const source = matchSourceByEndpoint(endpoint, sourceIndex)
+      if (!source) return
+      ensureSourceGraphNode(ns, source)
+      const edgeId = `derived:req-code:${criterion.id}:${source.nodeId}:${endpoint}`
+      if (!es.has(edgeId)) {
+        es.set(edgeId, {
+          id: edgeId,
+          source: reqId,
+          target: source.nodeId,
+          label: '需求实现',
+          action: '接口路径匹配',
+          sourceLabel: ns.get(reqId)?.label,
+          targetLabel: source.label,
+        })
+      }
+    })
+  })
+
+  current.testcases.forEach((testcase) => {
+    const tcId = testcaseNodeId(testcase.id)
+    endpointTexts(testcaseText(testcase)).forEach((endpoint) => {
+      const source = matchSourceByEndpoint(endpoint, sourceIndex)
+      if (!source) return
+      ensureSourceGraphNode(ns, source)
+      const edgeId = `derived:tc-code:${testcase.id}:${source.nodeId}:${endpoint}`
+      if (!es.has(edgeId)) {
+        es.set(edgeId, {
+          id: edgeId,
+          source: tcId,
+          target: source.nodeId,
+          label: '测试覆盖',
+          action: '接口路径匹配',
+          sourceLabel: ns.get(tcId)?.label,
+          targetLabel: source.label,
+        })
+      }
+    })
+  })
+}
+
+function ensureSourceGraphNode(ns: Map<string, RelationNode>, source: SourceSearchEntry) {
+  if (ns.has(source.nodeId)) return
+  ns.set(source.nodeId, {
+    id: source.nodeId,
+    label: source.label,
+    type: source.type,
+    classes: ['source', 'static'],
+    description: source.methodName ? `${source.className}#${source.methodName}` : source.className,
+  })
+}
+
+function criterionText(criterion: BaselineDetail['criteria'][number]) {
+  return [
+    criterion.requirementKey,
+    criterion.acKey,
+    criterion.title,
+    criterion.content,
+    criterion.sourceLocator,
+  ].join(' ')
+}
+
+function testcaseText(testcase: BaselineDetail['testcases'][number]) {
+  return [
+    testcase.externalKey,
+    testcase.title,
+    testcase.preconditions,
+    testcase.steps,
+    testcase.testData,
+    testcase.expected,
+    testcase.requirementRefs,
+    testcase.sourceLocator,
+  ].join(' ')
+}
+
+function endpointTexts(text: string) {
+  const endpoints = new Set<string>()
+  const pattern = /\b(?:GET|POST|PUT|DELETE|PATCH)?\s*[:：`]?\s*(\/[A-Za-z0-9_./{}-]+)/gi
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    endpoints.add(match[1])
+  }
+  return [...endpoints]
+}
+
+function matchSourceByEndpoint(endpoint: string, sourceIndex: SourceSearchEntry[]): SourceSearchEntry | null {
+  const tokens = endpointTokens(endpoint)
+  if (!tokens.length) return null
+  let bestItem: SourceSearchEntry | null = null
+  let bestScore = 0
+  sourceIndex.forEach((item) => {
+    let score = 0
+    tokens.forEach((token, index) => {
+      if (item.searchable.includes(token)) score += index === tokens.length - 1 ? 4 : 2
+      if (item.methodName && normalizeSearchText(item.methodName).includes(token)) score += 3
+      if (normalizeSearchText(item.className).includes(token)) score += 2
+    })
+    if (item.methodName) score += 1
+    if (score > bestScore) {
+      bestScore = score
+      bestItem = item
+    }
+  })
+  return bestScore >= 4 ? bestItem : null
+}
+
+function endpointTokens(endpoint: string) {
+  return endpoint
+    .split(/[/?#]/)[0]
+    .split('/')
+    .map((part) => part.replace(/[{}]/g, '').trim().toLowerCase())
+    .filter((part) => part && !/^\d+$/.test(part) && !['api', 'v1', 'v2', 'v3'].includes(part))
 }
 
 function addNormalizedTraceLink(ns: Map<string, RelationNode>, es: Map<string, RelationEdge>, link: TraceLink, sourceAliases: Map<string, string>) {
@@ -760,6 +1013,9 @@ onMounted(load)
 .pane-head { display:flex; justify-content:space-between; gap:8px; padding:14px 15px; border-bottom:1px solid #eef2f5; color:#172033; font-size:14px; }
 .pane-head span { color:#64748b; font-size:11px; font-weight:700; }
 .empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
+.asset-search { display:block; padding:10px 12px; border-bottom:1px solid #eef2f5; }
+.asset-search input { width:100%; box-sizing:border-box; border:1px solid #e2e8f0; border-radius:10px; padding:7px 10px; font-size:13px; outline:0; background:#f8fafc; }
+.asset-search input:focus { border-color:#0f766e; background:#fff; }
 
 .asset-group { display:grid; gap:7px; padding:12px; min-height:0; overflow:auto; }
 .testcase-group { flex:1; border-top:1px solid #eef2f5; }
