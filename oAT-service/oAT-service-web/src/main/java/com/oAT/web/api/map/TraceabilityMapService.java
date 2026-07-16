@@ -70,7 +70,9 @@ public class TraceabilityMapService {
     private static final Pattern CLASS_PATTERN = Pattern.compile("(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
     private static final Pattern IMPORT_PATTERN = Pattern.compile("(?m)^\\s*import\\s+(?:static\\s+)?([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$*]*)*);\\s*$");
     private static final Pattern CONTROL_FLOW_PATTERN = Pattern.compile("(?m)^\\s*(if|else\\s+if|else|for|while|switch|case|catch|return|throw)\\b\\s*(.*)");
-    private static final Pattern METHOD_PATTERN = Pattern.compile("(?m)^\\s*(?:public|protected|private|static|final|synchronized|abstract|native|default|\\s)+[\\w<>,.?\\[\\] ]+\\s+([A-Za-z_$][\\w$]*)\\s*\\([^;{}]*\\)\\s*(?:throws [^{]+)?\\{");
+    private static final Pattern METHOD_PATTERN = Pattern.compile("(?m)^\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\\s+)*[\\w<>,.?\\[\\]]+(?:\\s*<[^\\n{};()]+>)?\\s+([A-Za-z_$][\\w$]*)\\s*\\([^;{}]*\\)\\s*(?:throws [^{]+)?\\{");
+    private static final Set<String> JAVA_CONTROL_KEYWORDS = Set.of(
+            "if", "for", "while", "switch", "catch", "return", "throw", "else", "case", "do", "try", "finally", "synchronized");
 
     private final VerificationRepository verificationRepository;
     private final StaticInfoRepository staticInfoRepository;
@@ -409,6 +411,9 @@ public class TraceabilityMapService {
             Matcher matcher = METHOD_PATTERN.matcher(unit.content());
             while (matcher.find()) {
                 String methodName = matcher.group(1);
+                if (JAVA_CONTROL_KEYWORDS.contains(methodName)) {
+                    continue;
+                }
                 int line = lineNumber(unit.content(), matcher.start());
                 String methodId = normalizer.methodId(languageFromPath(path), path, className, methodName, null);
                 String declaration = unit.content().substring(matcher.start(), matcher.end());
@@ -804,13 +809,13 @@ public class TraceabilityMapService {
             return null;
         }
         String normalized = type.trim().toUpperCase(Locale.ROOT);
-        if (normalized.equals("AC") || normalized.equals("REQUIREMENT")) {
+        if ("AC".equals(normalized) || "REQUIREMENT".equals(normalized)) {
             return reqId(id);
         }
-        if (normalized.equals("TESTCASE")) {
+        if ("TESTCASE".equals(normalized)) {
             return tcId(id);
         }
-        if (normalized.contains("SOURCE") || normalized.contains("CODE") || normalized.equals("METHOD") || normalized.equals("CLASS") || normalized.equals("FILE")) {
+        if (normalized.contains("SOURCE") || normalized.contains("CODE") || "METHOD".equals(normalized) || "CLASS".equals(normalized) || "FILE".equals(normalized)) {
             return codeIndex.resolve(id);
         }
         return null;

@@ -109,7 +109,11 @@
           <small>{{ selectedTraceNode.locator || selectedTraceNode.symbol || selectedTraceNode.id }}</small>
         </div>
         <p>{{ selectedTraceNode.description || '暂无描述' }}</p>
-        <button type="button" @click="selectedTraceId = ''">关闭</button>
+        <div class="node-detail-actions">
+          <button v-if="selectedTraceNode.kind.startsWith('CODE_')" type="button" @click="locateTraceCodeNode(selectedTraceNode.id)">在代码树中定位</button>
+          <button v-if="selectedTraceNode.kind.startsWith('CODE_')" type="button" @click="openTraceCodeContext(selectedTraceNode.id)">查看调用上下文</button>
+          <button type="button" @click="selectedTraceId = ''">关闭</button>
+        </div>
       </section>
 
       <div class="trace-reference-grid">
@@ -427,8 +431,8 @@ const displayOpenClasses = computed(() => {
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
 const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, callGraphScope.value, codeKeyword.value))
-const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value))
-const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value))
+const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
+const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
 const selectedCodeContextText = computed(() => {
   const node = map.selectedNode.value
   if (!node) return ''
@@ -446,6 +450,7 @@ const coverageRows = computed(() => {
   })
   return map.nodes.value
     .filter((node) => node.kind.startsWith('CODE_'))
+    .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
     .filter((node) => node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH' || edgeNodeIds.has(node.id))
     .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
     .map((node) => ({
@@ -551,6 +556,19 @@ async function toggleAiCallAnalysis() {
 
 function selectTraceNode(id: string) {
   selectedTraceId.value = selectedTraceId.value === id ? '' : id
+}
+
+async function locateTraceCodeNode(id: string) {
+  activeTab.value = 'calls'
+  callViewMode.value = 'graph'
+  map.select(id)
+  await loadCodeData(id)
+  openAncestors(id, map.codeTree.value)
+}
+
+async function openTraceCodeContext(id: string) {
+  callGraphScope.value = 'context'
+  await locateTraceCodeNode(id)
 }
 
 async function selectCodeNode(id: string) {
@@ -792,20 +810,22 @@ function layerTitle(title: string, layer: { nodes: TraceabilityNode[]; total: nu
   return layer.total > layer.nodes.length ? `${title} · ${layer.nodes.length}/${layer.total}` : title
 }
 
-function buildDependencyGraph(dependencies: Array<{ source: string; target: string; kind: string }>, keyword: string) {
+function buildDependencyGraph(dependencies: Array<{ source: string; target: string; kind: string }>, keyword: string, allNodes: TraceabilityNode[], focusId: string) {
   const unique = new Map<string, { source: string; target: string; kind: string }>()
+  const dependencyScope = dependencyScopeLabels(allNodes, focusId)
   dependencies
+    .filter((item) => !dependencyScope.size || dependencyScope.has(normalizeSearch(item.source)) || [...dependencyScope].some((label) => normalizeSearch(item.source).endsWith(`.${label}`) || normalizeSearch(item.source).includes(label)))
     .filter((item) => !keyword || normalizeSearch([item.source, item.target, item.kind].join(' ')).includes(keyword))
     .forEach((item) => unique.set(`${item.source}|${item.target}`, item))
   const items = [...unique.values()].slice(0, 160)
   const sources = [...new Set(items.map((item) => item.source))]
   const targets = [...new Set(items.map((item) => item.target))]
-  const nodes: MiniGraphNode[] = []
+  const graphNodes: MiniGraphNode[] = []
   const sourceWidth = 230
   const targetWidth = 300
-  sources.forEach((label, index) => nodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source' }))
-  targets.forEach((label, index) => nodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target' }))
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]))
+  sources.forEach((label, index) => graphNodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source' }))
+  targets.forEach((label, index) => graphNodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target' }))
+  const nodeMap = new Map(graphNodes.map((node) => [node.id, node]))
   const edges: MiniGraphEdge[] = items.map((item, index) => {
     const source = nodeMap.get(`source:${item.source}`)!
     const target = nodeMap.get(`target:${item.target}`)!
@@ -816,16 +836,17 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
     const midX = (startX + endX) / 2
     return { id: `dependency:${index}`, path: `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}` }
   })
-  return { width: 860, height: Math.max(420, Math.max(sources.length * 76, targets.length * 58) + 80), nodes, edges }
+  return { width: 860, height: Math.max(420, Math.max(sources.length * 76, targets.length * 58) + 80), nodes: graphNodes, edges }
 }
 
-function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, keyword: string) {
+function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, keyword: string, allNodes: TraceabilityNode[]) {
+  const scopedMethodIds = codeMethodScopeIds(allNodes, focusId)
   const selected = focusId ? steps.filter((step) => step.methodId === focusId) : steps
-  const source = keyword ? steps : selected.length ? selected : steps
+  const source = scopedMethodIds.size ? steps.filter((step) => scopedMethodIds.has(step.methodId)) : keyword ? steps : selected.length ? selected : steps
   const visible = source
     .filter((step) => !keyword || normalizeSearch([step.methodId, step.methodLabel, step.kind, step.expression].join(' ')).includes(keyword))
     .slice(0, 80)
-  const nodes: MiniGraphNode[] = visible.map((step, index) => ({
+  const graphNodes: MiniGraphNode[] = visible.map((step, index) => ({
     id: `${step.methodId}:${step.order}`,
     x: 100 + (index % 2) * 390,
     y: 42 + Math.floor(index / 2) * 78,
@@ -836,12 +857,12 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
   }))
   const edges: MiniGraphEdge[] = []
-  for (let index = 1; index < nodes.length; index++) {
-    const source = nodes[index - 1]
-    const target = nodes[index]
+  for (let index = 1; index < graphNodes.length; index++) {
+    const source = graphNodes[index - 1]
+    const target = graphNodes[index]
     edges.push({ id: `control:${index}`, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
   }
-  return { width: 860, height: Math.max(420, Math.ceil(nodes.length / 2) * 78 + 70), nodes, edges }
+  return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
 }
 
 function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
@@ -1036,6 +1057,75 @@ function collectCallScopeIds(nodes: TraceabilityNode[], edges: TraceabilityEdge[
     })
   }
   return ids
+}
+
+function codeNodeInCurrentScope(node: TraceabilityNode, nodes: TraceabilityNode[], focusId: string) {
+  if (!focusId) return true
+  const scope = new Set<string>([focusId])
+  collectCodeDescendantIds(nodes, focusId, scope)
+  let current = nodes.find((item) => item.id === focusId)
+  while (current?.parentId) {
+    scope.add(current.parentId)
+    current = nodes.find((item) => item.id === current?.parentId)
+  }
+  return scope.has(node.id)
+}
+
+function codeMethodScopeIds(nodes: TraceabilityNode[], focusId: string) {
+  const result = new Set<string>()
+  if (!focusId) return result
+  const focus = nodes.find((node) => node.id === focusId)
+  if (!focus?.kind.startsWith('CODE_')) return result
+  if (focus.kind === 'CODE_METHOD') {
+    result.add(focus.id)
+    return result
+  }
+  const scope = new Set<string>([focusId])
+  collectCodeDescendantIds(nodes, focusId, scope)
+  nodes.forEach((node) => {
+    if (node.kind === 'CODE_METHOD' && scope.has(node.id)) result.add(node.id)
+  })
+  return result
+}
+
+function dependencyScopeLabels(nodes: TraceabilityNode[], focusId: string) {
+  const result = new Set<string>()
+  if (!focusId) return result
+  const focus = nodes.find((node) => node.id === focusId)
+  if (!focus?.kind.startsWith('CODE_')) return result
+  const classNode = focus.kind === 'CODE_CLASS'
+    ? focus
+    : nearestCodeAncestor(nodes, focus, 'CODE_CLASS')
+  const fileNode = focus.kind === 'CODE_FILE'
+    ? focus
+    : nearestCodeAncestor(nodes, focus, 'CODE_FILE')
+  const scope = new Set<string>()
+  if (classNode) scope.add(classNode.id)
+  if (fileNode) {
+    scope.add(fileNode.id)
+    collectCodeDescendantIds(nodes, fileNode.id, scope)
+  }
+  if (!classNode && !fileNode) scope.add(focus.id)
+  nodes.forEach((node) => {
+    if (!scope.has(node.id) || node.kind !== 'CODE_CLASS') return
+    const labels = [node.label, node.symbol, node.description]
+    labels.forEach((label) => {
+      const normalized = normalizeSearch(label)
+      if (!normalized) return
+      result.add(normalized)
+      result.add(normalized.split('.').pop() || normalized)
+    })
+  })
+  return result
+}
+
+function nearestCodeAncestor(nodes: TraceabilityNode[], node: TraceabilityNode, kind: string) {
+  let current: TraceabilityNode | undefined = node
+  while (current?.parentId) {
+    current = nodes.find((item) => item.id === current?.parentId)
+    if (current?.kind === kind) return current
+  }
+  return undefined
 }
 
 function collectCodeDescendantIds(nodes: TraceabilityNode[], rootId: string, ids: Set<string>) {
@@ -1245,7 +1335,9 @@ onBeforeUnmount(() => {
 .node-detail-card strong, .code-node-detail strong { color:#172033; overflow-wrap:anywhere; }
 .node-detail-card small, .code-node-detail small { color:#64748b; overflow-wrap:anywhere; }
 .node-detail-card p { grid-column:1 / -1; margin:0; color:#475569; font-size:12px; line-height:1.5; }
-.node-detail-card button { border:0; border-radius:8px; padding:6px 10px; background:rgba(15,23,42,.08); color:#334155; font-size:12px; font-weight:900; cursor:pointer; }
+.node-detail-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
+.node-detail-actions button { border:0; border-radius:8px; padding:6px 10px; background:rgba(15,23,42,.08); color:#334155; font-size:12px; font-weight:900; cursor:pointer; }
+.node-detail-actions button:hover { background:#0f766e; color:#fff; }
 .line-cell { display:inline-block; width:36px; margin-right:8px; vertical-align:middle; border-top:2px solid #475569; }
 .line-cell.dashed { border-top-style:dashed; }
 .dot { display:inline-block; width:16px; height:16px; margin-right:8px; border-radius:999px; vertical-align:middle; }
