@@ -183,7 +183,7 @@ public class QualityGateService {
         return jdbc.query("""
                 SELECT * FROM oat_quality_gate_exemption
                 WHERE project_id = ? AND baseline_id = ?
-                  AND (expires_at IS NULL OR expires_at > NOW())
+                  AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
                 """, this::exemption, projectId, baselineId);
     }
 

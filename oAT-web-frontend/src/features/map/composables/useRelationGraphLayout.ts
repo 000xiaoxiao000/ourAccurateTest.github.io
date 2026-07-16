@@ -1,15 +1,16 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
 
-import type { GraphNode, RelationEdge, RelationNode } from '@/features/map/types'
+import type { GraphLayoutDirection, GraphNode, RelationEdge, RelationNode } from '@/features/map/types'
 
 export function useRelationGraphLayout(
   nodes: ComputedRef<RelationNode[]>,
   edges: ComputedRef<RelationEdge[]>,
   compact: ComputedRef<boolean>,
   nodePositionOverrides: Ref<Record<string, { x: number; y: number }>>,
+  direction: Ref<GraphLayoutDirection>,
 ) {
   const graphLayoutKind = computed(() => resolveGraphLayoutKind(nodes.value))
-  const graphLayoutPlan = computed(() => buildGraphLayout(nodes.value, edges.value, graphLayoutKind.value))
+  const graphLayoutPlan = computed(() => buildGraphLayout(nodes.value, edges.value, graphLayoutKind.value, direction.value))
   const graphViewport = computed(() => ({ width: compact.value ? 1080 : 1200, height: compact.value ? 620 : 720 }))
   const graphViewBox = computed(() => `0 0 ${graphViewport.value.width} ${graphViewport.value.height}`)
   const denseGraph = computed(() => nodes.value.length > 70)
@@ -82,6 +83,8 @@ export function nodeTone(node: RelationNode) {
   if (type.includes('testcase')) return 'testcase'
   if (type.includes('bug') || type.includes('finding')) return 'bug'
   if (type.includes('source')) return 'source'
+  if (type.includes('execution')) return 'execution'
+  if (type.includes('coverage')) return 'coverage'
   if (type.includes('table')) return 'table'
   if (type.includes('code')) return 'code'
   if (type.includes('notice')) return 'notice'
@@ -92,6 +95,8 @@ export function edgeTone(edge: Pick<RelationEdge, 'action' | 'label'>) {
   const value = `${edge.action || ''} ${edge.label || ''}`.toLowerCase()
   if (value.includes('bug') || value.includes('finding') || value.includes('critical') || value.includes('high')) return 'delete'
   if (value.includes('源码') || value.includes('source') || value.includes('implement')) return 'source'
+  if (value.includes('执行') || value.includes('execution')) return 'execution'
+  if (value.includes('覆盖率') || value.includes('coverage')) return 'coverage'
   if (value.includes('用例') || value.includes('testcase') || value.includes('cover')) return 'testcase'
   if (value.includes('需求') || value.includes('requirement')) return 'requirement'
   if (value.includes('delete') || value.includes('删')) return 'delete'
@@ -126,19 +131,19 @@ function resolveGraphLayoutKind(layoutNodes: RelationNode[]) {
   return 'grid'
 }
 
-function buildGraphLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[], kind: string) {
+function buildGraphLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[], kind: string, direction: GraphLayoutDirection) {
   if (!layoutNodes.length) {
     return { canvas: { width: 1200, height: 680 }, positions: new Map<string, { x: number; y: number }>() }
   }
-  return kind === 'grid' ? buildGridLayout(layoutNodes) : buildLayeredLayout(layoutNodes, layoutEdges)
+  return kind === 'grid' ? buildGridLayout(layoutNodes, direction) : buildLayeredLayout(layoutNodes, layoutEdges, direction)
 }
 
-function buildGridLayout(layoutNodes: RelationNode[]) {
+function buildGridLayout(layoutNodes: RelationNode[], direction: GraphLayoutDirection) {
   const count = layoutNodes.length
-  const columns = Math.max(1, Math.ceil(Math.sqrt(count * 1.6)))
+  const columns = Math.max(1, Math.ceil(Math.sqrt(count * (direction === 'horizontal' ? 1.6 : 0.8))))
   const rows = Math.ceil(count / columns)
-  const spacingX = 160
-  const spacingY = 92
+  const spacingX = direction === 'horizontal' ? 160 : 190
+  const spacingY = direction === 'horizontal' ? 92 : 108
   const canvas = {
     width: Math.max(1200, columns * spacingX + 160),
     height: Math.max(680, rows * spacingY + 160),
@@ -155,7 +160,7 @@ function buildGridLayout(layoutNodes: RelationNode[]) {
   return { canvas, positions }
 }
 
-function buildLayeredLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[]) {
+function buildLayeredLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[], direction: GraphLayoutDirection) {
   const nodeIds = new Set(layoutNodes.map((node) => node.id))
   const incoming = new Map<string, number>()
   const children = new Map<string, string[]>()
@@ -198,7 +203,7 @@ function buildLayeredLayout(layoutNodes: RelationNode[], layoutEdges: RelationEd
 
   const mostlyCode = layoutNodes.filter(isCodeNode).length > layoutNodes.length * 0.5
   if (mostlyCode && layoutNodes.length > 10) {
-    return buildWrappedFlowLayout(layoutNodes, layoutEdges)
+    return buildWrappedFlowLayout(layoutNodes, layoutEdges, direction)
   }
   const maxRowsPerColumn = mostlyCode ? (layoutNodes.length > 80 ? 5 : 4) : (layoutNodes.length > 80 ? 7 : 6)
   const maxColumnsPerBand = mostlyCode ? (layoutNodes.length > 80 ? 5 : 6) : (layoutNodes.length > 80 ? 6 : 7)
@@ -218,13 +223,14 @@ function buildLayeredLayout(layoutNodes: RelationNode[], layoutEdges: RelationEd
       const chunk = sortedBucket.slice(chunkIndex * maxRowsPerColumn, (chunkIndex + 1) * maxRowsPerColumn)
       const band = Math.floor(visualColumn / maxColumnsPerBand)
       const column = visualColumn % maxColumnsPerBand
-      const x = left + column * spacingX
+      const x = left + (direction === 'horizontal' ? column * spacingX : rowBandOffset(band, maxRowsPerColumn, spacingX, bandGap))
       const bandTop = top + band * (maxRowsPerColumn * spacingY + bandGap)
       const verticalOffset = Math.max(0, maxRowsPerColumn - chunk.length) * spacingY * 0.5
+      const horizontalOffset = Math.max(0, maxRowsPerColumn - chunk.length) * spacingX * 0.5
       chunk.forEach((node, row) => {
         positions.set(node.id, {
-          x,
-          y: bandTop + verticalOffset + row * spacingY,
+          x: direction === 'horizontal' ? x : x + horizontalOffset + row * spacingX,
+          y: direction === 'horizontal' ? bandTop + verticalOffset + row * spacingY : top + column * spacingY,
         })
       })
       visualColumn += 1
@@ -234,13 +240,21 @@ function buildLayeredLayout(layoutNodes: RelationNode[], layoutEdges: RelationEd
   const usedColumns = Math.min(maxColumnsPerBand, Math.max(1, visualColumn))
   const bands = Math.max(1, Math.ceil(visualColumn / maxColumnsPerBand))
   const canvas = {
-    width: Math.max(1120, left * 2 + (usedColumns - 1) * spacingX + 160),
-    height: Math.max(680, top * 2 + bands * maxRowsPerColumn * spacingY + (bands - 1) * bandGap),
+    width: direction === 'horizontal'
+      ? Math.max(1120, left * 2 + (usedColumns - 1) * spacingX + 160)
+      : Math.max(1120, left * 2 + bands * maxRowsPerColumn * spacingX + (bands - 1) * bandGap),
+    height: direction === 'horizontal'
+      ? Math.max(680, top * 2 + bands * maxRowsPerColumn * spacingY + (bands - 1) * bandGap)
+      : Math.max(680, top * 2 + (usedColumns - 1) * spacingY + 160),
   }
   return { canvas, positions }
 }
 
-function buildWrappedFlowLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[]) {
+function rowBandOffset(band: number, maxRowsPerColumn: number, spacingX: number, bandGap: number) {
+  return band * (maxRowsPerColumn * spacingX + bandGap)
+}
+
+function buildWrappedFlowLayout(layoutNodes: RelationNode[], layoutEdges: RelationEdge[], direction: GraphLayoutDirection) {
   const order = topologicalNodeOrder(layoutNodes, layoutEdges)
   const perRow = layoutNodes.length > 80 ? 8 : layoutNodes.length > 40 ? 7 : 6
   const spacingX = layoutNodes.length > 80 ? 144 : 160
@@ -257,15 +271,19 @@ function buildWrappedFlowLayout(layoutNodes: RelationNode[], layoutEdges: Relati
     const rowOffset = Math.max(0, perRow - rowNodes.length) * spacingX * 0.5
     displayNodes.forEach((node, column) => {
       positions.set(node.id, {
-        x: left + rowOffset + column * spacingX,
-        y: top + row * spacingY,
+        x: direction === 'horizontal' ? left + rowOffset + column * spacingX : left + row * spacingY,
+        y: direction === 'horizontal' ? top + row * spacingY : top + rowOffset + column * spacingX,
       })
     })
   }
 
   const canvas = {
-    width: Math.max(1120, left * 2 + Math.max(0, usedColumns - 1) * spacingX + 96),
-    height: Math.max(680, top * 2 + Math.max(0, rowCount - 1) * spacingY + 96),
+    width: direction === 'horizontal'
+      ? Math.max(1120, left * 2 + Math.max(0, usedColumns - 1) * spacingX + 96)
+      : Math.max(1120, left * 2 + Math.max(0, rowCount - 1) * spacingY + 96),
+    height: direction === 'horizontal'
+      ? Math.max(680, top * 2 + Math.max(0, rowCount - 1) * spacingY + 96)
+      : Math.max(680, top * 2 + Math.max(0, usedColumns - 1) * spacingX + 96),
   }
   return { canvas, positions }
 }
@@ -319,6 +337,11 @@ function nodeLabel(node: RelationNode) {
 
 function nodeSortWeight(node: RelationNode) {
   const type = nodeTypeText(node)
+  if (type.includes('requirement')) return 0
+  if (type.includes('testcase')) return 1
+  if (type.includes('source')) return 2
+  if (type.includes('execution') || type.includes('coverage')) return 3
+  if (type.includes('bug') || type.includes('finding')) return 4
   if (type.includes('entry')) return 0
   if (type.includes('controller')) return 1
   if (type.includes('service')) return 2

@@ -24,6 +24,7 @@ public class StaticSourceMethodInfo implements Serializable {
     private Integer cyclomaticComplexityMap;
     private Boolean recursiveMap;
     private Boolean asyncMethodMap;
+    private List<InvocationInfo> invocations;
 
     public String getMethodName() {
         return methodName;
@@ -107,6 +108,74 @@ public class StaticSourceMethodInfo implements Serializable {
 
     public void setAsyncMethodMap(Boolean asyncMethodMap) {
         this.asyncMethodMap = asyncMethodMap;
+    }
+
+    public List<InvocationInfo> getInvocations() {
+        return invocations;
+    }
+
+    public void setInvocations(List<InvocationInfo> invocations) {
+        this.invocations = invocations;
+    }
+
+    @JsonSetter("invokers")
+    public void setLegacyInvokers(List<InvocationInfo> invokers) {
+        if (this.invocations == null || this.invocations.isEmpty()) {
+            this.invocations = invokers;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class InvocationInfo implements Serializable {
+        private String owner;
+        private String name;
+        private String descriptor;
+        private String desc;
+        private Integer opcode;
+
+        public String getOwner() {
+            return owner;
+        }
+
+        public void setOwner(String owner) {
+            this.owner = owner;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getDescriptor() {
+            return descriptor;
+        }
+
+        public void setDescriptor(String descriptor) {
+            this.descriptor = descriptor;
+        }
+
+        public String getDesc() {
+            return desc;
+        }
+
+        public void setDesc(String desc) {
+            this.desc = desc;
+        }
+
+        public Integer getOpcode() {
+            return opcode;
+        }
+
+        public void setOpcode(Integer opcode) {
+            this.opcode = opcode;
+        }
+
+        public String descriptorValue() {
+            return descriptor != null ? descriptor : desc;
+        }
     }
 
     private Map<String, List<Integer>> normalizeIntegerMap(JsonNode node) {

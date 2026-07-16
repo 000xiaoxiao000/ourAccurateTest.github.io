@@ -2,6 +2,8 @@ package com.oAT.web.control.api;
 
 import com.oAT.web.api.map.MapHomePayloadService;
 import com.oAT.web.api.map.MapAppPayloadService;
+import com.oAT.web.api.map.TraceabilityMapPayloads.TraceabilityMapResponse;
+import com.oAT.web.api.map.TraceabilityMapService;
 import com.oAT.web.common.SourceClassUtil;
 import com.oAT.web.domain.ImageElement;
 import com.oAT.web.esDao.StaticInfoRepository;
@@ -40,17 +42,20 @@ public class MapApiControl {
 
     private final MapHomePayloadService mapHomePayloadService;
     private final MapAppPayloadService mapAppPayloadService;
+    private final TraceabilityMapService traceabilityMapService;
     private final StaticInfoRepository staticInfoRepository;
     private final VerificationRepository verificationRepository;
     private final AssetContentStore assetContentStore;
 
     public MapApiControl(MapHomePayloadService mapHomePayloadService,
                          MapAppPayloadService mapAppPayloadService,
+                         TraceabilityMapService traceabilityMapService,
                          StaticInfoRepository staticInfoRepository,
                          VerificationRepository verificationRepository,
                          AssetContentStore assetContentStore) {
         this.mapHomePayloadService = mapHomePayloadService;
         this.mapAppPayloadService = mapAppPayloadService;
+        this.traceabilityMapService = traceabilityMapService;
         this.staticInfoRepository = staticInfoRepository;
         this.verificationRepository = verificationRepository;
         this.assetContentStore = assetContentStore;
@@ -59,6 +64,18 @@ public class MapApiControl {
     @GetMapping("/home")
     public List<ImageElement> home(@PathVariable String projectId) {
         return mapHomePayloadService.buildHomeMapData(projectId);
+    }
+
+    @GetMapping("/traceability")
+    public TraceabilityMapResponse traceability(@PathVariable String projectId,
+                                                @RequestParam(required = false) String baselineId,
+                                                @RequestParam(required = false) String focusId,
+                                                @RequestParam(defaultValue = "BOTH") String direction,
+                                                @RequestParam(defaultValue = "4") Integer depth,
+                                                @RequestParam(defaultValue = "true") boolean includeStatic,
+                                                @RequestParam(defaultValue = "true") boolean includeDynamic,
+                                                @RequestParam(defaultValue = "true") boolean includeAiCalls) {
+        return traceabilityMapService.build(projectId, baselineId, focusId, direction, depth, includeStatic, includeDynamic, includeAiCalls);
     }
 
     @GetMapping("/apps/{appId}")

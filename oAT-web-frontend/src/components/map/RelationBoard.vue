@@ -68,6 +68,20 @@
             <div>图形画布</div>
             <div class="graph-tools">
               <button type="button" @click.stop="openSearchPanel">查找</button>
+              <button
+                type="button"
+                :class="{ active: graphLayoutDirection === 'horizontal' }"
+                @click.stop="setGraphLayoutDirection('horizontal')"
+              >
+                横向
+              </button>
+              <button
+                type="button"
+                :class="{ active: graphLayoutDirection === 'vertical' }"
+                @click.stop="setGraphLayoutDirection('vertical')"
+              >
+                纵向
+              </button>
               <button type="button" @click.stop="fitGraph">适配视图</button>
               <button type="button" @click.stop="zoomGraph(0.15)">放大</button>
               <button type="button" @click.stop="zoomGraph(-0.15)">缩小</button>
@@ -243,7 +257,7 @@ import {
   nodeTypeText,
   useRelationGraphLayout,
 } from '@/features/map/composables/useRelationGraphLayout'
-import type { GraphNode, RelationContextAction, RelationEdge, RelationNode } from '@/features/map/types'
+import type { GraphLayoutDirection, GraphNode, RelationContextAction, RelationEdge, RelationNode } from '@/features/map/types'
 
 const props = defineProps<{
   eyebrow: string
@@ -262,6 +276,7 @@ const props = defineProps<{
   showEdgeLabels?: boolean
   highlightRelated?: boolean
   selectedNodeId?: string
+  layoutDirection?: GraphLayoutDirection
 }>()
 
 const emit = defineEmits<{
@@ -287,6 +302,7 @@ const tip = reactive({ open: false })
 const relationGraphRef = ref<SVGSVGElement | null>(null)
 const graphZoom = ref(1)
 const graphOffset = ref({ x: 0, y: 0 })
+const graphLayoutDirection = ref<GraphLayoutDirection>(props.layoutDirection || 'horizontal')
 const graphPan = ref<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
 const nodePositionOverrides = ref<Record<string, { x: number; y: number }>>({})
 const nodeDrag = ref<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null)
@@ -375,7 +391,7 @@ const {
   graphNodeMap,
   graphViewBox,
   graphViewport,
-} = useRelationGraphLayout(layoutSourceNodes, layoutSourceEdges, compact, nodePositionOverrides)
+} = useRelationGraphLayout(layoutSourceNodes, layoutSourceEdges, compact, nodePositionOverrides, graphLayoutDirection)
 const graphTransform = computed(() => `translate(${graphOffset.value.x} ${graphOffset.value.y}) scale(${graphZoom.value})`)
 
 function selectGraphNode(nodeId: string) {
@@ -515,6 +531,14 @@ function resetGraphLayout() {
   fitGraph()
 }
 
+async function setGraphLayoutDirection(direction: GraphLayoutDirection) {
+  if (graphLayoutDirection.value === direction) return
+  graphLayoutDirection.value = direction
+  nodePositionOverrides.value = {}
+  await nextTick()
+  fitGraph()
+}
+
 function graphPointerDelta(event: PointerEvent, startX: number, startY: number) {
   const rect = relationGraphRef.value?.getBoundingClientRect()
   const scaleX = rect?.width ? graphViewport.value.width / rect.width : 1
@@ -643,9 +667,19 @@ watch(
 )
 
 watch(
+  () => props.layoutDirection,
+  (direction) => {
+    if (!direction || direction === graphLayoutDirection.value) return
+    graphLayoutDirection.value = direction
+    nodePositionOverrides.value = {}
+  },
+)
+
+watch(
   () => [
     layoutSourceNodes.value.map((node) => node.id).join('|'),
     layoutSourceEdges.value.map((edge) => `${edge.source}>${edge.target}`).join('|'),
+    graphLayoutDirection.value,
   ],
   async () => {
     nodePositionOverrides.value = {}

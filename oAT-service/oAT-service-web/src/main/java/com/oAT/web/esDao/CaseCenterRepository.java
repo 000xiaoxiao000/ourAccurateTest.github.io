@@ -78,8 +78,8 @@ public class CaseCenterRepository {
         Usecase u = index.getUsecase();
         jdbcTemplate.update("""
                         INSERT INTO oat_usecase (id, project_id, directory_id, title, content, head_image, defects_json, prd_requirements_json, labels_json, authors_json, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), directory_id=VALUES(directory_id), title=VALUES(title), content=VALUES(content), head_image=VALUES(head_image), defects_json=VALUES(defects_json), prd_requirements_json=VALUES(prd_requirements_json), labels_json=VALUES(labels_json), authors_json=VALUES(authors_json), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, directory_id=EXCLUDED.directory_id, title=EXCLUDED.title, content=EXCLUDED.content, head_image=EXCLUDED.head_image, defects_json=EXCLUDED.defects_json, prd_requirements_json=EXCLUDED.prd_requirements_json, labels_json=EXCLUDED.labels_json, authors_json=EXCLUDED.authors_json, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), u == null ? null : u.getProjectId(), u == null ? null : u.getDirectory(), u == null ? null : u.getTitle(), u == null ? null : u.getContent(), u == null ? null : u.getHeadImage(), u == null ? null : UtilJson.writeValueAsString(u.getDefects()), u == null ? null : UtilJson.writeValueAsString(u.getPrdRequirements()), u == null ? null : UtilJson.writeValueAsString(u.getLabels()), u == null ? null : UtilJson.writeValueAsString(u.getAuthors()), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -87,8 +87,8 @@ public class CaseCenterRepository {
         UsecaseDirectory d = index.getDirectory();
         jdbcTemplate.update("""
                         INSERT INTO oat_usecase_directory (id, project_id, parent_id, directory_name, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), parent_id=VALUES(parent_id), directory_name=VALUES(directory_name), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, parent_id=EXCLUDED.parent_id, directory_name=EXCLUDED.directory_name, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), d == null ? null : d.getProjectId(), d == null ? null : d.getParentId(), d == null ? null : d.getName(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 

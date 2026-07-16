@@ -16,6 +16,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import org.springframework.util.DigestUtils;
+import org.springframework.util.StringUtils;
 
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -37,16 +38,22 @@ public class UserServiceImpl implements UserService{
     @Override
     public void doRegister(UserRegisterVo register) {
         Assert.notNull(register, "register must not be null");
-        Assert.notNull(register.getName(), "name must not be null");
-        Assert.notNull(register.getPassword(), "password must not be null");
+        Assert.hasText(register.getName(), "用户名不能为空");
+        Assert.hasText(register.getEmail(), "邮箱不能为空");
+        Assert.hasText(register.getPassword(), "密码不能为空");
+        Assert.isTrue(register.getPassword().equals(register.getAgainPassword()), "两次密码输入不一致");
+
+        String name = register.getName().trim();
+        String email = register.getEmail().trim();
+        Assert.isTrue(systemRepository.findByUserNameOrUserEmail(name, email).isEmpty(), "用户名或邮箱已存在");
 
         User user = new User();
-        user.setName(register.getName());
-        user.setEmail(register.getEmail());
+        user.setName(name);
+        user.setEmail(email);
         user.setPassword(DigestUtils
                 .md5DigestAsHex(register.getPassword()
                         .getBytes(Charset.forName("UTF-8"))));
-        user.setNickName(register.getNickname());
+        user.setNickName(StringUtils.hasText(register.getNickname()) ? register.getNickname().trim() : name);
         SystemIndex systemIndex = new SystemIndex(user);
         systemRepository.save(systemIndex);
         logger.info("register succeed！： {} ", register);

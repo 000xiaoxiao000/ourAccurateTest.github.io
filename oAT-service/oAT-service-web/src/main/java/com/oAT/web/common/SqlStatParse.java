@@ -67,7 +67,7 @@ public class SqlStatParse {
 
     private DbType resolveDbType(String dbType) {
         DbType resolvedDbType = DbType.of(dbType);
-        return resolvedDbType == null ? DbType.mysql : resolvedDbType;
+        return resolvedDbType == null ? DbType.postgresql : resolvedDbType;
     }
 
     public List<SqlParseInfo> getAdds() {

@@ -66,18 +66,18 @@ public class StaticInfoRepository {
                             id, app_id, type, class_id, class_name, method_maps_json,
                             source_code, source_code_path, source_code_hash, source_code_size,
                             payload_json, create_time, update_time
-                        ) VALUES (?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE
-                            id = VALUES(id),
-                            type = VALUES(type),
-                            class_id = VALUES(class_id),
-                            method_maps_json = VALUES(method_maps_json),
-                            source_code = VALUES(source_code),
-                            source_code_path = VALUES(source_code_path),
-                            source_code_hash = VALUES(source_code_hash),
-                            source_code_size = VALUES(source_code_size),
-                            payload_json = VALUES(payload_json),
-                            update_time = VALUES(update_time)
+                        ) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (app_id, class_name) DO UPDATE SET
+                            id = EXCLUDED.id,
+                            type = EXCLUDED.type,
+                            class_id = EXCLUDED.class_id,
+                            method_maps_json = EXCLUDED.method_maps_json,
+                            source_code = EXCLUDED.source_code,
+                            source_code_path = EXCLUDED.source_code_path,
+                            source_code_hash = EXCLUDED.source_code_hash,
+                            source_code_size = EXCLUDED.source_code_size,
+                            payload_json = EXCLUDED.payload_json,
+                            update_time = EXCLUDED.update_time
                         """,
                 info.getId(),
                 info.getAppId(),

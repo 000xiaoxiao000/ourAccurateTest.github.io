@@ -414,7 +414,8 @@
 }
 
 .graph-tools button:hover:not(:disabled),
-.graph-tools button:focus-visible {
+.graph-tools button:focus-visible,
+.graph-tools button.active {
   background: #0f766e;
   color: #fff;
   transform: translateY(-1px);
@@ -466,6 +467,8 @@
 .graph-edge.requirement path { stroke: #0f766e; }
 .graph-edge.testcase path { stroke: #2563eb; }
 .graph-edge.source path { stroke: #7c3aed; }
+.graph-edge.execution path { stroke: #0891b2; }
+.graph-edge.coverage path { stroke: #16a34a; }
 .graph-edge.invoke path {
   stroke: #2563eb;
   stroke-width: 2.1;
@@ -479,6 +482,8 @@
 .graph-edge.requirement text { fill: #0f766e; }
 .graph-edge.testcase text { fill: #1d4ed8; }
 .graph-edge.source text { fill: #6d28d9; }
+.graph-edge.execution text { fill: #0e7490; }
+.graph-edge.coverage text { fill: #15803d; }
 .graph-edge.invoke text { fill: #1d4ed8; }
 
 .graph-edge text {
@@ -529,6 +534,8 @@
 .graph-node.requirement circle { fill: #0f766e; }
 .graph-node.testcase circle { fill: #2563eb; }
 .graph-node.source circle { fill: #7c3aed; }
+.graph-node.execution circle { fill: #0891b2; }
+.graph-node.coverage circle { fill: #16a34a; }
 .graph-node.bug circle { fill: #dc2626; }
 
 .node-label {

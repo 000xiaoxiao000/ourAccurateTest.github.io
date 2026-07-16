@@ -18,6 +18,8 @@ export interface RelationEdge {
   targetLabel?: string
 }
 
+export type GraphLayoutDirection = 'horizontal' | 'vertical'
+
 export interface RelationContextAction {
   id: string
   label: string

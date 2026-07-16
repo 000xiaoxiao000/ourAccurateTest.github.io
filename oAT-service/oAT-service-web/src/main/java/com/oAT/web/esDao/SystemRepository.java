@@ -133,8 +133,8 @@ public class SystemRepository {
         User user = index.getUser();
         jdbcTemplate.update("""
                         INSERT INTO oat_user (id, name, nick_name, email, password, header, phone, readme, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE name=VALUES(name), nick_name=VALUES(nick_name), email=VALUES(email), password=VALUES(password), header=VALUES(header), phone=VALUES(phone), readme=VALUES(readme), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, nick_name=EXCLUDED.nick_name, email=EXCLUDED.email, password=EXCLUDED.password, header=EXCLUDED.header, phone=EXCLUDED.phone, readme=EXCLUDED.readme, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), user == null ? null : user.getName(), user == null ? null : user.getNickName(), user == null ? null : user.getEmail(), user == null ? null : user.getPassword(), user == null ? null : user.getHeader(), user == null ? null : user.getPhone(), user == null ? null : user.getReadme(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -142,8 +142,8 @@ public class SystemRepository {
         Project project = index.getProject();
         jdbcTemplate.update("""
                         INSERT INTO oat_project (id, name, project_describe, owner_id, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE name=VALUES(name), project_describe=VALUES(project_describe), owner_id=VALUES(owner_id), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, project_describe=EXCLUDED.project_describe, owner_id=EXCLUDED.owner_id, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), project == null ? null : project.getName(), project == null ? null : project.getDescribe(), project == null ? null : project.getCreate(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -151,8 +151,8 @@ public class SystemRepository {
         App app = index.getApp();
         jdbcTemplate.update("""
                         INSERT INTO oat_app (id, name, project_id, range_type, src_name, language, language_config_json, app_describe, properties_text, current_version, current_branch, current_commit_id, repo_address, repo_user_name, repo_password, create_user_id, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE name=VALUES(name), project_id=VALUES(project_id), range_type=VALUES(range_type), src_name=VALUES(src_name), language=VALUES(language), language_config_json=VALUES(language_config_json), app_describe=VALUES(app_describe), properties_text=VALUES(properties_text), current_version=VALUES(current_version), current_branch=VALUES(current_branch), current_commit_id=VALUES(current_commit_id), repo_address=VALUES(repo_address), repo_user_name=VALUES(repo_user_name), repo_password=VALUES(repo_password), create_user_id=VALUES(create_user_id), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, project_id=EXCLUDED.project_id, range_type=EXCLUDED.range_type, src_name=EXCLUDED.src_name, language=EXCLUDED.language, language_config_json=EXCLUDED.language_config_json, app_describe=EXCLUDED.app_describe, properties_text=EXCLUDED.properties_text, current_version=EXCLUDED.current_version, current_branch=EXCLUDED.current_branch, current_commit_id=EXCLUDED.current_commit_id, repo_address=EXCLUDED.repo_address, repo_user_name=EXCLUDED.repo_user_name, repo_password=EXCLUDED.repo_password, create_user_id=EXCLUDED.create_user_id, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), app == null ? null : app.getName(), app == null ? null : app.getCreateProjectId(), app == null ? null : app.getRange(), app == null ? null : app.getSrcName(), app == null ? null : app.getLanguage(), app == null ? null : app.getLanguageConfig(), app == null ? null : app.getDescribe(), app == null ? null : app.getProperties(), app == null ? null : app.getCurrentVersion(), app == null ? null : app.getCurrentBranch(), app == null ? null : app.getCurrentCommitId(), app == null ? null : app.getRepoAddress(), app == null ? null : app.getRepoUserName(), app == null ? null : app.getRepoPassword(), app == null ? null : app.getCreateUserId(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -160,8 +160,8 @@ public class SystemRepository {
         LabelGroup labelGroup = index.getLabelGroup();
         jdbcTemplate.update("""
                         INSERT INTO oat_label_group (id, project_id, label_type, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), label_type=VALUES(label_type), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, label_type=EXCLUDED.label_type, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), labelGroup == null ? null : labelGroup.getProjectid(), labelGroup == null ? null : labelGroup.getType(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -169,8 +169,8 @@ public class SystemRepository {
         ProjectMember member = index.getProjectMember();
         jdbcTemplate.update("""
                         INSERT INTO oat_project_member (id, project_id, member_id, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), member_id=VALUES(member_id), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, member_id=EXCLUDED.member_id, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), member == null ? null : member.getProjectId(), member == null ? null : member.getMemberId(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
@@ -178,8 +178,8 @@ public class SystemRepository {
         SystemLog log = index.getSystemLog();
         jdbcTemplate.update("""
                         INSERT INTO oat_system_log (id, project_id, user_id, user_name, action, title, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?)
-                        ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), user_id=VALUES(user_id), user_name=VALUES(user_name), action=VALUES(action), title=VALUES(title), payload_json=VALUES(payload_json), create_time=VALUES(create_time), update_time=VALUES(update_time)
+                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, user_id=EXCLUDED.user_id, user_name=EXCLUDED.user_name, action=EXCLUDED.action, title=EXCLUDED.title, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
                         """, index.getId(), log == null ? null : log.getProjectId(), log == null ? null : log.getUserId(), log == null ? null : log.getUserName(), log == null ? null : log.getAction(), log == null ? null : log.getTitle(), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 

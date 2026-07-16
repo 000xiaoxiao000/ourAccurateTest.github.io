@@ -44,7 +44,16 @@
         </p>
 
         <div class="asset-import-grid">
-          <article v-for="asset in assetInputs" :key="asset.type" class="asset-import" :class="{ collapsed: !isImportExpanded(asset.type) }">
+          <article
+            v-for="asset in assetInputs"
+            :key="asset.type"
+            class="asset-import"
+            :class="{ collapsed: !isImportExpanded(asset.type), dragging: draggingAssetType === asset.type }"
+            @dragenter.prevent="onAssetDragEnter(asset.type, $event)"
+            @dragover.prevent="onAssetDragOver(asset.type, $event)"
+            @dragleave="onAssetDragLeave($event)"
+            @drop.prevent="onAssetDrop(asset.type, $event)"
+          >
             <button type="button" class="asset-toggle" @click="toggleImport(asset.type)">
               <span>
                 <strong>{{ asset.label }}</strong>
@@ -53,7 +62,11 @@
               <em>{{ isImportExpanded(asset.type) ? '收起' : '展开' }}</em>
             </button>
             <div v-if="isImportExpanded(asset.type)" class="asset-import-body">
-              <input type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
+              <label class="asset-file-drop">
+                <input type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
+                <span>{{ files[asset.type]?.name || '选择文件' }}</span>
+                <small>{{ files[asset.type]?.name ? '已选择文件，可重新选择或拖放替换' : '点击选择文件，或把文件拖放到此区域' }}</small>
+              </label>
               <textarea v-model="pasteInputs[asset.type]" :placeholder="asset.placeholder"></textarea>
               <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号（可选）" />
               <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
@@ -89,7 +102,7 @@
                   </label>
                   <label>
                     <span>AI 摘要文件数</span>
-                    <input v-model.number="gitForm.maxFiles" type="number" min="1" max="500" />
+                    <input v-model.number="gitForm.maxFiles" type="number" min="1" max="2000" />
                   </label>
                 </div>
                 <button type="button" class="secondary-button full" :disabled="gitImporting" @click="importGitSource">
@@ -590,6 +603,7 @@ import {
 import { useDialog } from '@/composables/useDialog'
 import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
+import type { RelationEdge, RelationNode } from '@/features/map/types'
 
 type WorkspaceKey = 'library' | 'baseline' | 'result'
 type EvidenceRecord = {
@@ -660,6 +674,7 @@ const writeBackSubmitting = ref(false)
 let analysisPollTimer: ReturnType<typeof setTimeout> | null = null
 const error = ref('')
 const files = reactive<Partial<Record<AssetType, File>>>({})
+const draggingAssetType = ref<AssetType | ''>('')
 const pasteInputs = reactive<Record<AssetType, string>>({ REQUIREMENT: '', TESTCASE: '', SOURCE: '', EXECUTION: '', COVERAGE: '', DEFECT: '' })
 const sourceVersions = reactive<Record<AssetType, string>>({ REQUIREMENT: '', TESTCASE: '', SOURCE: '', EXECUTION: '', COVERAGE: '', DEFECT: '' })
 const baselineForm = reactive({
@@ -682,7 +697,7 @@ const gitForm = reactive({
   appId: '',
   branch: '',
   commit: '',
-  maxFiles: 120,
+  maxFiles: 1000,
 })
 const helpTooltipRef = ref<HTMLElement | null>(null)
 const helpTooltip = reactive({
@@ -752,6 +767,132 @@ const analysisCounts = computed(() => {
     staticCode: current.metrics.staticCodeCount ?? 0,
     dynamicCode: current.metrics.dynamicCodeCount ?? 0,
   }
+})
+
+const traceMapNodes = computed<RelationNode[]>(() => {
+  const current = detail.value
+  if (!current) return []
+  const nodes = new Map<string, RelationNode>()
+  const testcaseById = new Map(current.testcases.map((item) => [item.id, item]))
+  const matrixByAcId = new Map(matrix.value.map((row) => [row.criterion.id, row]))
+
+  current.criteria.forEach((criterion) => {
+    const row = matrixByAcId.get(criterion.id)
+    nodes.set(traceNodeId('REQUIREMENT', criterion.id), {
+      id: traceNodeId('REQUIREMENT', criterion.id),
+      label: `${criterion.requirementKey} ${criterion.acKey}`,
+      type: 'requirement',
+      description: criterion.title || criterion.content,
+      meta: [
+        row ? `结论 ${verdictText(row.verdict)}` : '',
+        row ? evidenceLevelText(row.evidenceLevel) : '',
+        criterion.testable ? '可测试' : '不可测试',
+        criterion.ambiguity ? '存在歧义' : '',
+        criterion.sourceLocator ? `位置 ${criterion.sourceLocator}` : '',
+      ].filter(Boolean),
+    })
+  })
+
+  current.testcases.forEach((testcase) => {
+    nodes.set(traceNodeId('TESTCASE', testcase.id), {
+      id: traceNodeId('TESTCASE', testcase.id),
+      label: testcase.externalKey || testcase.title || testcase.id,
+      type: 'testcase',
+      description: testcase.title,
+      meta: [
+        testcase.sourceLocator ? `位置 ${testcase.sourceLocator}` : '',
+        testcase.requirementRefs ? `需求引用 ${testcase.requirementRefs}` : '',
+      ].filter(Boolean),
+    })
+  })
+
+  current.traceLinks.forEach((link) => {
+    const targetNodeId = traceNodeId(link.targetType, link.targetId)
+    if (!nodes.has(targetNodeId)) {
+      const testcase = testcaseById.get(link.targetId)
+      const evidence = link.evidence || {}
+      nodes.set(targetNodeId, {
+        id: targetNodeId,
+        label: testcase?.externalKey || traceTargetNodeLabel(link),
+        type: traceNodeType(link.targetType),
+        description: testcase?.title || stringValue(evidence.reason) || stringValue(evidence.summary) || link.targetId,
+        meta: [
+          traceTargetText(link.targetType),
+          evidenceLevelText(link.evidenceLevel),
+          reviewStatusText(link.reviewStatus),
+          `置信度 ${Math.round((link.confidence || 0) * 100)}%`,
+          stringValue(evidence.locator) ? `位置 ${stringValue(evidence.locator)}` : '',
+        ].filter(Boolean),
+      })
+    }
+  })
+
+  current.findings.forEach((finding) => {
+    nodes.set(traceNodeId('FINDING', finding.id), {
+      id: traceNodeId('FINDING', finding.id),
+      label: finding.title,
+      type: 'finding bug',
+      description: finding.description,
+      meta: [
+        perspectiveText(finding.perspective),
+        severityText(finding.severity),
+        verdictText(finding.verdict),
+        reviewStatusText(finding.reviewStatus),
+      ].filter(Boolean),
+    })
+  })
+
+  return Array.from(nodes.values())
+})
+
+const traceMapEdges = computed<RelationEdge[]>(() => {
+  const current = detail.value
+  if (!current) return []
+  const edges = new Map<string, RelationEdge>()
+
+  matrix.value.forEach((row) => {
+    row.testcases.forEach((testcase) => {
+      const id = `matrix-${row.criterion.id}-${testcase.id}`
+      edges.set(id, {
+        id,
+        source: traceNodeId('REQUIREMENT', row.criterion.id),
+        target: traceNodeId('TESTCASE', testcase.id),
+        label: `验证 · ${evidenceLevelText(row.evidenceLevel)}`,
+        action: 'covers',
+        sourceLabel: `${row.criterion.requirementKey} ${row.criterion.acKey}`,
+        targetLabel: testcase.externalKey || testcase.title,
+      })
+    })
+  })
+
+  current.traceLinks.forEach((link) => {
+    const sourceType = link.sourceType || 'REQUIREMENT'
+    const source = traceSourceNodeId(sourceType, link.sourceId)
+    const target = traceNodeId(link.targetType, link.targetId)
+    edges.set(`trace-${link.id}`, {
+      id: `trace-${link.id}`,
+      source,
+      target,
+      label: traceRelationLabel(link),
+      action: link.relationType || link.targetType,
+    })
+  })
+
+  current.findings.forEach((finding) => {
+    if (!finding.acId) return
+    edges.set(`finding-${finding.id}`, {
+      id: `finding-${finding.id}`,
+      source: traceNodeId('REQUIREMENT', finding.acId),
+      target: traceNodeId('FINDING', finding.id),
+      label: `${severityText(finding.severity)} · ${findingTypeText(finding.findingType)}`,
+      action: finding.severity,
+    })
+  })
+
+  return Array.from(edges.values()).filter((edge) =>
+    traceMapNodes.value.some((node) => node.id === edge.source)
+      && traceMapNodes.value.some((node) => node.id === edge.target),
+  )
 })
 
 const filteredFindings = computed(() => {
@@ -1069,8 +1210,62 @@ async function loadOverview() {
 function onFileChange(type: AssetType, event: Event) {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  if (file) files[type] = file
+  if (file) setAssetFile(type, file)
   else delete files[type]
+}
+
+function setAssetFile(type: AssetType, file: File) {
+  files[type] = file
+  if (!isImportExpanded(type)) {
+    expandedImportTypes.value = [...expandedImportTypes.value, type]
+  }
+}
+
+function onAssetDragEnter(type: AssetType, event: DragEvent) {
+  if (hasDraggedFiles(event)) {
+    draggingAssetType.value = type
+  }
+}
+
+function onAssetDragOver(type: AssetType, event: DragEvent) {
+  if (!hasDraggedFiles(event)) return
+  draggingAssetType.value = type
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+function onAssetDragLeave(event: DragEvent) {
+  const current = event.currentTarget as HTMLElement | null
+  const related = event.relatedTarget as Node | null
+  if (current && related && current.contains(related)) return
+  draggingAssetType.value = ''
+}
+
+function onAssetDrop(type: AssetType, event: DragEvent) {
+  draggingAssetType.value = ''
+  const file = event.dataTransfer?.files?.[0]
+  if (!file) return
+  if (!isAcceptedAssetFile(type, file)) {
+    toast.warning(`${assetTypeLabel(type)}不支持该文件类型`)
+    return
+  }
+  setAssetFile(type, file)
+  toast.success(`已选择文件：${file.name}`)
+}
+
+function hasDraggedFiles(event: DragEvent) {
+  return Array.from(event.dataTransfer?.types || []).includes('Files')
+}
+
+function isAcceptedAssetFile(type: AssetType, file: File) {
+  const accept = assetAccept(type).split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
+  if (!accept.length) return true
+  const fileName = file.name.toLowerCase()
+  return accept.some((item) => {
+    if (item.startsWith('.')) return fileName.endsWith(item)
+    return file.type === item || file.type.startsWith(item.replace('/*', '/'))
+  })
 }
 
 function hasImportInput(type: AssetType) {
@@ -1272,8 +1467,8 @@ async function importGitSource() {
       appId: gitForm.appId,
       branch: gitForm.branch,
       commit: gitForm.commit,
-      maxFiles: gitForm.maxFiles,
-      maxBytes: 300000,
+      maxFiles: gitForm.maxFiles || 1000,
+      maxBytes: 20000000,
     })
     baselineForm.sourceAssetId = asset.id
     if (gitForm.appId) baselineForm.sourceAppId = gitForm.appId
@@ -1555,6 +1750,63 @@ async function confirmTrace(id: string) {
 
 function evidenceLinks(acId: string): TraceLink[] {
   return detail.value?.traceLinks.filter((link) => link.sourceId === acId) || []
+}
+
+function traceNodeId(type: string, id: string) {
+  return `${traceNodeType(type)}:${id}`
+}
+
+function traceSourceNodeId(type: string, id: string) {
+  const normalized = traceNodeType(type)
+  if (normalized === 'acceptance_criterion' || normalized === 'criterion') {
+    return traceNodeId('REQUIREMENT', id)
+  }
+  return traceNodeId(type || 'REQUIREMENT', id)
+}
+
+function traceNodeType(type: string) {
+  const value = String(type || '').toLowerCase()
+  if (value.includes('requirement') || value.includes('acceptance') || value === 'ac') return 'requirement'
+  if (value.includes('testcase') || value.includes('test_case')) return 'testcase'
+  if (value.includes('source') || value.includes('symbol') || value.includes('code')) return 'source'
+  if (value.includes('execution')) return 'execution'
+  if (value.includes('coverage')) return 'coverage'
+  if (value.includes('defect') || value.includes('bug') || value.includes('finding')) return 'bug'
+  return value || 'node'
+}
+
+function traceTargetNodeLabel(link: TraceLink) {
+  const evidence = link.evidence || {}
+  return stringValue(evidence.name)
+    || stringValue(evidence.symbol)
+    || stringValue(evidence.locator)
+    || `${traceTargetText(link.targetType)} ${shortId(link.targetId)}`
+}
+
+function traceRelationLabel(link: TraceLink) {
+  return [
+    relationTypeText(link.relationType),
+    evidenceLevelText(link.evidenceLevel),
+    reviewStatusText(link.reviewStatus),
+  ].filter(Boolean).join(' · ')
+}
+
+function relationTypeText(value?: string) {
+  const map: Record<string, string> = {
+    VERIFIED_BY: '验证',
+    IMPLEMENTED_BY: '实现',
+    EXECUTED_BY: '执行',
+    COVERED_BY: '覆盖',
+    RELATED_TO: '关联',
+    COVERS: '覆盖',
+    IMPLEMENTS: '实现',
+  }
+  const key = String(value || '').toUpperCase()
+  return map[key] || value || '关联'
+}
+
+function shortId(value?: string) {
+  return value && value.length > 12 ? `${value.slice(0, 12)}...` : value || '-'
 }
 
 function assetLabel(asset: VerificationAsset) {
@@ -1877,6 +2129,12 @@ function messageOf(err: unknown) {
   background: #fff;
 }
 
+.asset-import.dragging {
+  border-color: rgba(var(--oat-primary-rgb), .45);
+  background: rgba(var(--oat-primary-rgb), .08);
+  box-shadow: 0 0 0 3px rgba(var(--oat-primary-rgb), .10);
+}
+
 .asset-group-head,
 .asset-toggle {
   display: flex;
@@ -1975,6 +2233,49 @@ function messageOf(err: unknown) {
 .asset-import-body {
   display: grid;
   gap: 8px;
+}
+
+.asset-file-drop {
+  display: grid;
+  gap: 4px;
+  min-height: 74px;
+  padding: 12px;
+  border: 1px dashed rgba(100, 116, 139, .34);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+
+.asset-file-drop:hover,
+.asset-file-drop:focus-within {
+  border-color: rgba(var(--oat-primary-rgb), .45);
+  background: rgba(var(--oat-primary-rgb), .05);
+  box-shadow: 0 0 0 3px rgba(var(--oat-primary-rgb), .08);
+}
+
+.asset-file-drop input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.asset-file-drop span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oat-text);
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-file-drop small {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .source-import-divider {

@@ -17,6 +17,7 @@ import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.service.entity.ProjectMemberVo;
 import com.oAT.web.service.entity.ProjectVo;
 import com.oAT.web.service.entity.SystemLogVo;
+import com.oAT.web.service.entity.UserRegisterVo;
 import com.oAT.web.service.entity.UserVo;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.http.HttpStatus;
@@ -66,6 +67,13 @@ public class FrontendAuthProjectApiControl {
         UserVo user = userService.doLogin(request.getNameOrEmail(), request.getNameOrEmail(), request.getPassword());
         session.setAttribute("user", user);
         return ok("登录成功", toUserSummary(user));
+    }
+
+    @PostMapping("/api/auth/register")
+    public ResultNotified<String> register(@RequestBody UserRegisterVo request) {
+        Assert.notNull(request, "请求体不能为空");
+        userService.doRegister(request);
+        return ok("注册成功", "OK");
     }
 
     @PostMapping("/api/auth/logout")

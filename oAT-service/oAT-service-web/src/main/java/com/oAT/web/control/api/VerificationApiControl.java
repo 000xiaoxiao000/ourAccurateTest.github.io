@@ -543,8 +543,8 @@ public class VerificationApiControl {
     }
 
     private SourceSnapshot summarizeSourceZip(File zipFile, Integer maxFiles, Integer maxBytes) throws IOException {
-        int fileLimit = maxFiles == null || maxFiles <= 0 ? 120 : Math.min(maxFiles, 500);
-        int byteLimit = maxBytes == null || maxBytes <= 0 ? 300_000 : Math.min(maxBytes, 2_000_000);
+        int fileLimit = maxFiles == null || maxFiles <= 0 ? 1000 : Math.min(maxFiles, 2000);
+        int byteLimit = maxBytes == null || maxBytes <= 0 ? 20_000_000 : Math.min(maxBytes, 50_000_000);
         StringBuilder manifestBuilder = new StringBuilder();
         StringBuilder contentBuilder = new StringBuilder();
         int sampledCount = 0;

@@ -28,7 +28,7 @@ public class VerificationRepository {
                 (id, project_id, asset_type, source_type, external_id, external_url, source_version,
                  file_name, content_hash, content_text, storage_type, storage_key, content_size,
                  content_preview, metadata_json, freshness, imported_by, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
                 """, asset.id(), asset.projectId(), asset.assetType().name(), asset.sourceType().name(),
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
                 asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(), asset.contentPreview(),
@@ -50,7 +50,7 @@ public class VerificationRepository {
                 UPDATE oat_verification_asset
                 SET external_id = ?, external_url = ?, source_version = ?, file_name = ?,
                     content_hash = ?, content_text = ?, storage_type = ?, storage_key = ?,
-                    content_size = ?, content_preview = ?, metadata_json = CAST(? AS JSON), freshness = ?
+                    content_size = ?, content_preview = ?, metadata_json = ?::jsonb, freshness = ?
                 WHERE project_id = ? AND id = ?
                 """, asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(),
                 asset.contentHash(), asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(),
@@ -173,7 +173,18 @@ public class VerificationRepository {
     }
 
     public List<Finding> findFindings(String baselineId) {
-        return jdbc.query("SELECT * FROM oat_verification_finding WHERE baseline_id = ? ORDER BY FIELD(severity, 'CRITICAL','HIGH','MEDIUM','LOW','INFO'), create_time",
+        return jdbc.query("""
+                SELECT * FROM oat_verification_finding
+                WHERE baseline_id = ?
+                ORDER BY CASE severity
+                    WHEN 'CRITICAL' THEN 1
+                    WHEN 'HIGH' THEN 2
+                    WHEN 'MEDIUM' THEN 3
+                    WHEN 'LOW' THEN 4
+                    WHEN 'INFO' THEN 5
+                    ELSE 6
+                END, create_time
+                """,
                 this::finding, baselineId);
     }
 
@@ -181,10 +192,11 @@ public class VerificationRepository {
                                  String reason, String externalUrl) {
         int updated = jdbc.update("""
                 UPDATE oat_verification_finding f
-                JOIN oat_verification_baseline b ON b.id = f.baseline_id
-                SET f.review_status = ?, f.reviewed_by = ?, f.review_reason = ?,
-                    f.external_work_item_url = ?, f.update_time = CURRENT_TIMESTAMP
+                SET review_status = ?, reviewed_by = ?, review_reason = ?,
+                    external_work_item_url = ?, update_time = CURRENT_TIMESTAMP
+                FROM oat_verification_baseline b
                 WHERE b.project_id = ? AND f.id = ?
+                  AND b.id = f.baseline_id
                 """, status.name(), userId, reason, externalUrl, projectId, findingId);
         return updated == 1;
     }
@@ -192,9 +204,10 @@ public class VerificationRepository {
     public boolean reviewTraceLink(String projectId, String traceLinkId, ReviewStatus status) {
         int updated = jdbc.update("""
                 UPDATE oat_verification_trace_link t
-                JOIN oat_verification_baseline b ON b.id = t.baseline_id
-                SET t.review_status = ?, t.update_time = CURRENT_TIMESTAMP
+                SET review_status = ?, update_time = CURRENT_TIMESTAMP
+                FROM oat_verification_baseline b
                 WHERE b.project_id = ? AND t.id = ?
+                  AND b.id = t.baseline_id
                 """, status.name(), projectId, traceLinkId);
         return updated == 1;
     }
@@ -291,7 +304,7 @@ public class VerificationRepository {
                 INSERT INTO oat_verification_trace_link
                 (id, baseline_id, source_type, source_id, target_type, target_id, relation_type,
                  generation_method, confidence, evidence_level, review_status, evidence_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """, item.id(), item.baselineId(), item.sourceType(), item.sourceId(), item.targetType(), item.targetId(),
                 item.relationType(), item.generationMethod(), item.confidence(), item.evidenceLevel().name(),
                 item.reviewStatus().name(), json(item.evidence()));
@@ -303,7 +316,7 @@ public class VerificationRepository {
                 (id, baseline_id, ac_id, finding_type, perspective, severity, title, description_text,
                  suggestion_text, confidence, evidence_level, verdict, review_status, evidence_json,
                  external_work_item_url, reviewed_by, review_reason)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
                 """, item.id(), item.baselineId(), item.acId(), item.findingType(), item.perspective().name(),
                 item.severity().name(), item.title(), item.description(), item.suggestion(), item.confidence(),
                 item.evidenceLevel().name(), item.verdict().name(), item.reviewStatus().name(), json(item.evidence()),

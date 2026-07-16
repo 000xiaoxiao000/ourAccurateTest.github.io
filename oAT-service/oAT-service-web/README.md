@@ -77,12 +77,14 @@ src/main/resources/application.properties
 server.port=8899
 ```
 
-### MySQL
+### PostgreSQL
 
 ```properties
-spring.datasource.url=jdbc:mysql://127.0.0.1:3306/oaccurate_test?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-spring.datasource.username=root
+spring.datasource.url=${OAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification}
+spring.datasource.username=${OAT_DB_USERNAME:postgres}
 spring.datasource.password=123456
+spring.datasource.driver-class-name=org.postgresql.Driver
+oat.datasource.postgresql.create-database-if-missing=true
 ```
 
 ### 本地数据目录
@@ -152,6 +154,4 @@ java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSH
 
 ## 注意事项
 
-- MySQL 应先于本服务启动。
-- 首次部署执行全部 SQL；升级时只执行新增 phase。
 - `oat.data.path` 会自动创建，但磁盘空间和权限需要提前确认。
