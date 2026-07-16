@@ -542,24 +542,24 @@
         </section>
       </template>
     </section>
+    <Teleport to="body">
+      <div
+        v-if="helpTooltip.visible"
+        ref="helpTooltipRef"
+        class="adaptive-help-tooltip"
+        :class="helpTooltip.placement"
+        :style="{
+          left: `${helpTooltip.left}px`,
+          top: `${helpTooltip.top}px`,
+          width: `${helpTooltip.width}px`,
+          '--arrow-left': `${helpTooltip.arrowLeft}px`,
+        }"
+        role="tooltip"
+      >
+        {{ helpTooltip.text }}
+      </div>
+    </Teleport>
   </section>
-  <Teleport to="body">
-    <div
-      v-if="helpTooltip.visible"
-      ref="helpTooltipRef"
-      class="adaptive-help-tooltip"
-      :class="helpTooltip.placement"
-      :style="{
-        left: `${helpTooltip.left}px`,
-        top: `${helpTooltip.top}px`,
-        width: `${helpTooltip.width}px`,
-        '--arrow-left': `${helpTooltip.arrowLeft}px`,
-      }"
-      role="tooltip"
-    >
-      {{ helpTooltip.text }}
-    </div>
-  </Teleport>
 </template>
 
 <script setup lang="ts">

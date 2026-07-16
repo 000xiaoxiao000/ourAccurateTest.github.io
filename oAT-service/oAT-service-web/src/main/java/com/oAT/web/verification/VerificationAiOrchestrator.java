@@ -539,7 +539,7 @@ public class VerificationAiOrchestrator {
                 if ("Request".equals(mappingType)) {
                     classPath = normalizeEndpoint(path);
                 } else {
-                    pendingHttpMethod = mappingType.substring(0, mappingType.length() - "Mapping".length()).toUpperCase(Locale.ROOT);
+                    pendingHttpMethod = mappingType.toUpperCase(Locale.ROOT);
                     pendingPath = path;
                 }
                 continue;

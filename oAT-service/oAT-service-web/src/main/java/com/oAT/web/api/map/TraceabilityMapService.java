@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -126,11 +127,11 @@ public class TraceabilityMapService {
 
         if (includeStatic) {
             if (includeAiCalls) {
-                int inferred = codeIndex.inferAiCallPairs();
+                int inferred = codeIndex.inferSourceCallPairs();
                 if (inferred == 0) {
-                    warnings.add("AI 调用链分析未发现可关联的代码调用关系");
+                    warnings.add("源码静态调用解析未发现可关联的代码调用关系");
                 } else {
-                    warnings.add("AI 调用链分析已生成 " + inferred + " 条代码调用关系");
+                    warnings.add("源码静态调用解析已生成 " + inferred + " 条代码调用关系");
                 }
             }
             addStaticCallEdges(graph, codeIndex, dynamicEvidence.coveredNodeIds);
@@ -162,9 +163,36 @@ public class TraceabilityMapService {
             return verificationRepository.findBaseline(projectId, baselineId)
                     .orElseThrow(() -> new FriendlyException("分析基线不存在或不属于当前项目"));
         }
-        return verificationRepository.findBaselines(projectId).stream()
+        Optional<Baseline> baseline = verificationRepository.findBaselines(projectId).stream().findFirst();
+        if (baseline.isPresent()) {
+            return baseline.get();
+        }
+        return latestSourceBaseline(projectId)
+                .orElseThrow(() -> new FriendlyException("当前项目暂无分析基线或源码快照"));
+    }
+
+    private Optional<Baseline> latestSourceBaseline(String projectId) {
+        return verificationRepository.findAssets(projectId, AssetType.SOURCE).stream()
                 .findFirst()
-                .orElseThrow(() -> new FriendlyException("当前项目暂无分析基线"));
+                .map(asset -> new Baseline(
+                        "source-only:" + asset.id(),
+                        projectId,
+                        "源码快照 " + firstText(asset.fileName(), asset.id()),
+                        null,
+                        null,
+                        asset.id(),
+                        null,
+                        null,
+                        metadataText(asset, "appId"),
+                        asset.externalUrl(),
+                        null,
+                        asset.sourceVersion(),
+                        VerificationModels.ANALYZER_VERSION,
+                        VerificationModels.BaselineStatus.CREATED,
+                        asset.freshness(),
+                        asset.importedBy(),
+                        asset.capturedAt(),
+                        LocalDateTime.now()));
     }
 
     private int normalizeDepth(Integer requestedDepth) {
@@ -637,12 +665,12 @@ public class TraceabilityMapService {
         for (CallPair pair : codeIndex.staticCallPairs) {
             CallEvidence evidence = coveredNodeIds.contains(pair.source()) && coveredNodeIds.contains(pair.target())
                     ? CallEvidence.STATIC_BRIDGED : CallEvidence.STATIC_ONLY;
-            boolean aiGenerated = "AI_CODE_CALL_ANALYSIS".equals(pair.assetId());
+            boolean inferredFromSource = "SOURCE_CALL_ANALYSIS".equals(pair.assetId());
             graph.putEdge(new TraceabilityEdge("call:static:" + stableId(pair.source() + pair.target() + value(pair.assetId())), pair.source(), pair.target(),
                     Relation.CALLS, "FORWARD", EvidenceType.STATIC_ANALYSIS, evidence, evidence == CallEvidence.STATIC_BRIDGED ? 0.72 : 0.6,
-                    VerificationModels.EvidenceLevel.E2, aiGenerated ? "AI_CODE_CALL_ANALYSIS" : evidence.name(), VerificationModels.ReviewStatus.PENDING,
+                    VerificationModels.EvidenceLevel.E2, inferredFromSource ? "SOURCE_CALL_ANALYSIS" : evidence.name(), VerificationModels.ReviewStatus.PENDING,
                     List.of(new EdgeEvidence(null, null, null, null, null,
-                            aiGenerated ? "AI 基于源码方法体分析生成的候选调用关系"
+                            inferredFromSource ? "基于源码方法体静态解析生成的候选调用关系"
                                     : evidence == CallEvidence.STATIC_BRIDGED ? "两端均有覆盖证据，调用方向来自静态索引" : "静态方法调用索引", Map.of()))));
         }
     }
@@ -1063,7 +1091,7 @@ public class TraceabilityMapService {
             }
         }
 
-        int inferAiCallPairs() {
+        int inferSourceCallPairs() {
             int before = pendingStaticCalls.size();
             Set<String> existing = new HashSet<>();
             pendingStaticCalls.forEach(call -> existing.add(call.callerId() + "->" + call.calleeKey()));
@@ -1085,7 +1113,7 @@ public class TraceabilityMapService {
                     for (MethodSpan callee : entry.getValue()) {
                         String key = caller.methodId() + "->" + callee.methodId();
                         if (existing.add(key)) {
-                            pendingStaticCalls.add(new PendingCall(caller.methodId(), callee.methodId(), "AI_CODE_CALL_ANALYSIS"));
+                            pendingStaticCalls.add(new PendingCall(caller.methodId(), callee.methodId(), "SOURCE_CALL_ANALYSIS"));
                         }
                     }
                 }
@@ -1136,8 +1164,10 @@ public class TraceabilityMapService {
             }
             Set<String> visited = new LinkedHashSet<>();
             Queue<NodeDepth> queue = new ArrayDeque<>();
-            visited.add(focusId);
-            queue.add(new NodeDepth(focusId, 0));
+            for (String seedId : codeScopeIds(focusId)) {
+                visited.add(seedId);
+                queue.add(new NodeDepth(seedId, 0));
+            }
             String dir = StringUtils.hasText(direction) ? direction.toUpperCase(Locale.ROOT) : "BOTH";
             while (!queue.isEmpty()) {
                 NodeDepth current = queue.poll();
@@ -1157,6 +1187,25 @@ public class TraceabilityMapService {
                     .filter(edge -> visited.contains(edge.source()) && visited.contains(edge.target()))
                     .toList();
             return clip(visited, scopedEdges, maxNodes, maxEdges, warnings);
+        }
+
+        private Set<String> codeScopeIds(String focusId) {
+            LinkedHashSet<String> scope = new LinkedHashSet<>();
+            scope.add(focusId);
+            TraceabilityNode focus = nodes.get(focusId);
+            if (focus == null || !focus.kind().name().startsWith("CODE_")) {
+                return scope;
+            }
+            boolean changed = true;
+            while (changed) {
+                changed = false;
+                for (TraceabilityNode node : nodes.values()) {
+                    if (node.parentId() != null && scope.contains(node.parentId()) && scope.add(node.id())) {
+                        changed = true;
+                    }
+                }
+            }
+            return scope;
         }
 
         private GraphView clip(Set<String> ids, List<TraceabilityEdge> scopedEdges, int maxNodes, int maxEdges, List<String> warnings) {

@@ -121,7 +121,7 @@ const mainModeClass = computed(() => {
 
 watch(projectId, async (value) => {
   if (!value) return
-  await projectStore.loadProjectContext(value)
+  await projectStore.loadProjectContext(value).catch(() => undefined)
 }, { immediate: true })
 
 watch(() => route.fullPath, () => {

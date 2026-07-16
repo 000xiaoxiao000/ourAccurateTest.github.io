@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '@/layouts/AppShell.vue'
 import { ApiError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
+import { useProjectStore } from '@/stores/project'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -214,6 +215,25 @@ router.beforeEach(async (to) => {
 
   if (!authStore.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
+  }
+
+  const projectId = typeof to.params.projectId === 'string' ? to.params.projectId : ''
+  if (projectId) {
+    const projectStore = useProjectStore()
+    try {
+      if (projectStore.projects.length === 0) {
+        await projectStore.loadProjects()
+      }
+    } catch (error) {
+      if (isAuthRequired(error)) {
+        return { name: 'login', query: { redirect: to.fullPath } }
+      }
+      throw error
+    }
+
+    if (!projectStore.projects.some((project) => project.id === projectId)) {
+      return { name: 'projects' }
+    }
   }
 
   return true

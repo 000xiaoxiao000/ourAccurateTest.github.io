@@ -19,8 +19,8 @@
       </div>
     </header>
 
-    <div v-if="!baselines.length && !map.loading.value && !map.error.value" class="workspace-notice">
-      暂无分析基线。请先在 AI 验证页面导入需求、用例和源码并执行分析。
+    <div v-if="!baselines.length && !map.response.value && !map.loading.value && !map.error.value" class="workspace-notice">
+      暂无分析基线。三层追溯需在 AI 验证页创建基线；代码调用链路图可基于已导入源码展示。
     </div>
     <div v-if="map.error.value" class="workspace-notice error">{{ map.error.value }}</div>
     <div v-for="warning in map.response.value?.warnings || []" :key="warning" class="workspace-notice warning">
@@ -151,9 +151,6 @@
               <button type="button" :class="{ active: callViewMode === 'control' }" @click="callViewMode = 'control'">控制流图</button>
               <button type="button" :class="{ active: callViewMode === 'coverage' }" @click="callViewMode = 'coverage'">覆盖率数据</button>
             </div>
-            <button class="ai-button" type="button" :disabled="map.loading.value || aiCallAnalyzing" @click="runAiCallAnalysis">
-              {{ aiCallAnalyzing ? 'AI 分析中...' : 'AI 分析调用链' }}
-            </button>
             <span v-if="callViewMode === 'graph'">{{ callGraph.edges.length }} 条调用</span>
           </div>
         </div>
@@ -164,7 +161,12 @@
           <span><i class="call-color static"></i>静态方法</span>
           <span><i class="call-color recursive"></i>递归</span>
         </div>
-        <div v-if="callViewMode === 'coverage'" class="coverage-data-panel">
+        <div v-if="map.loading.value" class="graph-loading-state">
+          <span class="spin">◌</span>
+          <strong>{{ slowLoading ? '源码调用关系仍在解析' : '正在加载代码图谱' }}</strong>
+          <small>{{ slowLoading ? '源码文件较多时需要更长时间；可等待完成，或稍后刷新当前基线。' : '正在读取当前基线的源码树、调用边、依赖和控制流。' }}</small>
+        </div>
+        <div v-else-if="callViewMode === 'coverage'" class="coverage-data-panel">
           <div v-if="!coverageRows.length" class="empty-card">暂无可展示的覆盖率数据。请在分析基线中选择覆盖率或执行资产。</div>
           <table v-else class="coverage-table">
             <thead>
@@ -181,7 +183,7 @@
           </table>
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
-          <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据，请重新导入源码并运行分析。</div>
+          <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图">
             <defs><marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g v-for="edge in dependencyGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#dependency-arrow)" /></g>
@@ -189,14 +191,14 @@
           </svg>
         </div>
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
-          <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据，请重新导入源码并运行分析。</div>
+          <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图">
             <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g v-for="edge in controlFlowGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#control-arrow)" /></g>
             <g v-for="node in controlFlowGraph.nodes" :key="node.id" :class="['mini-graph-node', node.tone]"><rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" /><text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text><text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text></g>
           </svg>
         </div>
-        <div v-else-if="!callGraph.nodes.length" class="empty-card">暂无代码调用关系。点击“AI 分析调用链”后，将基于源码方法体生成候选调用图谱。</div>
+        <div v-else-if="!callGraph.nodes.length" class="empty-card">暂无代码调用关系。请确认当前基线已绑定源码，且源码快照包含可解析的类、方法和调用信息。</div>
         <div v-else class="call-map-scroll large" :class="{ fullscreen: callGraphFullscreen }">
           <div class="call-graph-toolbar">
             <span class="graph-mode-label">调用关系图</span>
@@ -322,13 +324,27 @@ const openDirs = ref<Set<string>>(new Set())
 const openClasses = ref<Set<string>>(new Set())
 const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
-const aiCallAnalyzing = ref(false)
 const selectedTraceId = ref('')
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
+const slowLoading = ref(false)
+let slowLoadingTimer: number | undefined
 
 watch([activeTab, callViewMode], () => {
   exitCallGraphFullscreen()
+})
+
+watch(() => map.loading.value, (loading) => {
+  if (slowLoadingTimer !== undefined) {
+    window.clearTimeout(slowLoadingTimer)
+    slowLoadingTimer = undefined
+  }
+  slowLoading.value = false
+  if (loading) {
+    slowLoadingTimer = window.setTimeout(() => {
+      slowLoading.value = true
+    }, 8000)
+  }
 })
 
 const filters: Array<{ value: TraceFilter; label: string }> = [
@@ -349,7 +365,7 @@ const baselineStatusText = computed(() => {
 
 const treeNodes = computed(() => (map.codeTree.value || []).map(toTreeNode))
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
-const callGraph = computed(() => buildCallGraph(map.nodes.value, map.filteredEdges.value, map.focusId.value))
+const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || []))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value))
 const coverageRows = computed(() => {
@@ -395,13 +411,21 @@ async function loadOverview() {
 }
 
 async function reload() {
-  await loadOverview()
-  // The call graph is an independent code analysis view. Load its inferred
-  // edges together with the baseline so selecting a controller is useful
-  // immediately instead of showing an empty canvas until another action.
+  try {
+    await loadOverview()
+  } catch (err) {
+    map.error.value = err instanceof Error ? err.message : '加载分析基线失败'
+    baselines.value = []
+    selectedBaselineId.value = ''
+    return
+  }
+  // The call graph is an independent source-code analysis view. It is loaded
+  // from the baseline source snapshot and does not depend on verification AI analysis.
   map.includeAiCalls.value = true
   await map.load({ baselineId: selectedBaselineId.value })
-  selectedBaselineId.value = map.activeBaselineId.value
+  if (map.activeBaselineId.value) {
+    selectedBaselineId.value = map.activeBaselineId.value
+  }
 }
 
 async function reloadBaseline() {
@@ -411,18 +435,6 @@ async function reloadBaseline() {
   await map.load({ baselineId: selectedBaselineId.value })
 }
 
-async function runAiCallAnalysis() {
-  aiCallAnalyzing.value = true
-  activeTab.value = 'calls'
-  callViewMode.value = 'graph'
-  map.includeAiCalls.value = true
-  try {
-    await map.load({ baselineId: selectedBaselineId.value, focusId: '' })
-  } finally {
-    aiCallAnalyzing.value = false
-  }
-}
-
 function selectTraceNode(id: string) {
   selectedTraceId.value = selectedTraceId.value === id ? '' : id
 }
@@ -430,10 +442,8 @@ function selectTraceNode(id: string) {
 async function selectCodeNode(id: string) {
   map.select(id)
   openAncestors(id, map.codeTree.value)
-  if (activeTab.value === 'calls' && callViewMode.value === 'graph' && !map.includeAiCalls.value) {
-    map.includeAiCalls.value = true
-    await map.load({ baselineId: selectedBaselineId.value, focusId: '' })
-    map.select(id)
+  if (selectedBaselineId.value) {
+    await map.load({ baselineId: selectedBaselineId.value, focusId: id })
     openAncestors(id, map.codeTree.value)
   }
 }
@@ -680,14 +690,22 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
   const callEdges = edges
     .filter((edge) => edge.relation === 'CALLS' && nodeMap.has(edge.source) && nodeMap.has(edge.target))
     .filter((edge) => !selectedIsCode || scopedIds.has(edge.source) || scopedIds.has(edge.target))
-    .slice(0, 40)
+    .sort((left, right) => callEdgePriority(left, scopedIds) - callEdgePriority(right, scopedIds))
+    .slice(0, 64)
   const ids = new Set<string>()
+  if (selectedIsCode) {
+    nodes
+      .filter((node) => scopedIds.has(node.id) && node.kind.startsWith('CODE_'))
+      .sort((left, right) => codeNodePriority(left, focusId) - codeNodePriority(right, focusId))
+      .slice(0, 28)
+      .forEach((node) => ids.add(node.id))
+  }
   callEdges.forEach((edge) => {
     ids.add(edge.source)
     ids.add(edge.target)
   })
   if (selectedIsCode) ids.add(focusId)
-  const graphNodes = [...ids].map((id) => nodeMap.get(id)).filter((node): node is TraceabilityNode => Boolean(node)).slice(0, 42)
+  const graphNodes = [...ids].map((id) => nodeMap.get(id)).filter((node): node is TraceabilityNode => Boolean(node)).slice(0, 56)
   if (!graphNodes.length) {
     const fallbackNodes = selectedIsCode
       ? nodes.filter((node) => scopedIds.has(node.id) && (node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS')).slice(0, 24)
@@ -762,6 +780,25 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
       }
     })
   return { width, height, nodes: [...positioned.values()], edges: graphEdges }
+}
+
+function callEdgePriority(edge: TraceabilityEdge, scopedIds: Set<string>) {
+  let score = 0
+  if (edge.source === edge.target) score += 80
+  if (scopedIds.size && !scopedIds.has(edge.source) && !scopedIds.has(edge.target)) score += 60
+  if (scopedIds.has(edge.source) && !scopedIds.has(edge.target)) score += 5
+  if (!scopedIds.has(edge.source) && scopedIds.has(edge.target)) score += 12
+  if (edge.callEvidence === 'DYNAMIC_CONFIRMED') score -= 20
+  if (edge.callEvidence === 'STATIC_BRIDGED') score -= 10
+  return score
+}
+
+function codeNodePriority(node: TraceabilityNode, focusId: string) {
+  if (node.id === focusId) return 0
+  if (node.kind === 'CODE_CLASS') return 1
+  if (node.kind === 'CODE_METHOD') return 2
+  if (node.kind === 'CODE_FILE') return 3
+  return 4
 }
 
 function edgeLabelWidth(label: string) {
@@ -911,6 +948,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleCallGraphKeydown)
+  if (slowLoadingTimer !== undefined) window.clearTimeout(slowLoadingTimer)
   exitCallGraphFullscreen()
 })
 </script>
@@ -985,6 +1023,10 @@ onBeforeUnmount(() => {
 .segmented-control button.active { background:#0f766e; color:#fff; }
 .ai-button { border:0; border-radius:9px; padding:8px 11px; background:#172033; color:#fff; font-size:12px; font-weight:900; cursor:pointer; }
 .ai-button:disabled { opacity:.55; cursor:not-allowed; }
+.graph-loading-state { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; flex:1; min-height:520px; padding:28px; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; color:#64748b; text-align:center; }
+.graph-loading-state .spin { color:#0f766e; font-size:30px; }
+.graph-loading-state strong { color:#172033; font-size:15px; }
+.graph-loading-state small { max-width:420px; color:#64748b; font-size:12px; line-height:1.6; }
 .map-head { align-items:center; }
 .map-legend { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; color:#64748b; font-size:11px; font-weight:800; }
 .map-legend span { display:flex; align-items:center; gap:5px; }

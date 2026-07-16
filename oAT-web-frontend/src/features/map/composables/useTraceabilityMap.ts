@@ -10,8 +10,8 @@ export function useTraceabilityMap(projectId: () => string) {
   const activeBaselineId = ref('')
   const focusId = ref('')
   const depth = ref(4)
-  // Call-chain data belongs to the code graph tab and is loaded with the
-  // baseline so a selected controller never falls back to an empty graph.
+  // Code call-chain data belongs to the code graph tab. It is derived from
+  // source/static indexes and is independent from verification AI analysis.
   const includeAiCalls = ref(true)
   const filter = ref<TraceFilter>('ALL')
   const keyword = ref('')
