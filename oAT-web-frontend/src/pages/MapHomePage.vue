@@ -249,7 +249,11 @@
                 <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
               </marker>
             </defs>
-            <g v-for="edge in callGraph.edges" :key="edge.id" :class="['call-svg-edge', evidenceTone(edge.raw), { recursive: edge.source === edge.target }]">
+            <g
+              v-for="edge in callGraph.edges"
+              :key="edge.id"
+              :class="['call-svg-edge', evidenceTone(edge.raw), { recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedEdgeIds.has(edge.id) }]"
+            >
               <path :d="edge.path" marker-end="url(#call-arrow)" />
               <rect class="edge-label-bg" :x="edge.labelX - edge.labelWidth / 2" :y="edge.labelY - 13" :width="edge.labelWidth" height="19" rx="4" />
               <text :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
@@ -257,8 +261,8 @@
             <g
               v-for="node in callGraph.nodes"
               :key="node.id"
-              :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: map.focusId.value === node.id, recursive: Boolean(node.raw.metadata?.recursive) }]"
-              @click="selectCodeNode(node.id)"
+              :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
+              @click="selectCallGraphNode(node.id)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.shortLabel }}</text>
@@ -368,6 +372,7 @@ const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
 const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
 const selectedTraceId = ref('')
+const selectedCallGraphId = ref('')
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
 const slowLoading = ref(false)
@@ -431,7 +436,7 @@ const displayOpenClasses = computed(() => {
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
-const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, callGraphScope.value, codeKeyword.value))
+const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
 const callViewMeta = computed(() => {
@@ -537,6 +542,7 @@ async function reload() {
 async function reloadBaseline() {
   map.focusId.value = ''
   selectedTraceId.value = ''
+  selectedCallGraphId.value = ''
   loadedCodeDataKey.value = ''
   loadingCodeDataKey.value = ''
   if (activeTab.value === 'calls') {
@@ -590,6 +596,7 @@ function selectTraceNode(id: string) {
 async function locateTraceCodeNode(id: string) {
   activeTab.value = 'calls'
   callViewMode.value = 'graph'
+  selectedCallGraphId.value = id
   map.select(id)
   await loadCodeData(id)
   openAncestors(id, map.codeTree.value)
@@ -600,7 +607,15 @@ async function openTraceCodeContext(id: string) {
   await locateTraceCodeNode(id)
 }
 
+function selectCallGraphNode(id: string) {
+  const nextId = selectedCallGraphId.value === id ? '' : id
+  selectedCallGraphId.value = nextId
+  map.select(nextId)
+  if (nextId) openAncestors(nextId, map.codeTree.value)
+}
+
 async function selectCodeNode(id: string) {
+  selectedCallGraphId.value = id
   map.select(id)
   openAncestors(id, map.codeTree.value)
   if (selectedBaselineId.value) {
@@ -894,7 +909,7 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
   return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
 }
 
-function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
+function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string, selectedNodeId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   const selectedNode = focusId ? nodeMap.get(focusId) : null
   const selectedIsCode = Boolean(selectedNode?.kind.startsWith('CODE_'))
@@ -1009,7 +1024,34 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
         raw: edge,
       }
     })
-  return { width, height, nodes: [...positioned.values()], edges: graphEdges }
+  return {
+    width,
+    height,
+    nodes: [...positioned.values()],
+    edges: graphEdges,
+    relatedNodeIds: callGraphRelatedNodeIds(selectedNodeId, graphEdges),
+    relatedEdgeIds: callGraphRelatedEdgeIds(selectedNodeId, graphEdges),
+    hasSelection: Boolean(selectedNodeId && positioned.has(selectedNodeId)),
+    selectedNodeId,
+  }
+}
+
+function callGraphRelatedNodeIds(focusId: string, edges: SvgEdge[]) {
+  const ids = new Set<string>()
+  if (!focusId) return ids
+  ids.add(focusId)
+  edges.forEach((edge) => {
+    if (edge.source === focusId) ids.add(edge.target)
+    if (edge.target === focusId) ids.add(edge.source)
+  })
+  return ids
+}
+
+function callGraphRelatedEdgeIds(focusId: string, edges: SvgEdge[]) {
+  if (!focusId) return new Set<string>()
+  return new Set(edges
+    .filter((edge) => edge.source === focusId || edge.target === focusId)
+    .map((edge) => edge.id))
 }
 
 function callEdgePriority(edge: TraceabilityEdge, scopedIds: Set<string>) {
@@ -1527,6 +1569,10 @@ onBeforeUnmount(() => {
 .call-svg-edge.recursive path { stroke:#dc2626; stroke-width:1.8; stroke-dasharray:5 3; }
 .call-svg-edge.recursive .edge-label-bg { fill:#fff1f2; stroke:#fecaca; }
 .call-svg-edge.recursive text { fill:#b91c1c; }
+.call-svg-edge.active path { stroke:#0f766e; stroke-width:2.8; opacity:1; }
+.call-svg-edge.active .edge-label-bg { fill:#ecfdf5; stroke:#5eead4; }
+.call-svg-edge.active text { fill:#0f766e; }
+.call-svg-edge.dimmed { opacity:.16; }
 .call-svg-node { cursor:pointer; }
 .call-svg-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.8; filter:drop-shadow(0 8px 14px rgba(15,23,42,.08)); }
 .call-svg-node.call-controller rect { fill:#bfdbfe; stroke:#2563eb; }
@@ -1534,6 +1580,8 @@ onBeforeUnmount(() => {
 .call-svg-node.call-static rect { fill:#fed7aa; stroke:#f97316; }
 .call-svg-node.call-recursive rect { fill:#fecaca; stroke:#dc2626; }
 .call-svg-node.active rect { stroke:#7c3aed; stroke-width:2.8; }
+.call-svg-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; }
+.call-svg-node.dimmed { opacity:.28; }
 .call-svg-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; dominant-baseline:middle; }
 .call-svg-node .call-node-subtitle { fill:#64748b; font-size:10px; font-weight:800; }
 .code-tree-head { border-top:1px solid #eef2f5; }

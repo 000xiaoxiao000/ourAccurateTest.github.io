@@ -70,6 +70,12 @@
         <div><span>分析器</span><code>{{ result.report.changeSet.analyzerVersion || 'unknown' }}</code></div>
       </div>
 
+      <div v-if="llmReview" :class="['llm-status', llmReview.status.toLowerCase()]">
+        <strong>LLM 辅助确认：{{ llmReviewText }}</strong>
+        <span v-if="llmReview.total">{{ llmReview.completed }} / {{ llmReview.total }} 条</span>
+        <span v-if="llmReview.message">{{ llmReview.message }}</span>
+      </div>
+
       <div class="result-toolbar">
         <label>
           <span>关键字</span>
@@ -232,10 +238,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { analyzeGitChangeImpact, fetchVerificationOverview, type GitChangeImpactResponse, type GitImpactReport, type VerificationOverview } from '@/api/verification'
+import { analyzeGitChangeImpact, fetchGitImpactLlmReview, fetchVerificationOverview, type GitChangeImpactResponse, type GitImpactLlmReviewProgress, type GitImpactReport, type VerificationOverview } from '@/api/verification'
 import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useToast } from '@/composables/useToast'
@@ -248,6 +254,8 @@ const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
 const overview = ref<VerificationOverview>({ requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] })
 const result = ref<GitChangeImpactResponse | null>(null)
+const llmReview = ref<GitImpactLlmReviewProgress | null>(null)
+let llmPollTimer: number | undefined
 const loading = ref(false)
 const error = ref('')
 const form = reactive({ baselineId: '', appId: '', baseCommit: '', headCommit: '' })
@@ -258,6 +266,17 @@ const canAnalyze = computed(() => !!form.baselineId && !!form.appId && !!form.ba
 const transitiveCandidates = computed(() => (result.value?.report.candidates || [])
   .filter(candidate => candidate.classification !== 'DIRECT')
   .sort((a, b) => b.confidence - a.confidence || a.distance - b.distance))
+const llmReviewText = computed(() => {
+  if (!llmReview.value) return '未开始'
+  return ({
+    PENDING: '排队中',
+    RUNNING: '后台审阅中',
+    COMPLETED: '已完成',
+    FAILED: '失败',
+    UNAVAILABLE: '不可用',
+    NOT_FOUND: '未找到',
+  } as Record<string, string>)[llmReview.value.status] || llmReview.value.status
+})
 const keyword = computed(() => resultFilters.keyword.toLowerCase())
 const filteredFiles = computed(() => (result.value?.report.changeSet.files || []).filter(file => matchesKeyword([filePath(file), file.changeType, file.language])))
 const filteredDirectChanges = computed(() => (result.value?.report.directChanges || []).filter(change => matchesKeyword([
@@ -309,7 +328,9 @@ async function analyze() {
     result.value = await analyzeGitChangeImpact(projectId.value, form.baselineId, {
       appId: form.appId, baseCommit: form.baseCommit, headCommit: form.headCommit,
     })
+    llmReview.value = null
     resetPages()
+    startLlmReviewPolling(result.value.report.id)
     toast.success('Git 变更影响分析完成')
   } catch (err) {
     error.value = messageOf(err)
@@ -324,6 +345,29 @@ function messageOf(err: unknown) {
 }
 
 watch(() => [resultFilters.keyword, resultFilters.classification], resetPages)
+
+async function pollLlmReview(reportId: string) {
+  try {
+    const progress = await fetchGitImpactLlmReview(projectId.value, reportId)
+    if (result.value?.report.id !== reportId) return
+    llmReview.value = progress
+    result.value.report.llmJudgements = progress.judgements || []
+    if (['COMPLETED', 'FAILED', 'UNAVAILABLE', 'NOT_FOUND'].includes(progress.status)) stopLlmReviewPolling()
+  } catch (err) {
+    stopLlmReviewPolling()
+  }
+}
+
+function startLlmReviewPolling(reportId: string) {
+  stopLlmReviewPolling()
+  void pollLlmReview(reportId)
+  llmPollTimer = window.setInterval(() => void pollLlmReview(reportId), 2500)
+}
+
+function stopLlmReviewPolling() {
+  if (llmPollTimer) window.clearInterval(llmPollTimer)
+  llmPollTimer = undefined
+}
 
 function resetPages() {
   pages.files = 1
@@ -443,6 +487,7 @@ function typeText(value: string) {
 }
 
 onMounted(loadOverview)
+onBeforeUnmount(stopLlmReviewPolling)
 </script>
 
 <style scoped>
@@ -534,6 +579,14 @@ onMounted(loadOverview)
 .commit-strip div { display: grid; gap: 4px; min-width: 0; }
 .commit-strip span { color: #0f766e; font-size: 12px; font-weight: 800; }
 .commit-strip code { overflow: hidden; color: #134e4a; text-overflow: ellipsis; white-space: nowrap; }
+.llm-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; color: var(--oat-text-muted); font-size: 13px; }
+.llm-status strong { color: var(--oat-text); }
+.llm-status.running,
+.llm-status.pending { border-color: rgba(37, 99, 235, .2); background: #eff6ff; }
+.llm-status.completed { border-color: rgba(22, 163, 74, .22); background: #f0fdf4; }
+.llm-status.failed,
+.llm-status.unavailable,
+.llm-status.not_found { border-color: rgba(217, 119, 6, .24); background: #fffbeb; }
 .result-toolbar { display: grid; grid-template-columns: minmax(280px, 1fr) 180px; gap: 12px; }
 .result-toolbar label { display: grid; gap: 6px; color: #475569; font-size: 12px; font-weight: 800; }
 .result-toolbar input,

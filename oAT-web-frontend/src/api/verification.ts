@@ -480,9 +480,22 @@ export interface GitChangeImpactResponse {
   traceability: { affectedSymbols: string[]; affectedCriteria: AcceptanceCriterion[]; affectedTestcases: TestcaseProjection[] }
 }
 
+export interface GitImpactLlmReviewProgress {
+  reportId: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNAVAILABLE' | 'NOT_FOUND'
+  total: number
+  completed: number
+  judgements: GitImpactReport['llmJudgements']
+  message?: string
+}
+
 export function analyzeGitChangeImpact(projectId: string, baselineId: string, payload: { appId: string; baseCommit: string; headCommit: string }) {
   return apiPost<GitChangeImpactResponse>(
     `${base(projectId)}/baselines/${baselineId}/git-change-impact`, JSON.stringify(payload), 'application/json')
+}
+
+export function fetchGitImpactLlmReview(projectId: string, reportId: string) {
+  return apiGet<GitImpactLlmReviewProgress>(`${base(projectId)}/git-change-impact/${reportId}/llm-review`)
 }
 
 export function analyzeChangeImpact(projectId: string, baselineId: string, changeDescription?: string) {

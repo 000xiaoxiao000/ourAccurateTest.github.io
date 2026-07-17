@@ -406,6 +406,14 @@ public class VerificationApiControl {
         return ok("Git 变更影响分析完成", new GitChangeImpactResponse(report, traceability));
     }
 
+    @GetMapping("/git-change-impact/{reportId}/llm-review")
+    public ResultNotified<GitImpactAnalysisService.LlmReviewProgress> getGitImpactLlmReview(@PathVariable String projectId,
+                                                                                            @PathVariable String reportId,
+                                                                                            @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取 Git 影响 LLM 审阅进度成功", gitImpactAnalysisService.llmReview(reportId));
+    }
+
     // ── Connector types ───────────────────────────────────────────────────────
 
     @GetMapping("/connectors/types")
