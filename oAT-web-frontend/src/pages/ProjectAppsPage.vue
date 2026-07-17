@@ -9,7 +9,7 @@
         <button class="ghost-button" type="button" @click="creating = !creating">
           {{ creating ? '收起创建' : '新建应用' }}
         </button>
-        <button class="action-button" type="button" @click="load">刷新</button>
+        <AppRefreshButton :loading="loading" @click="load" />
       </div>
     </div>
 
@@ -127,6 +127,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import LanguageConfigForm from '@/features/app/LanguageConfigForm.vue'
 import { languageOptions } from '@/features/app/languageProfiles'
 import { useProjectStore } from '@/stores/project'

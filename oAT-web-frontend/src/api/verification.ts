@@ -406,9 +406,73 @@ export function fetchGateExemptions(projectId: string, baselineId: string) {
 
 export interface GitImpactReport {
   id: string
-  directChanges: Array<{ symbolKey: string; changeType: string; facets: string[] }>
-  candidates: Array<{ seedSymbol: string; targetSymbol: string; classification: string; confidence: number; reason: string }>
-  llmJudgements: Array<{ candidateId: string; decision: 'CONFIRM' | 'REJECT' | 'UNCERTAIN'; confidence: number }>
+  changeSet: {
+    repositoryUrl?: string
+    baseCommit: string
+    headCommit: string
+    mergeBase?: string
+    analyzerVersion?: string
+    createdAt?: string
+    files: Array<{
+      oldPath?: string
+      newPath?: string
+      changeType: string
+      renameScore?: number
+      oldBlobId?: string
+      newBlobId?: string
+      oldRanges?: Array<{ startLine: number; endLine: number }>
+      newRanges?: Array<{ startLine: number; endLine: number }>
+      binary?: boolean
+      language?: string
+    }>
+  }
+  directChanges: Array<{
+    oldKey?: string
+    newKey?: string
+    symbolKey: string
+    changeType: string
+    facets: string[]
+    oldSymbol?: GitSymbolSnapshot
+    newSymbol?: GitSymbolSnapshot
+    evidenceRanges?: Array<{ startLine: number; endLine: number }>
+  }>
+  candidates: Array<{
+    seedSymbol: string
+    targetSymbol: string
+    direction: string
+    distance: number
+    classification: string
+    ruleScore: number
+    semanticScore?: number
+    confidence: number
+    reason: string
+    path?: { symbols: string[]; edgeTypes: string[]; confidence: number }
+    evidence?: Record<string, unknown>
+  }>
+  llmJudgements: Array<{
+    candidateId: string
+    decision: 'CONFIRM' | 'REJECT' | 'UNCERTAIN'
+    confidence: number
+    businessReason?: string
+    riskLevel?: string
+    recommendedTests?: string[]
+    evidenceIds?: string[]
+  }>
+}
+
+export interface GitSymbolSnapshot {
+  key: string
+  kind: string
+  language: string
+  qualifiedName: string
+  signature?: string
+  path?: string
+  range?: { startLine: number; endLine: number }
+  astHash?: string
+  bodyHash?: string
+  apiHash?: string
+  snippet?: string
+  invokedNames?: string[]
 }
 
 export interface GitChangeImpactResponse {

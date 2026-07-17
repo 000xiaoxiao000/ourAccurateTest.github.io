@@ -5,7 +5,7 @@
         <div class="eyebrow">Members</div>
         <h1>项目成员</h1>
       </div>
-      <button class="action-button" type="button" @click="load">刷新</button>
+      <AppRefreshButton :loading="loading" @click="load" />
     </div>
 
     <div v-if="loading" class="status-card">正在加载成员数据...</div>
@@ -86,6 +86,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()

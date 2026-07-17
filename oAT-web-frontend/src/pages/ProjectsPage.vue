@@ -9,7 +9,7 @@
         <button class="ghost-button" type="button" @click="toggleCreate">
           {{ creating ? '收起创建' : '新建项目' }}
         </button>
-        <button class="refresh-button" type="button" @click="load">刷新</button>
+        <AppRefreshButton @click="load" />
       </div>
     </div>
 
@@ -157,6 +157,7 @@ import { RouterLink, useRoute, useRouter } from 'vue-router'
 
 import type { ProjectSummary } from '@/api/types'
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()

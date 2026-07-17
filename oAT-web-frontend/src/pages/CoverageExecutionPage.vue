@@ -7,7 +7,7 @@
         <p class="subtext">多维度覆盖率指标：用例覆盖、实现覆盖、执行有效覆盖、运行时覆盖和闭环率。</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="secondary-button" :disabled="loading" @click="load">刷新</button>
+        <AppRefreshButton :loading="loading" @click="load" />
         <RouterLink :to="`/p/${projectId}/verification`" class="secondary-button-link">← 工作区</RouterLink>
       </div>
     </header>
@@ -117,6 +117,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import {
   fetchBaselineDetail, analyzeChangeImpact,
   type ChangeImpactReport, type VerificationMetrics,

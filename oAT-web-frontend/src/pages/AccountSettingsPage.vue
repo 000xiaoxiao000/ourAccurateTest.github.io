@@ -5,7 +5,7 @@
         <div class="eyebrow">Account</div>
         <h1>账号设置</h1>
       </div>
-      <button class="action-button" type="button" @click="load">刷新</button>
+      <AppRefreshButton :loading="loading" @click="load" />
     </div>
 
     <div class="tab-row">
@@ -92,6 +92,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 
 import { fetchAccountProfile, updateAccountPassword, updateAccountProfile } from '@/api/bootstrap'
 import { useAuthStore } from '@/stores/auth'

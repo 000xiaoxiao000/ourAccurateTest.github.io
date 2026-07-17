@@ -5,7 +5,7 @@
         <div class="eyebrow">Repository</div>
         <h1>仓库配置</h1>
       </div>
-      <button class="action-button" type="button" @click="load">刷新</button>
+      <AppRefreshButton :loading="loading" @click="load" />
     </div>
 
     <div v-if="loading" class="status-card">正在加载仓库配置...</div>
@@ -64,6 +64,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 
 import { fetchRepositoryBranchesPreview } from '@/api/bootstrap'
 import { useToast } from '@/composables/useToast'

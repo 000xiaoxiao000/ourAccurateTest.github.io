@@ -7,7 +7,7 @@
         <p class="subtext">按产品 / 测试 / 开发 / 交叉视角审核 AI 发现，确认、驳回或生成回写内容。</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="secondary-button" :disabled="loading" @click="load">刷新</button>
+        <AppRefreshButton :loading="loading" @click="load" />
         <RouterLink :to="`/p/${projectId}/verification`" class="secondary-button-link">← 工作区</RouterLink>
       </div>
     </header>
@@ -99,6 +99,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import {
   fetchBaselineDetail, reviewVerificationFinding, writeBackVerificationFinding,
   type Perspective, type ReviewStatus, type Severity, type VerificationFinding, type Verdict,

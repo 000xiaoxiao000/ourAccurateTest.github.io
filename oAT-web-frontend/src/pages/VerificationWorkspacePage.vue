@@ -13,7 +13,7 @@
         <p class="subtext">围绕需求、测试用例、源码和依据建立可追溯的 AI 分析闭环。</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="secondary-button" :disabled="loading" @click="loadOverview">刷新</button>
+        <AppRefreshButton :loading="loading" @click="loadOverview" />
         <button type="button" class="primary-button" @click="activeWorkspace = 'library'">导入资料</button>
       </div>
     </header>
@@ -586,6 +586,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useRoute } from 'vue-router'
 
 import {

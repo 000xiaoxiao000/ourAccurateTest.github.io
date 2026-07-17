@@ -8,7 +8,7 @@
       </div>
       <div class="header-actions">
         <RouterLink class="secondary-link" :to="`/p/${projectId}/apps/${appId}/settings`">返回源码工程</RouterLink>
-        <button class="action-button" type="button" @click="refreshAll">刷新</button>
+        <AppRefreshButton :loading="loading" @click="refreshAll" />
       </div>
     </div>
 
@@ -150,6 +150,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { apiGetRaw, apiPost } from '@/api/http'
 import type { ApiEndpointItem, PulledZipItem } from '@/api/types'
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 
 interface DisplayEndpoint {
   key: string

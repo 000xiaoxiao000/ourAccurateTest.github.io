@@ -7,7 +7,7 @@
         <p class="subtext">配置并执行质量门禁策略，查看评估结果，对失败规则申请豁免。</p>
       </div>
       <div class="header-actions">
-        <button type="button" class="secondary-button" :disabled="loading" @click="load">刷新</button>
+        <AppRefreshButton :loading="loading" @click="load" />
         <RouterLink :to="`/p/${projectId}/verification`" class="secondary-button-link">← 工作区</RouterLink>
       </div>
     </header>
@@ -176,6 +176,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import {
   createGateExemption, createQualityGatePolicy, evaluateQualityGate,
   fetchQualityGatePolicies, fetchQualityGateResults,

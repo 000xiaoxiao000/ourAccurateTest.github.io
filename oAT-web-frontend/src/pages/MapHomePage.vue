@@ -15,7 +15,7 @@
             </option>
           </select>
         </label>
-        <button type="button" :disabled="map.loading.value" @click="reload">刷新</button>
+        <AppRefreshButton :loading="map.loading.value" @click="reload" />
       </div>
     </header>
 
@@ -317,6 +317,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { fetchVerificationOverview } from '@/api/verification'
 import type { VerificationBaseline } from '@/api/verification'
 import type { CodeTreeNode, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'

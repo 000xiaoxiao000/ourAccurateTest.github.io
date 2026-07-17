@@ -7,9 +7,7 @@
         <p class="subtext">管理版本创建、当前版本切换和文件清理。</p>
       </div>
       <div class="header-actions">
-        <button class="ghost-button" type="button" :disabled="refreshing || saving" aria-label="刷新版本列表" @click="refreshVersions">
-          {{ refreshing ? '刷新中...' : '刷新' }}
-        </button>
+        <AppRefreshButton :disabled="saving" :loading="refreshing" label="刷新版本列表" @click="refreshVersions" />
         <RouterLink class="ghost-link" :to="`/p/${projectId}/apps/${appId}/versions/new`">新增版本</RouterLink>
         <RouterLink class="ghost-link" :to="`/p/${projectId}/apps/${appId}/compare`">比对与报告</RouterLink>
       </div>
@@ -152,6 +150,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
 import AppPagination from '@/components/AppPagination.vue'
+import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { deleteVersion, deleteVersionFile, fetchVersionCenter, setCurrentVersion } from '@/api/bootstrap'
 import type { VersionCenterPayload, VersionItemSummary } from '@/api/types'
 
