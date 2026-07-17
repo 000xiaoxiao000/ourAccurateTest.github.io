@@ -159,11 +159,16 @@
             <div class="meta-line">
               <span v-if="activeSymbol(change)?.path">{{ activeSymbol(change)?.path }}</span>
               <span v-if="rangeText(activeSymbol(change)?.range)">行 {{ rangeText(activeSymbol(change)?.range) }}</span>
-              <span v-if="formatRanges(change.evidenceRanges)">证据 {{ formatRanges(change.evidenceRanges) }}</span>
+              <span v-if="formatRanges(change.evidenceRanges)">变更行 {{ formatRanges(change.evidenceRanges) }}</span>
             </div>
             <details v-if="activeSymbol(change)?.snippet" class="snippet-box">
               <summary>查看源码片段</summary>
-              <pre>{{ activeSymbol(change)?.snippet }}</pre>
+              <div class="snippet-code" role="region" aria-label="源码片段">
+                <div v-for="line in snippetLines(change)" :key="line.key" class="snippet-line">
+                  <span class="snippet-line-number">{{ line.number }}</span>
+                  <code>{{ line.text || ' ' }}</code>
+                </div>
+              </div>
             </details>
           </article>
           <AppPagination
@@ -526,6 +531,20 @@ function rangeText(range?: { startLine: number; endLine: number }) {
   return range.startLine === range.endLine ? String(range.startLine) : `${range.startLine}-${range.endLine}`
 }
 
+function snippetLines(change: GitImpactReport['directChanges'][number]) {
+  const snippet = activeSymbol(change)?.snippet || ''
+  const startLine = snippetStartLine(change)
+  return snippet.split(/\r?\n/).map((text, index) => ({
+    key: `${startLine + index}:${index}:${text}`,
+    number: startLine + index,
+    text,
+  }))
+}
+
+function snippetStartLine(change: GitImpactReport['directChanges'][number]) {
+  return change.evidenceRanges?.[0]?.startLine || activeSymbol(change)?.range?.startLine || 1
+}
+
 function shortCommit(value?: string) {
   return value ? value.slice(0, 8) : 'unknown'
 }
@@ -719,7 +738,38 @@ onBeforeUnmount(() => {
 .facet-list span { border-radius: 6px; padding: 3px 7px; background: var(--oat-surface-soft); color: #334155; font-size: 12px; font-weight: 700; }
 .snippet-box { border-top: 1px solid rgba(15, 23, 42, .08); padding-top: 8px; }
 .snippet-box summary { color: #0f766e; cursor: pointer; font-size: 13px; font-weight: 800; }
-.snippet-box pre { max-height: 260px; overflow: auto; margin: 8px 0 0; border-radius: 8px; padding: 10px; background: #0f172a; color: #e2e8f0; font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.snippet-code {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  border-radius: 8px;
+  padding: 10px 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.snippet-line {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 12px;
+  min-width: max-content;
+  padding: 0 12px 0 0;
+}
+.snippet-line-number {
+  position: sticky;
+  left: 0;
+  padding: 0 10px;
+  background: #0f172a;
+  color: #64748b;
+  text-align: right;
+  user-select: none;
+}
+.snippet-line code {
+  display: block;
+  white-space: pre;
+}
 .confidence { margin-left: auto; color: #0f766e; font-weight: 800; }
 .path-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px; border-radius: 8px; background: var(--oat-surface-soft); color: #334155; font-size: 12px; }
 .path-chain span { overflow-wrap: anywhere; }
