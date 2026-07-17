@@ -156,10 +156,10 @@
         <div class="call-head">
           <div class="call-head-main">
             <div>
-              <strong>{{ callViewMode === 'graph' ? '代码间调用链路图' : '覆盖率数据' }}</strong>
-              <span>{{ callViewMode === 'graph' ? '按调用边展示代码节点关系，动态确认、静态补全、静态调用分层标识' : '展示覆盖/执行证据匹配到的代码节点' }}</span>
+              <strong>{{ callViewMeta.title }}</strong>
+              <span>{{ callViewMeta.description }}</span>
             </div>
-            <span v-if="callViewMode === 'graph'" class="call-count">{{ callGraph.edges.length }} 条调用</span>
+            <span class="call-count">{{ callViewMeta.count }}</span>
           </div>
           <div class="call-toolbar">
             <div class="segmented-control mode-control">
@@ -433,6 +433,34 @@ const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredE
 const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, callGraphScope.value, codeKeyword.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
+const callViewMeta = computed(() => {
+  if (callViewMode.value === 'dependency') {
+    return {
+      title: '依赖关系图',
+      description: '按当前代码节点范围展示源码 import 和类依赖关系',
+      count: `${dependencyGraph.value.edges.length} 条依赖`,
+    }
+  }
+  if (callViewMode.value === 'control') {
+    return {
+      title: '控制流图',
+      description: '按当前方法、类或文件范围展示条件、循环、返回等执行结构',
+      count: `${controlFlowGraph.value.nodes.length} 个步骤`,
+    }
+  }
+  if (callViewMode.value === 'coverage') {
+    return {
+      title: '覆盖率数据',
+      description: '展示覆盖/执行证据匹配到的代码节点',
+      count: `${coverageRows.value.length} 条数据`,
+    }
+  }
+  return {
+    title: '代码间调用链路图',
+    description: '按调用边展示代码节点关系，动态确认、静态补全、静态调用分层标识',
+    count: `${callGraph.value.edges.length} 条调用`,
+  }
+})
 const selectedCodeContextText = computed(() => {
   const node = map.selectedNode.value
   if (!node) return ''
