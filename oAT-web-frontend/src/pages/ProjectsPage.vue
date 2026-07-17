@@ -81,21 +81,27 @@
       <div v-if="filteredProjects.length === 0" class="status-card">没有匹配的项目</div>
       <div v-else class="project-grid" :class="{ 'list-view': viewMode === 'list' }">
       <article v-for="project in paginatedProjects" :key="project.id" class="project-card" :class="{ recent: isRecentProject(project.id) }">
-        <div class="project-card-head">
-          <RouterLink class="project-title" :to="`/p/${project.id}/home`" @click="recordRecentProject(project)">{{ project.name }}</RouterLink>
-          <span v-if="isRecentProject(project.id)" class="recent-badge">最近访问</span>
-        </div>
-        <div class="project-card-desc">{{ project.describe || '暂无项目描述' }}</div>
-        <div class="project-card-meta">
-          <span>{{ projectAppCount(project.id) }} 源码工程</span>
-          <span>{{ project.memberCount }} 成员</span>
-          <span>{{ project.createDisplayName || project.create || '-' }}</span>
-          <span>{{ recentProjectText(project.id) }}</span>
-        </div>
-        <div class="project-card-actions">
-          <button class="link-button" type="button" @click="recordRecentProject(project); startEdit(project)">编辑</button>
-          <button class="link-button danger" type="button" @click="startDelete(project)">删除</button>
-          <RouterLink class="link-button route" :to="`/p/${project.id}/home`" @click="recordRecentProject(project)">进入项目</RouterLink>
+        <div class="project-card-body">
+          <div class="project-card-main">
+            <div class="project-card-head">
+              <RouterLink class="project-title" :to="`/p/${project.id}/home`" @click="recordRecentProject(project)">{{ project.name }}</RouterLink>
+              <span v-if="isRecentProject(project.id)" class="recent-badge">最近访问</span>
+            </div>
+            <p class="project-card-desc">{{ project.describe || '暂无项目描述' }}</p>
+          </div>
+
+          <div class="project-card-meta">
+            <span><strong>{{ projectAppCount(project.id) }}</strong> 源码工程</span>
+            <span><strong>{{ project.memberCount }}</strong> 成员</span>
+            <span class="project-creator">{{ project.createDisplayName || project.create || '-' }}</span>
+            <span class="project-recent">{{ recentProjectText(project.id) }}</span>
+          </div>
+
+          <div class="project-card-actions">
+            <button class="link-button" type="button" @click="recordRecentProject(project); startEdit(project)">编辑</button>
+            <button class="link-button danger" type="button" @click="startDelete(project)">删除</button>
+            <RouterLink class="link-button route" :to="`/p/${project.id}/home`" @click="recordRecentProject(project)">进入项目</RouterLink>
+          </div>
         </div>
 
         <form v-if="editingId === project.id" class="inline-form" @submit.prevent="submitEdit(project.id)">
@@ -591,31 +597,44 @@ watch(
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 16px;
-  min-height: min(520px, calc(100vh - 360px));
+  align-items: start;
 }
 
 .project-grid.list-view {
   grid-template-columns: 1fr;
+  gap: 10px;
 }
 
 .project-grid.list-view .project-card {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1fr) auto;
-  gap: 18px;
-  align-items: center;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--oat-radius-lg);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .project-card {
-  padding: 20px;
-  border-radius: var(--oat-radius-xl);
+  padding: 18px;
+  border-radius: var(--oat-radius-lg);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(241, 248, 250, 0.94) 100%);
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: var(--oat-shadow-sm);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(248, 252, 253, 0.96) 100%);
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.07);
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.project-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(15, 118, 110, 0.18);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.09);
 }
 
 .project-card.recent {
   border-color: rgba(15, 118, 110, 0.22);
+}
+
+.project-card-body {
+  display: grid;
+  gap: 16px;
 }
 
 .project-card-head {
@@ -639,27 +658,89 @@ watch(
   color: #0f172a;
   font-size: 18px;
   font-weight: 800;
+  line-height: 1.3;
 }
 
 .project-card-desc {
-  margin-top: 8px;
+  display: -webkit-box;
+  min-height: 44px;
+  margin: 8px 0 0;
+  overflow: hidden;
   color: #5b6b79;
-  min-height: 42px;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .project-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 0;
   color: #6b7280;
   font-size: 13px;
 }
 
+.project-card-meta span {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  border-radius: 12px;
+  background: rgba(248, 250, 252, 0.82);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-meta strong {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.project-creator,
+.project-recent {
+  grid-column: auto;
+}
+
 .project-card-actions {
-  margin-top: 16px;
+  justify-content: flex-start;
+  margin-top: 0;
   align-items: center;
   flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.project-grid.list-view .project-card-body {
+  grid-template-columns: minmax(240px, 1.1fr) minmax(420px, 1.4fr) minmax(210px, auto);
+  gap: 18px;
+  align-items: center;
+  min-height: 104px;
+  padding: 18px 20px;
+}
+
+.project-grid.list-view .project-card-main {
+  min-width: 0;
+}
+
+.project-grid.list-view .project-card-desc {
+  min-height: 0;
+  -webkit-line-clamp: 1;
+}
+
+.project-grid.list-view .project-card-meta {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.project-grid.list-view .project-card-meta span {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.project-grid.list-view .project-card-actions {
+  justify-content: flex-end;
+  padding-top: 0;
 }
 
 .inline-form {
@@ -695,19 +776,25 @@ watch(
 }
 
 .link-button {
-  border: none;
-  background: none;
-  padding: 0;
+  min-height: 34px;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.06);
+  padding: 6px 12px;
   color: #0f766e;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
 }
 
 .link-button.route {
   text-decoration: none;
+  background: #0f766e;
+  color: #fff;
 }
 
 .link-button.danger {
+  border-color: rgba(185, 28, 28, 0.12);
+  background: rgba(185, 28, 28, 0.06);
   color: #b91c1c;
 }
 
@@ -715,7 +802,22 @@ watch(
   .stats-grid,
   .project-toolbar,
   .filter-row,
-  .project-grid.list-view .project-card {
+  .project-grid.list-view .project-card-body {
+    grid-template-columns: 1fr;
+  }
+
+  .project-grid.list-view .project-card-body {
+    gap: 14px;
+  }
+
+  .project-grid.list-view .project-card-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .project-card-meta,
+  .project-grid.list-view .project-card-meta {
     grid-template-columns: 1fr;
   }
 }
