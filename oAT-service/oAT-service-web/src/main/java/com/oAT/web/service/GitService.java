@@ -1,7 +1,9 @@
 package com.oAT.web.service;
 
 import java.io.File;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 
 import com.oAT.web.service.entity.*;
 
@@ -35,6 +37,11 @@ public interface GitService {
      * 返回 null 表示文件在该 commit 中不存在或不可读。
      */
     String getFileContent(String repoUrl, String username, String password, String commitId, String filePath);
+
+    /**
+     * 批量获取指定 commit 下多个文件的内容，避免逐文件重复打开和同步仓库。
+     */
+    Map<String, String> getFileContents(String repoUrl, String username, String password, String commitId, Collection<String> filePaths);
 
     /**
      * 查找磁盘上已存在的缓存文件信息（基于分支和CommitID）。

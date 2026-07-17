@@ -17,8 +17,8 @@ import java.util.regex.Pattern;
 @Component
 public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
     private static final Pattern PACKAGE = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;");
-    private static final Pattern TYPE = Pattern.compile("(?m)^\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:public|protected|private|abstract|final|static|sealed|non-sealed|\\s)*(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
-    private static final Pattern METHOD = Pattern.compile("(?m)^\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:public|protected|private|static|final|synchronized|abstract|native|default|\\s)+([\\w$<>?,.\\[\\] ]+)\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*(?:throws[^\\{]+)?\\{");
+    private static final Pattern TYPE = Pattern.compile("(?m)(?:^|[;{}])\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:public|protected|private|abstract|final|static|sealed|non-sealed|\\s)*(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
+    private static final Pattern METHOD = Pattern.compile("(?m)(?:^|[;{}])\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\\s+)*([\\w$<>?,.\\[\\] ]+)\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*(?:throws[^\\{]+)?\\{");
     private static final Pattern INVOCATION = Pattern.compile("\\b([A-Za-z_$][\\w$]*)\\s*\\(");
 
     @Override
@@ -39,8 +39,9 @@ public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
             String name = matcher.group(2);
             String parameters = normalizeParameters(matcher.group(3));
             int begin = lineAt(source, matcher.start());
-            int end = closingBraceLine(source, matcher.end() - 1, begin);
-            String body = lines(source, begin, end);
+            int endOffset = closingBraceOffset(source, matcher.end() - 1);
+            int end = endOffset >= 0 ? lineAt(source, endOffset) : begin;
+            String body = endOffset >= 0 ? source.substring(matcher.start(), endOffset + 1) : matcher.group();
             String signature = name + "(" + parameters + ")";
             String key = "java://" + qualifiedType + "#" + signature;
             symbols.add(snapshot(key, SymbolKind.METHOD, qualifiedType + "." + name, signature, path, begin, end, body, invocations(body)));
@@ -55,7 +56,7 @@ public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
     private String normalizeParameters(String value) { return value == null || value.isBlank() ? "" : value.replaceAll("@[\\w.]+", "").replaceAll("\\s+", " ").trim(); }
     private List<String> invocations(String body) { Matcher m = INVOCATION.matcher(body); List<String> result = new ArrayList<>(); while (m.find()) { String value = m.group(1); if (!List.of("if", "for", "while", "switch", "catch", "return", "new").contains(value)) result.add(value); } return result.stream().distinct().toList(); }
     private int lineAt(String source, int offset) { int line = 1; for (int i = 0; i < offset; i++) if (source.charAt(i) == '\n') line++; return line; }
-    private int closingBraceLine(String source, int start, int fallback) { int depth = 0; for (int i = start; i < source.length(); i++) { char c = source.charAt(i); if (c == '{') depth++; else if (c == '}' && --depth == 0) return lineAt(source, i); } return fallback; }
+    private int closingBraceOffset(String source, int start) { int depth = 0; for (int i = start; i < source.length(); i++) { char c = source.charAt(i); if (c == '{') depth++; else if (c == '}' && --depth == 0) return i; } return -1; }
     private int lines(String source) { return lineAt(source, source.length()); }
     private String lines(String source, int start, int end) { String[] all = source.split("\\R", -1); StringBuilder result = new StringBuilder(); for (int i = Math.max(1, start); i <= Math.min(end, all.length); i++) result.append(all[i - 1]).append('\n'); return result.toString(); }
     private String normalize(String value) { return value.replaceAll("(?s)/\\*.*?\\*/|//[^\\n]*", "").replaceAll("\\s+", " ").trim(); }

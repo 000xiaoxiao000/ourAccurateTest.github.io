@@ -15,17 +15,22 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 @Service
 public class GitImpactAnalysisService {
     private static final Logger logger = LoggerFactory.getLogger(GitImpactAnalysisService.class);
     private static final int LLM_REVIEW_TIMEOUT_SECONDS = 8;
+    private static final int MAX_STRUCTURAL_SOURCE_CHARS = 500_000;
     private final GitService gitService;
     private final LanguageAnalyzer javaAnalyzer;
     private final StructuralDiffEngine structuralDiffEngine;
@@ -47,25 +52,48 @@ public class GitImpactAnalysisService {
     }
 
     public ImpactReport analyze(AppVo app, String baseCommit, String headCommit) {
+        return analyze(app, baseCommit, headCommit, ignored -> { });
+    }
+
+    public ImpactReport analyze(AppVo app, String baseCommit, String headCommit, Consumer<AnalysisProgress> progress) {
+        Consumer<AnalysisProgress> reporter = progress == null ? ignored -> { } : progress;
+        reporter.accept(new AnalysisProgress("PREPARING", 3, "准备 Git 影响分析"));
+        reporter.accept(new AnalysisProgress("FETCHING_DIFF", 8, "正在读取两个 Commit 的文件差异"));
         List<GitDiffVo> files = gitService.getDiffDetail(app.getRepoAddress(), app.getRepoUserName(), app.getRepoPassword(), baseCommit, headCommit);
+        reporter.accept(new AnalysisProgress("ANALYZING_FILES", 12, "发现 " + files.size() + " 个变更文件，开始结构化解析"));
         List<FileChange> fileChanges = new ArrayList<>();
         List<SymbolChange> changes = new ArrayList<>();
         List<GraphEdge> edges = new ArrayList<>();
+        reporter.accept(new AnalysisProgress("READING_CONTENT", 14, "正在读取变更文件内容"));
+        Map<String, String> oldSources = gitService.getFileContents(app.getRepoAddress(), app.getRepoUserName(), app.getRepoPassword(), baseCommit, readablePaths(files, true));
+        Map<String, String> newSources = gitService.getFileContents(app.getRepoAddress(), app.getRepoUserName(), app.getRepoPassword(), headCommit, readablePaths(files, false));
+        int totalFiles = Math.max(1, files.size());
+        int index = 0;
         for (GitDiffVo file : files) {
+            index++;
             String path = StringUtils.hasText(file.getNewPath()) && !"/dev/null".equals(file.getNewPath()) ? file.getNewPath() : file.getOldPath();
+            int percent = 12 + (int) Math.round(index * 58d / totalFiles);
+            reporter.accept(new AnalysisProgress("ANALYZING_FILES", Math.min(70, percent), "正在解析 " + path + " (" + index + "/" + files.size() + ")"));
             fileChanges.add(new FileChange(file.getOldPath(), file.getNewPath(), FileChangeType.valueOf(file.getChangeType()), file.getRenameScore(), file.getOldBlobId(), file.getNewBlobId(), ranges(file.getOldRanges()), ranges(file.getNewRanges()), false, language(path)));
             if (!javaAnalyzer.supports(path)) continue;
-            String oldSource = StringUtils.hasText(file.getOldPath()) && !"/dev/null".equals(file.getOldPath()) ? gitService.getFileContent(app.getRepoAddress(), app.getRepoUserName(), app.getRepoPassword(), baseCommit, file.getOldPath()) : null;
-            String newSource = StringUtils.hasText(file.getNewPath()) && !"/dev/null".equals(file.getNewPath()) ? gitService.getFileContent(app.getRepoAddress(), app.getRepoUserName(), app.getRepoPassword(), headCommit, file.getNewPath()) : null;
+            String oldSource = oldSources.get(file.getOldPath());
+            String newSource = newSources.get(file.getNewPath());
+            if (tooLarge(oldSource) || tooLarge(newSource)) {
+                logger.info("Skip structural analysis for large changed file {}", path);
+                continue;
+            }
             List<SymbolSnapshot> oldSymbols = javaAnalyzer.analyze(path, oldSource);
             List<SymbolSnapshot> newSymbols = javaAnalyzer.analyze(path, newSource);
             changes.addAll(structuralDiffEngine.diff(oldSymbols, newSymbols));
-            for (SymbolSnapshot source : newSymbols) for (String invoked : source.invokedNames()) for (SymbolSnapshot target : newSymbols) if (target.qualifiedName().endsWith("." + invoked)) edges.add(new GraphEdge(source.key(), target.key(), EdgeType.CALLS, .8d, false, "Tree-sitter call-site candidate"));
+            edges.addAll(callEdges(newSymbols));
         }
+        reporter.accept(new AnalysisProgress("PROPAGATING", 78, "正在基于调用图传播影响范围"));
         ChangeSet changeSet = new ChangeSet(app.getRepoAddress(), baseCommit, headCommit, baseCommit, ImpactModels.ANALYZER_VERSION, LocalDateTime.now(), fileChanges);
         List<ImpactCandidate> candidates = propagationEngine.propagate(changes, edges, 3);
         String reportId = UUID.randomUUID().toString();
+        reporter.accept(new AnalysisProgress("SCHEDULING_LLM", 88, "正在创建 LLM 辅助确认后台任务"));
         scheduleLlmReview(reportId, candidates);
+        reporter.accept(new AnalysisProgress("COMPLETED", 95, "确定性影响分析完成"));
         return new ImpactReport(reportId, changeSet, changes, candidates, List.of(), LocalDateTime.now());
     }
 
@@ -166,9 +194,43 @@ public class GitImpactAnalysisService {
     private List<LineRange> ranges(List<GitDiffVo.LineRange> ranges) { return ranges == null ? List.of() : ranges.stream().map(r -> new LineRange(r.getStartLine(), r.getEndLine())).toList(); }
     private String language(String path) { return path != null && path.endsWith(".java") ? "java" : "unknown"; }
 
+    private Collection<String> readablePaths(List<GitDiffVo> files, boolean oldSide) {
+        return files.stream()
+                .map(file -> oldSide ? file.getOldPath() : file.getNewPath())
+                .filter(path -> StringUtils.hasText(path) && !"/dev/null".equals(path))
+                .distinct()
+                .toList();
+    }
+
+    private boolean tooLarge(String source) {
+        return source != null && source.length() > MAX_STRUCTURAL_SOURCE_CHARS;
+    }
+
+    private List<GraphEdge> callEdges(List<SymbolSnapshot> symbols) {
+        Map<String, List<SymbolSnapshot>> bySimpleName = new LinkedHashMap<>();
+        for (SymbolSnapshot symbol : symbols) {
+            String qualifiedName = symbol.qualifiedName();
+            if (!StringUtils.hasText(qualifiedName)) continue;
+            String simpleName = qualifiedName.substring(qualifiedName.lastIndexOf('.') + 1);
+            bySimpleName.computeIfAbsent(simpleName, ignored -> new ArrayList<>()).add(symbol);
+        }
+        List<GraphEdge> result = new ArrayList<>();
+        for (SymbolSnapshot source : symbols) {
+            for (String invoked : source.invokedNames()) {
+                for (SymbolSnapshot target : bySimpleName.getOrDefault(invoked, List.of())) {
+                    result.add(new GraphEdge(source.key(), target.key(), EdgeType.CALLS, .8d, false, "Tree-sitter call-site candidate"));
+                }
+            }
+        }
+        return result;
+    }
+
     public enum LlmReviewStatus { PENDING, RUNNING, COMPLETED, FAILED, UNAVAILABLE, NOT_FOUND }
 
     public record LlmReviewProgress(String reportId, LlmReviewStatus status, int total, int completed,
                                     List<LlmJudgement> judgements, String message) {
+    }
+
+    public record AnalysisProgress(String stage, int percent, String message) {
     }
 }

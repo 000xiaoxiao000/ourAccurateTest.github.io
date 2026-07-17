@@ -26,7 +26,9 @@ import org.springframework.util.StringUtils;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -55,7 +57,7 @@ public class GitRepositoryContentService {
         lock.lock();
         try {
             File gitCacheDir = getGitCacheDir(normalizedRepoUrl);
-            Git clonedGit = openOrCloneBareWorktree(normalizedRepoUrl, username, password, gitCacheDir);
+            Git clonedGit = openOrCloneBareWorktree(normalizedRepoUrl, username, password, gitCacheDir, true);
             try (Git git = clonedGit) {
                 Repository repository = git.getRepository();
                 ObjectId oldId = StringUtils.hasText(oldCommit) ? repository.resolve(oldCommit) : null;
@@ -106,48 +108,74 @@ public class GitRepositoryContentService {
     }
 
     public String getFileContent(String repoUrl, String username, String password, String commitId, String filePath) {
-        if (!StringUtils.hasText(commitId) || !StringUtils.hasText(filePath)) return null;
+        return getFileContents(repoUrl, username, password, commitId, List.of(filePath)).get(filePath);
+    }
+
+    public Map<String, String> getFileContents(String repoUrl, String username, String password, String commitId, Collection<String> filePaths) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (!StringUtils.hasText(commitId) || filePaths == null || filePaths.isEmpty()) return result;
+        List<String> normalizedPaths = filePaths.stream()
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (normalizedPaths.isEmpty()) return result;
         String normalizedRepoUrl = gitRemoteSupportService.normalizeRemoteUrl(repoUrl);
         ReentrantLock lock = getRepoLock(normalizedRepoUrl);
         lock.lock();
         try {
             File gitCacheDir = getGitCacheDir(normalizedRepoUrl);
-            Git clonedGit = openOrCloneBareWorktree(normalizedRepoUrl, username, password, gitCacheDir);
+            Git clonedGit = openOrCloneBareWorktree(normalizedRepoUrl, username, password, gitCacheDir, false);
             try (Git git = clonedGit) {
                 Repository repository = git.getRepository();
                 ObjectId commitObj = repository.resolve(commitId);
                 if (commitObj == null) {
-                    logger.warn("Could not resolve commit {} in {}", commitId, normalizedRepoUrl);
-                    return null;
+                    try {
+                        git.fetch().setCredentialsProvider(gitRemoteSupportService.credentials(username, password)).call();
+                        commitObj = repository.resolve(commitId);
+                    } catch (Exception e) {
+                        logger.warn("Fetch failed while resolving commit {} in {}: {}", commitId, normalizedRepoUrl, e.getMessage());
+                    }
+                    if (commitObj == null) {
+                        logger.warn("Could not resolve commit {} in {}", commitId, normalizedRepoUrl);
+                        return result;
+                    }
                 }
                 try (RevWalk revWalk = new RevWalk(repository)) {
                     RevCommit revCommit = revWalk.parseCommit(commitObj);
-                    Set<String> candidates = buildFileCandidates(filePath);
-                    for (String candidate : candidates) {
-                        String content = readExactPath(repository, revCommit, candidate);
-                        if (content != null) {
-                            return content;
+                    for (String filePath : normalizedPaths) {
+                        Set<String> candidates = buildFileCandidates(filePath);
+                        for (String candidate : candidates) {
+                            String content = readExactPath(repository, revCommit, candidate);
+                            if (content != null) {
+                                result.put(filePath, content);
+                                break;
+                            }
+                        }
+                        if (!result.containsKey(filePath)) {
+                            String content = readPathSuffix(repository, revCommit, candidates);
+                            if (content != null) result.put(filePath, content);
                         }
                     }
-                    return readPathSuffix(repository, revCommit, candidates);
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get file content {}@{}: {}", filePath, commitId, e.getMessage());
+            logger.error("Failed to get file contents at {}: {}", commitId, e.getMessage());
         } finally {
             lock.unlock();
         }
-        return null;
+        return result;
     }
 
-    private Git openOrCloneBareWorktree(String normalizedRepoUrl, String username, String password, File gitCacheDir) throws Exception {
+    private Git openOrCloneBareWorktree(String normalizedRepoUrl, String username, String password, File gitCacheDir, boolean fetchExisting) throws Exception {
         Git clonedGit;
         if (new File(gitCacheDir, ".git").exists()) {
             clonedGit = Git.open(gitCacheDir);
-            try {
-                clonedGit.fetch().setCredentialsProvider(gitRemoteSupportService.credentials(username, password)).call();
-            } catch (Exception e) {
-                logger.warn("Fetch failed for cached git repository {}: {}", normalizedRepoUrl, e.getMessage());
+            if (fetchExisting) {
+                try {
+                    clonedGit.fetch().setCredentialsProvider(gitRemoteSupportService.credentials(username, password)).call();
+                } catch (Exception e) {
+                    logger.warn("Fetch failed for cached git repository {}: {}", normalizedRepoUrl, e.getMessage());
+                }
             }
         } else {
             clonedGit = Git.cloneRepository()

@@ -26,6 +26,7 @@ import com.oAT.web.verification.impact.ImpactTraceabilityMapper;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +53,9 @@ import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -72,6 +76,7 @@ public class VerificationApiControl {
     private static final String SOURCE_TREE_BEGIN = "// SOURCE_TREE_BEGIN";
     private static final String SOURCE_TREE_END = "// SOURCE_TREE_END";
     private static final String SOURCE_FILE_PREFIX = "// SOURCE_FILE: ";
+    private final ConcurrentHashMap<String, GitImpactAnalysisJob> gitImpactJobs = new ConcurrentHashMap<>();
 
     private final VerificationService verificationService;
     private final ProjectService projectService;
@@ -82,6 +87,7 @@ public class VerificationApiControl {
     private final GitImpactAnalysisService gitImpactAnalysisService;
     private final ImpactTraceabilityMapper impactTraceabilityMapper;
     private final ConnectorRegistry connectorRegistry;
+    private final Executor verificationAiExecutor;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
                                   AppService appService, GitService gitService,
@@ -89,7 +95,8 @@ public class VerificationApiControl {
                                   ChangeImpactService changeImpactService,
                                   GitImpactAnalysisService gitImpactAnalysisService,
                                   ImpactTraceabilityMapper impactTraceabilityMapper,
-                                  ConnectorRegistry connectorRegistry) {
+                                  ConnectorRegistry connectorRegistry,
+                                  @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.verificationService = verificationService;
         this.projectService = projectService;
         this.appService = appService;
@@ -99,6 +106,7 @@ public class VerificationApiControl {
         this.gitImpactAnalysisService = gitImpactAnalysisService;
         this.impactTraceabilityMapper = impactTraceabilityMapper;
         this.connectorRegistry = connectorRegistry;
+        this.verificationAiExecutor = verificationAiExecutor;
     }
 
     @GetMapping("/overview")
@@ -406,12 +414,71 @@ public class VerificationApiControl {
         return ok("Git 变更影响分析完成", new GitChangeImpactResponse(report, traceability));
     }
 
+    @PostMapping("/baselines/{baselineId}/git-change-impact-jobs")
+    public ResultNotified<GitImpactAnalysisJob> startGitImpactJob(@PathVariable String projectId,
+                                                                  @PathVariable String baselineId,
+                                                                  @SessionAttribute UserVo user,
+                                                                  @RequestBody GitChangeImpactRequest request) {
+        ensureProjectAccess(projectId, user);
+        Assert.notNull(request, "请求不能为空");
+        Assert.hasText(request.appId(), "appId 不能为空");
+        Assert.hasText(request.baseCommit(), "baseCommit 不能为空");
+        Assert.hasText(request.headCommit(), "headCommit 不能为空");
+        AppVo app = resolveSourceApp(projectId, request.appId());
+        String jobId = UUID.randomUUID().toString();
+        LocalDateTime now = LocalDateTime.now();
+        updateGitImpactJob(new GitImpactAnalysisJob(jobId, projectId, baselineId, GitImpactJobStatus.PENDING,
+                "PENDING", 1, "分析任务已创建", null, null, now, now));
+        CompletableFuture.runAsync(() -> runGitImpactJob(jobId, projectId, baselineId, app, request), verificationAiExecutor);
+        return ok("Git 变更影响分析任务已创建", gitImpactJobs.get(jobId));
+    }
+
+    @GetMapping("/git-change-impact-jobs/{jobId}")
+    public ResultNotified<GitImpactAnalysisJob> getGitImpactJob(@PathVariable String projectId,
+                                                                @PathVariable String jobId,
+                                                                @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        GitImpactAnalysisJob job = gitImpactJobs.get(jobId);
+        Assert.notNull(job, "Git 影响分析任务不存在或已过期");
+        Assert.isTrue(projectId.equals(job.projectId()), "无权访问该分析任务");
+        return ok("获取 Git 影响分析进度成功", job);
+    }
+
     @GetMapping("/git-change-impact/{reportId}/llm-review")
     public ResultNotified<GitImpactAnalysisService.LlmReviewProgress> getGitImpactLlmReview(@PathVariable String projectId,
                                                                                             @PathVariable String reportId,
                                                                                             @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
         return ok("获取 Git 影响 LLM 审阅进度成功", gitImpactAnalysisService.llmReview(reportId));
+    }
+
+    private void runGitImpactJob(String jobId, String projectId, String baselineId, AppVo app, GitChangeImpactRequest request) {
+        try {
+            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "STARTING", 3, "正在启动 Git 影响分析", null, null));
+            var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit(), progress ->
+                    updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, progress.stage(), progress.percent(), progress.message(), null, null)));
+            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "MAPPING_TRACEABILITY", 96, "正在映射验收标准和回归用例", null, null));
+            var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
+            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.COMPLETED, "COMPLETED", 100, "Git 影响分析完成", new GitChangeImpactResponse(report, traceability), null));
+        } catch (RuntimeException exception) {
+            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.FAILED, "FAILED", 100, "Git 影响分析失败", null, exception.getMessage()));
+        }
+    }
+
+    private GitImpactAnalysisJob progressJob(String jobId, GitImpactJobStatus status, String stage, int percent, String message,
+                                             GitChangeImpactResponse result, String error) {
+        GitImpactAnalysisJob existing = gitImpactJobs.get(jobId);
+        LocalDateTime createdAt = existing == null ? LocalDateTime.now() : existing.createdAt();
+        return new GitImpactAnalysisJob(jobId,
+                existing == null ? "" : existing.projectId(),
+                existing == null ? "" : existing.baselineId(),
+                status, stage, Math.max(0, Math.min(100, percent)), message,
+                result == null && existing != null ? existing.result() : result,
+                error, createdAt, LocalDateTime.now());
+    }
+
+    private void updateGitImpactJob(GitImpactAnalysisJob job) {
+        gitImpactJobs.put(job.jobId(), job);
     }
 
     // ── Connector types ───────────────────────────────────────────────────────
@@ -431,6 +498,10 @@ public class VerificationApiControl {
     public record GitChangeImpactRequest(String appId, String baseCommit, String headCommit) {}
     public record GitChangeImpactResponse(com.oAT.web.verification.impact.ImpactModels.ImpactReport report,
                                           ImpactTraceabilityMapper.TraceabilityImpact traceability) {}
+    public enum GitImpactJobStatus { PENDING, RUNNING, COMPLETED, FAILED }
+    public record GitImpactAnalysisJob(String jobId, String projectId, String baselineId, GitImpactJobStatus status,
+                                       String stage, int percent, String message, GitChangeImpactResponse result,
+                                       String error, LocalDateTime createdAt, LocalDateTime updatedAt) {}
 
     private String readContent(MultipartFile file, AssetType assetType) throws IOException {
         if (file == null || file.isEmpty()) return "";

@@ -48,6 +48,17 @@
           <span v-if="!canAnalyze && !loading" class="analyze-hint">请完善分析条件</span>
         </button>
       </div>
+      <div v-if="analysisJob" :class="['analysis-progress', analysisJob.status.toLowerCase()]">
+        <div class="progress-top">
+          <strong>{{ analysisJob.message || jobStatusText }}</strong>
+          <span>{{ analysisJob.percent }}%</span>
+        </div>
+        <div class="progress-track"><div :style="{ width: `${analysisJob.percent}%` }"></div></div>
+        <div class="progress-meta">
+          <span>{{ stageText(analysisJob.stage) }}</span>
+          <span>{{ jobStatusText }}</span>
+        </div>
+      </div>
     </section>
 
     <section v-if="result" class="panel-section result-panel">
@@ -241,7 +252,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
-import { analyzeGitChangeImpact, fetchGitImpactLlmReview, fetchVerificationOverview, type GitChangeImpactResponse, type GitImpactLlmReviewProgress, type GitImpactReport, type VerificationOverview } from '@/api/verification'
+import { fetchGitChangeImpactJob, fetchGitImpactLlmReview, fetchVerificationOverview, startGitChangeImpactJob, type GitChangeImpactResponse, type GitImpactAnalysisJob, type GitImpactLlmReviewProgress, type GitImpactReport, type VerificationOverview } from '@/api/verification'
 import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useToast } from '@/composables/useToast'
@@ -254,7 +265,9 @@ const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
 const overview = ref<VerificationOverview>({ requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] })
 const result = ref<GitChangeImpactResponse | null>(null)
+const analysisJob = ref<GitImpactAnalysisJob | null>(null)
 const llmReview = ref<GitImpactLlmReviewProgress | null>(null)
+let analysisPollTimer: number | undefined
 let llmPollTimer: number | undefined
 const loading = ref(false)
 const error = ref('')
@@ -276,6 +289,10 @@ const llmReviewText = computed(() => {
     UNAVAILABLE: '不可用',
     NOT_FOUND: '未找到',
   } as Record<string, string>)[llmReview.value.status] || llmReview.value.status
+})
+const jobStatusText = computed(() => {
+  if (!analysisJob.value) return '未开始'
+  return ({ PENDING: '排队中', RUNNING: '分析中', COMPLETED: '已完成', FAILED: '失败' } as Record<string, string>)[analysisJob.value.status] || analysisJob.value.status
 })
 const keyword = computed(() => resultFilters.keyword.toLowerCase())
 const filteredFiles = computed(() => (result.value?.report.changeSet.files || []).filter(file => matchesKeyword([filePath(file), file.changeType, file.language])))
@@ -324,19 +341,23 @@ async function analyze() {
   if (!canAnalyze.value) return
   loading.value = true
   error.value = ''
+  result.value = null
+  llmReview.value = null
+  stopAnalysisPolling()
+  stopLlmReviewPolling()
   try {
-    result.value = await analyzeGitChangeImpact(projectId.value, form.baselineId, {
+    analysisJob.value = await startGitChangeImpactJob(projectId.value, form.baselineId, {
       appId: form.appId, baseCommit: form.baseCommit, headCommit: form.headCommit,
     })
-    llmReview.value = null
     resetPages()
-    startLlmReviewPolling(result.value.report.id)
-    toast.success('Git 变更影响分析完成')
+    startAnalysisPolling(analysisJob.value.jobId)
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
-  } finally {
     loading.value = false
+    analysisJob.value = null
+    stopAnalysisPolling()
+  } finally {
   }
 }
 
@@ -345,6 +366,43 @@ function messageOf(err: unknown) {
 }
 
 watch(() => [resultFilters.keyword, resultFilters.classification], resetPages)
+
+async function pollAnalysisJob(jobId: string) {
+  try {
+    const job = await fetchGitChangeImpactJob(projectId.value, jobId)
+    if (analysisJob.value?.jobId && analysisJob.value.jobId !== jobId) return
+    analysisJob.value = job
+    if (job.status === 'COMPLETED' && job.result) {
+      result.value = job.result
+      resetPages()
+      loading.value = false
+      stopAnalysisPolling()
+      startLlmReviewPolling(job.result.report.id)
+      toast.success('Git 变更影响分析完成')
+    } else if (job.status === 'FAILED') {
+      error.value = job.error || job.message || 'Git 影响分析失败'
+      loading.value = false
+      stopAnalysisPolling()
+      toast.error(error.value)
+    }
+  } catch (err) {
+    error.value = messageOf(err)
+    loading.value = false
+    stopAnalysisPolling()
+    toast.error(error.value)
+  }
+}
+
+function startAnalysisPolling(jobId: string) {
+  stopAnalysisPolling()
+  void pollAnalysisJob(jobId)
+  analysisPollTimer = window.setInterval(() => void pollAnalysisJob(jobId), 1000)
+}
+
+function stopAnalysisPolling() {
+  if (analysisPollTimer) window.clearInterval(analysisPollTimer)
+  analysisPollTimer = undefined
+}
 
 async function pollLlmReview(reportId: string) {
   try {
@@ -443,7 +501,7 @@ function llmText(value?: string) {
   return ({ CONFIRM: '确认', REJECT: '否决', UNCERTAIN: '不确定' } as Record<string, string>)[value || ''] || '未判定'
 }
 
-function matchesKeyword(values: Array<string | undefined>) {
+function matchesKeyword(values: Array<string | undefined | null>) {
   if (!keyword.value) return true
   return values.some(value => value?.toLowerCase().includes(keyword.value))
 }
@@ -466,13 +524,30 @@ function shortCommit(value?: string) {
   return value ? value.slice(0, 8) : 'unknown'
 }
 
+function stageText(value: string) {
+  return ({
+    PENDING: '等待执行',
+    STARTING: '启动任务',
+    PREPARING: '准备分析',
+    FETCHING_DIFF: '读取 Git Diff',
+    READING_CONTENT: '读取文件内容',
+    ANALYZING_FILES: '解析变更文件',
+    PROPAGATING: '传播影响范围',
+    SCHEDULING_LLM: '创建 LLM 任务',
+    MAPPING_TRACEABILITY: '映射追溯关系',
+    COMPLETED: '分析完成',
+    FAILED: '分析失败',
+  } as Record<string, string>)[value] || value
+}
+
 function symbolMeta(change: GitImpactReport['directChanges'][number]) {
   const symbol = activeSymbol(change)
   const parts = [symbol?.kind, symbol?.signature].filter(Boolean)
   return parts.length ? parts.join(' · ') : change.symbolKey
 }
 
-function symbolName(symbolKey: string) {
+function symbolName(symbolKey?: string | null) {
+  if (!symbolKey) return '未知符号'
   const cleaned = symbolKey.replace(/^java:\/\//, '')
   const memberIndex = cleaned.indexOf('#')
   if (memberIndex >= 0) {
@@ -487,7 +562,10 @@ function typeText(value: string) {
 }
 
 onMounted(loadOverview)
-onBeforeUnmount(stopLlmReviewPolling)
+onBeforeUnmount(() => {
+  stopAnalysisPolling()
+  stopLlmReviewPolling()
+})
 </script>
 
 <style scoped>
@@ -567,6 +645,18 @@ onBeforeUnmount(stopLlmReviewPolling)
   font-size: 12px;
   font-weight: 600;
 }
+.analysis-progress { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(37, 99, 235, .18); border-radius: 8px; background: #eff6ff; }
+.analysis-progress.completed { border-color: rgba(22, 163, 74, .22); background: #f0fdf4; }
+.analysis-progress.failed { border-color: rgba(220, 38, 38, .2); background: #fef2f2; }
+.progress-top,
+.progress-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.progress-top strong { color: var(--oat-text); overflow-wrap: anywhere; }
+.progress-top span { color: #2563eb; font-weight: 900; font-variant-numeric: tabular-nums; }
+.analysis-progress.completed .progress-top span { color: #16a34a; }
+.analysis-progress.failed .progress-top span { color: #dc2626; }
+.progress-track { overflow: hidden; height: 8px; border-radius: 999px; background: rgba(37, 99, 235, .13); }
+.progress-track div { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #0f766e); transition: width .25s ease; }
+.progress-meta { color: var(--oat-text-muted); font-size: 12px; font-weight: 700; }
 .inline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .form-stack label { display: grid; gap: 7px; color: #475569; font-size: 13px; font-weight: 700; }
 .form-stack input, .form-stack select { min-height: 42px; border: 1px solid rgba(15, 23, 42, .13); border-radius: 10px; padding: 9px 11px; background: #fff; color: #1e293b; font: inherit; }

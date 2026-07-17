@@ -191,6 +191,7 @@
           <span><i class="call-color private"></i>私有方法</span>
           <span><i class="call-color static"></i>静态方法</span>
           <span><i class="call-color recursive"></i>递归</span>
+          <span><i class="line-sample derived"></i>虚线：结构包含 / 源码候选</span>
         </div>
         <div v-if="map.loading.value" class="graph-loading-state">
           <span class="spin">◌</span>
@@ -218,7 +219,15 @@
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图">
             <defs><marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g v-for="edge in dependencyGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#dependency-arrow)" /></g>
-            <g v-for="node in dependencyGraph.nodes" :key="node.id" :class="['mini-graph-node', node.tone]"><rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" /><text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text></g>
+            <g
+              v-for="node in dependencyGraph.nodes"
+              :key="node.id"
+              :class="['mini-graph-node', node.tone, { active: selectedMiniGraphId === node.id || (!!node.nodeId && map.focusId.value === node.nodeId) }]"
+              @click="selectMiniGraphNode(node)"
+            >
+              <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
+              <text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text>
+            </g>
           </svg>
         </div>
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
@@ -226,7 +235,16 @@
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图">
             <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g v-for="edge in controlFlowGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#control-arrow)" /></g>
-            <g v-for="node in controlFlowGraph.nodes" :key="node.id" :class="['mini-graph-node', node.tone]"><rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" /><text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text><text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text></g>
+            <g
+              v-for="node in controlFlowGraph.nodes"
+              :key="node.id"
+              :class="['mini-graph-node', node.tone, { active: selectedMiniGraphId === node.id || (!!node.nodeId && map.focusId.value === node.nodeId) }]"
+              @click="selectMiniGraphNode(node)"
+            >
+              <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
+              <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
+              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
+            </g>
           </svg>
         </div>
         <div v-else-if="!callGraph.nodes.length" class="empty-card">暂无代码调用关系。请确认当前基线已绑定源码，且源码快照包含可解析的类、方法和调用信息。</div>
@@ -252,11 +270,13 @@
             <g
               v-for="edge in callGraph.edges"
               :key="edge.id"
-              :class="['call-svg-edge', evidenceTone(edge.raw), { recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedEdgeIds.has(edge.id) }]"
+              :class="['call-svg-edge', evidenceTone(edge.raw), { structure: edge.raw.generationMethod === 'CODE_STRUCTURE', inferred: edge.raw.generationMethod === 'SOURCE_EXPRESSION', recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedEdgeIds.has(edge.id) }]"
             >
               <path :d="edge.path" marker-end="url(#call-arrow)" />
-              <rect class="edge-label-bg" :x="edge.labelX - edge.labelWidth / 2" :y="edge.labelY - 13" :width="edge.labelWidth" height="19" rx="4" />
-              <text :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
+              <template v-if="edge.raw.generationMethod !== 'CODE_STRUCTURE'">
+                <rect class="edge-label-bg" :x="edge.labelX - edge.labelWidth / 2" :y="edge.labelY - 13" :width="edge.labelWidth" height="19" rx="4" />
+                <text :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
+              </template>
             </g>
             <g
               v-for="node in callGraph.nodes"
@@ -358,7 +378,7 @@ interface SvgEdge {
   labelWidth: number
   raw: TraceabilityEdge
 }
-interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; tone: string }
+interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; tone: string; nodeId?: string }
 interface MiniGraphEdge { id: string; path: string }
 
 const route = useRoute()
@@ -373,6 +393,7 @@ const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph
 const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
 const selectedTraceId = ref('')
 const selectedCallGraphId = ref('')
+const selectedMiniGraphId = ref('')
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
 const slowLoading = ref(false)
@@ -436,7 +457,7 @@ const displayOpenClasses = computed(() => {
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
-const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
+const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
 const callViewMeta = computed(() => {
@@ -610,12 +631,23 @@ async function openTraceCodeContext(id: string) {
 function selectCallGraphNode(id: string) {
   const nextId = selectedCallGraphId.value === id ? '' : id
   selectedCallGraphId.value = nextId
+  selectedMiniGraphId.value = ''
   map.select(nextId)
   if (nextId) openAncestors(nextId, map.codeTree.value)
 }
 
+function selectMiniGraphNode(node: MiniGraphNode) {
+  selectedMiniGraphId.value = selectedMiniGraphId.value === node.id ? '' : node.id
+  if (node.nodeId) {
+    selectedCallGraphId.value = node.nodeId
+    map.select(node.nodeId)
+    openAncestors(node.nodeId, map.codeTree.value)
+  }
+}
+
 async function selectCodeNode(id: string) {
   selectedCallGraphId.value = id
+  selectedMiniGraphId.value = ''
   map.select(id)
   openAncestors(id, map.codeTree.value)
   if (selectedBaselineId.value) {
@@ -854,9 +886,35 @@ function layerTitle(title: string, layer: { nodes: TraceabilityNode[]; total: nu
   return layer.total > layer.nodes.length ? `${title} · ${layer.nodes.length}/${layer.total}` : title
 }
 
+function dependencyNodeResolver(nodes: TraceabilityNode[]) {
+  const exact = new Map<string, string>()
+  nodes
+    .filter((node) => node.kind === 'CODE_CLASS' || node.kind === 'CODE_FILE')
+    .forEach((node) => {
+      ;[node.symbol, node.description, node.locator, node.label, node.id]
+        .filter(Boolean)
+        .forEach((value) => exact.set(normalizeSearch(String(value)), node.id))
+    })
+  return (label: string) => {
+    const normalized = normalizeSearch(label)
+    if (exact.has(normalized)) return exact.get(normalized)
+    const simple = normalized.split(/[./#]/).filter(Boolean).pop() || normalized
+    return nodes.find((node) =>
+      (node.kind === 'CODE_CLASS' || node.kind === 'CODE_FILE') &&
+      [node.symbol, node.description, node.locator, node.label, node.id]
+        .filter(Boolean)
+        .some((value) => {
+          const text = normalizeSearch(String(value))
+          return text === simple || text.endsWith(`.${simple}`) || normalized.endsWith(text)
+        }),
+    )?.id
+  }
+}
+
 function buildDependencyGraph(dependencies: Array<{ source: string; target: string; kind: string }>, keyword: string, allNodes: TraceabilityNode[], focusId: string) {
   const unique = new Map<string, { source: string; target: string; kind: string }>()
   const dependencyScope = dependencyScopeLabels(allNodes, focusId)
+  const dependencyNodeIds = dependencyNodeResolver(allNodes)
   dependencies
     .filter((item) => !dependencyScope.size || dependencyScope.has(normalizeSearch(item.source)) || [...dependencyScope].some((label) => normalizeSearch(item.source).endsWith(`.${label}`) || normalizeSearch(item.source).includes(label)))
     .filter((item) => !keyword || normalizeSearch([item.source, item.target, item.kind].join(' ')).includes(keyword))
@@ -867,8 +925,8 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
   const graphNodes: MiniGraphNode[] = []
   const sourceWidth = 230
   const targetWidth = 300
-  sources.forEach((label, index) => graphNodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source' }))
-  targets.forEach((label, index) => graphNodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target' }))
+  sources.forEach((label, index) => graphNodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source', nodeId: dependencyNodeIds(label) }))
+  targets.forEach((label, index) => graphNodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target', nodeId: dependencyNodeIds(label) }))
   const nodeMap = new Map(graphNodes.map((node) => [node.id, node]))
   const edges: MiniGraphEdge[] = items.map((item, index) => {
     const source = nodeMap.get(`source:${item.source}`)!
@@ -899,6 +957,7 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     label: `${step.kind} · ${shorten(step.methodLabel, 22)}`,
     subtitle: shorten(step.expression || '代码块', 38),
     tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
+    nodeId: step.methodId,
   }))
   const edges: MiniGraphEdge[] = []
   for (let index = 1; index < graphNodes.length; index++) {
@@ -909,7 +968,7 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
   return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
 }
 
-function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], focusId: string, selectedNodeId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
+function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], controlFlows: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, selectedNodeId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   const selectedNode = focusId ? nodeMap.get(focusId) : null
   const selectedIsCode = Boolean(selectedNode?.kind.startsWith('CODE_'))
@@ -931,6 +990,8 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
     .filter((edge) => !keyword || matchedNodeIds.has(edge.source) || matchedNodeIds.has(edge.target) || searchableCallEdge(edge).includes(keyword))
     .sort((left, right) => callEdgePriority(left, graphScopeIds) - callEdgePriority(right, graphScopeIds))
     .slice(0, 64)
+  const inferredExpressionEdges = inferControlFlowCallEdges(nodes, callEdges, controlFlows, selectedIsCode ? graphScopeIds : new Set<string>(), keyword)
+  const visibleCallEdges = [...callEdges, ...inferredExpressionEdges]
   const ids = new Set<string>()
   if (selectedIsCode) {
     nodes
@@ -939,7 +1000,7 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
       .slice(0, 28)
       .forEach((node) => ids.add(node.id))
   }
-  callEdges.forEach((edge) => {
+  visibleCallEdges.forEach((edge) => {
     ids.add(edge.source)
     ids.add(edge.target)
   })
@@ -957,9 +1018,14 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
         .slice(0, 24)
     graphNodes.push(...fallbackNodes)
   }
+  const structuralEdges = graphNodes
+    .filter((node) => node.parentId && nodeMap.has(node.parentId))
+    .filter((node) => node.kind === 'CODE_METHOD' || node.kind === 'CODE_CLASS')
+    .map((node) => structuralCallEdge(nodeMap.get(node.parentId!)!, node))
+  const layoutEdges = [...visibleCallEdges, ...structuralEdges]
   const nodeWidth = 184
   const nodeHeight = 58
-  const levels = callGraphLevels(graphNodes, callEdges)
+  const levels = callGraphLevels(graphNodes, layoutEdges)
   const columns = Math.max(1, Math.min(6, Math.max(...levels.values(), 0) + 1))
   const rowsByLevel = new Map<number, number>()
   levels.forEach((level) => rowsByLevel.set(level, (rowsByLevel.get(level) || 0) + 1))
@@ -986,7 +1052,7 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], fo
       raw: node,
     })
   })
-  const graphEdges = callEdges
+  const graphEdges = layoutEdges
     .filter((edge) => positioned.has(edge.source) && positioned.has(edge.target))
     .map((edge): SvgEdge => {
       const source = positioned.get(edge.source)!
@@ -1052,6 +1118,88 @@ function callGraphRelatedEdgeIds(focusId: string, edges: SvgEdge[]) {
   return new Set(edges
     .filter((edge) => edge.source === focusId || edge.target === focusId)
     .map((edge) => edge.id))
+}
+
+function inferControlFlowCallEdges(nodes: TraceabilityNode[], existingEdges: TraceabilityEdge[], controlFlows: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, scopedIds: Set<string>, keyword: string) {
+  if (!controlFlows.length) return []
+  const existing = new Set(existingEdges.map((edge) => `${edge.source}->${edge.target}`))
+  const methods = nodes.filter((node) => node.kind === 'CODE_METHOD')
+  const methodsByName = new Map<string, TraceabilityNode[]>()
+  methods.forEach((node) => {
+    const name = methodSimpleName(node)
+    if (name) methodsByName.set(name, [...(methodsByName.get(name) || []), node])
+  })
+  const result: TraceabilityEdge[] = []
+  const flows = controlFlows.filter((step) => !scopedIds.size || scopedIds.has(step.methodId))
+  for (const step of flows) {
+    const caller = methods.find((node) => node.id === step.methodId)
+    if (!caller || !step.expression) continue
+    for (const [name, targets] of methodsByName.entries()) {
+      if (!containsMethodCallExpression(step.expression, name)) continue
+      for (const target of targets) {
+        if (target.parentId !== caller.parentId && !sameCodeFile(nodes, caller, target)) continue
+        const key = `${caller.id}->${target.id}`
+        if (existing.has(key)) continue
+        if (keyword && !normalizeSearch([caller.label, target.label, caller.symbol, target.symbol, step.expression].join(' ')).includes(keyword)) continue
+        existing.add(key)
+        result.push({
+          id: `call:expr:${stableClientId(key + step.order)}`,
+          source: caller.id,
+          target: target.id,
+          relation: 'CALLS',
+          direction: 'FORWARD',
+          evidenceType: 'DERIVED',
+          callEvidence: 'STATIC_BRIDGED',
+          confidence: 0.58,
+          evidenceLevel: 'E2',
+          generationMethod: 'SOURCE_EXPRESSION',
+          reviewStatus: 'PENDING',
+          evidence: [{ reason: `源码表达式命中 ${name}()`, locator: caller.locator, line: lineFromLocator(caller.locator), metadata: { expression: step.expression } }],
+        })
+      }
+    }
+  }
+  return result.slice(0, 80)
+}
+
+function containsMethodCallExpression(expression: string, methodName: string) {
+  return new RegExp(`(^|[^\\w$])${escapeRegExp(methodName)}\\s*\\(`).test(expression)
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function methodSimpleName(node: TraceabilityNode) {
+  const symbol = node.symbol || node.label || ''
+  const afterHash = symbol.includes('#') ? symbol.slice(symbol.lastIndexOf('#') + 1) : symbol
+  return (afterHash.match(/[A-Za-z_$][\w$]*/) || [node.label || ''])[0]
+}
+
+function sameCodeFile(nodes: TraceabilityNode[], left: TraceabilityNode, right: TraceabilityNode) {
+  return nearestCodeAncestor(nodes, left, 'CODE_FILE')?.id === nearestCodeAncestor(nodes, right, 'CODE_FILE')?.id
+}
+
+function stableClientId(value: string) {
+  let hash = 0
+  for (let i = 0; i < value.length; i++) hash = Math.imul(31, hash) + value.charCodeAt(i) | 0
+  return Math.abs(hash).toString(36)
+}
+
+function structuralCallEdge(parent: TraceabilityNode, child: TraceabilityNode): TraceabilityEdge {
+  return {
+    id: `contains:${parent.id}->${child.id}`,
+    source: parent.id,
+    target: child.id,
+    relation: 'CALLS',
+    direction: 'FORWARD',
+    evidenceType: 'DERIVED',
+    confidence: 1,
+    evidenceLevel: 'E1',
+    generationMethod: 'CODE_STRUCTURE',
+    reviewStatus: 'CONFIRMED',
+    evidence: [{ reason: child.kind === 'CODE_METHOD' ? '类包含该方法' : '文件包含该类' }],
+  }
 }
 
 function callEdgePriority(edge: TraceabilityEdge, scopedIds: Set<string>) {
@@ -1278,6 +1426,8 @@ function edgeEvidenceText(edge: TraceabilityEdge) {
 }
 
 function callEvidenceLabel(edge: TraceabilityEdge) {
+  if (edge.generationMethod === 'CODE_STRUCTURE') return '包含方法'
+  if (edge.generationMethod === 'SOURCE_EXPRESSION') return '源码候选'
   if (edge.callEvidence === 'DYNAMIC_CONFIRMED') return '动态确认'
   if (edge.callEvidence === 'STATIC_BRIDGED') return '静态补全'
   return '静态调用'
@@ -1548,11 +1698,13 @@ onBeforeUnmount(() => {
 .code-analysis-panel { flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; }
+.mini-graph-node { cursor:pointer; }
 .mini-graph-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.5; }
 .mini-graph-node.source rect { fill:#dbeafe; stroke:#2563eb; }
 .mini-graph-node.target rect { fill:#fef3c7; stroke:#d97706; }
 .mini-graph-node.branch rect { fill:#fed7aa; stroke:#f97316; }
 .mini-graph-node.exit rect { fill:#fecaca; stroke:#dc2626; }
+.mini-graph-node.active rect { stroke:#7c3aed; stroke-width:2.8; filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
 .coverage-table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -1564,12 +1716,16 @@ onBeforeUnmount(() => {
 .coverage-pill.both { background:#ccfbf1; color:#0f766e; }
 .coverage-pill.static { background:#dcfce7; color:#15803d; }
 .call-svg-edge path { stroke:#94a3b8; stroke-width:1.2; opacity:.62; }
+.call-svg-edge.structure path { stroke:#0f766e; stroke-width:.9; opacity:.28; stroke-dasharray:3 4; }
+.call-svg-edge.inferred path { stroke:#0f766e; stroke-width:1.3; opacity:.72; stroke-dasharray:5 4; }
 .call-svg-edge .edge-label-bg { fill:rgba(255,255,255,.96); stroke:#e2e8f0; stroke-width:1; filter:drop-shadow(0 2px 5px rgba(15,23,42,.08)); }
 .call-svg-edge text { fill:#64748b; font-size:10px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .call-svg-edge.recursive path { stroke:#dc2626; stroke-width:1.8; stroke-dasharray:5 3; }
 .call-svg-edge.recursive .edge-label-bg { fill:#fff1f2; stroke:#fecaca; }
 .call-svg-edge.recursive text { fill:#b91c1c; }
 .call-svg-edge.active path { stroke:#0f766e; stroke-width:2.8; opacity:1; }
+.call-svg-edge.structure.active path { stroke:#0f766e; stroke-width:1.1; opacity:.36; stroke-dasharray:3 4; }
+.call-svg-edge.inferred.active path { stroke:#0f766e; stroke-width:2.1; opacity:1; stroke-dasharray:5 4; }
 .call-svg-edge.active .edge-label-bg { fill:#ecfdf5; stroke:#5eead4; }
 .call-svg-edge.active text { fill:#0f766e; }
 .call-svg-edge.dimmed { opacity:.16; }

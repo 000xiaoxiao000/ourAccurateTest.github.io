@@ -489,9 +489,32 @@ export interface GitImpactLlmReviewProgress {
   message?: string
 }
 
+export interface GitImpactAnalysisJob {
+  jobId: string
+  projectId: string
+  baselineId: string
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  stage: string
+  percent: number
+  message: string
+  result?: GitChangeImpactResponse
+  error?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export function analyzeGitChangeImpact(projectId: string, baselineId: string, payload: { appId: string; baseCommit: string; headCommit: string }) {
   return apiPost<GitChangeImpactResponse>(
     `${base(projectId)}/baselines/${baselineId}/git-change-impact`, JSON.stringify(payload), 'application/json')
+}
+
+export function startGitChangeImpactJob(projectId: string, baselineId: string, payload: { appId: string; baseCommit: string; headCommit: string }) {
+  return apiPost<GitImpactAnalysisJob>(
+    `${base(projectId)}/baselines/${baselineId}/git-change-impact-jobs`, JSON.stringify(payload), 'application/json')
+}
+
+export function fetchGitChangeImpactJob(projectId: string, jobId: string) {
+  return apiGet<GitImpactAnalysisJob>(`${base(projectId)}/git-change-impact-jobs/${jobId}`)
 }
 
 export function fetchGitImpactLlmReview(projectId: string, reportId: string) {

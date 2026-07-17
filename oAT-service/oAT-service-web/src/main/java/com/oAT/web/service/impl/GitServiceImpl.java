@@ -187,4 +187,9 @@ public class GitServiceImpl implements GitService {
     public String getFileContent(String repoUrl, String username, String password, String commitId, String filePath) {
         return gitRepositoryContentService.getFileContent(repoUrl, username, password, commitId, filePath);
     }
+
+    @Override
+    public Map<String, String> getFileContents(String repoUrl, String username, String password, String commitId, Collection<String> filePaths) {
+        return gitRepositoryContentService.getFileContents(repoUrl, username, password, commitId, filePaths);
+    }
 }

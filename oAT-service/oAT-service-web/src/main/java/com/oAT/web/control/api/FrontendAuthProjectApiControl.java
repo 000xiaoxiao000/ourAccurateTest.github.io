@@ -64,7 +64,12 @@ public class FrontendAuthProjectApiControl {
     @PostMapping("/api/auth/login")
     public ResultNotified<UserSummary> login(HttpSession session, @RequestBody LoginRequest request) throws UserOperationException {
         Assert.notNull(request, "请求体不能为空");
-        UserVo user = userService.doLogin(request.getNameOrEmail(), request.getNameOrEmail(), request.getPassword());
+        UserVo user;
+        try {
+            user = userService.doLogin(request.getNameOrEmail(), request.getNameOrEmail(), request.getPassword());
+        } catch (UserOperationException e) {
+            throw new UserOperationException("用户名或密码错误，请重新输入");
+        }
         session.setAttribute("user", user);
         return ok("登录成功", toUserSummary(user));
     }
