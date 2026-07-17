@@ -22,9 +22,9 @@ public class VerificationAiWriteBackComposer {
             你是一个严谨的软件质量协作 AI，负责把“需求一致性分析发现”转成接收方可直接处理的回写内容。
 
             工作边界：
-            1. 只能基于输入中的发现项、验收标准、测试用例、追溯关系和证据生成内容，不能编造不存在的系统、接口、用例、Bug 或源码位置。
+            1. 只能基于输入中的发现项、验收标准、测试用例、追溯关系和依据生成内容，不能编造不存在的系统、接口、用例、Bug 或源码位置。
             2. 回写内容必须让产品、测试或开发接收后可以直接判断要做什么、为什么做、验收条件是什么。
-            3. 如果证据不足，必须明确写出“需要补充的证据”，不要把不确定内容包装成确定结论。
+            3. 如果依据不足，必须明确写出“需要补充的依据”，不要把不确定内容包装成确定结论。
             4. 平台不会使用常规规则替你生成回写内容；你必须完成结构化归纳和可执行表达。
 
             只允许输出严格 JSON，不要 Markdown，不要解释文本。JSON 结构必须如下：
@@ -34,7 +34,7 @@ public class VerificationAiWriteBackComposer {
               "priority": "P0|P1|P2|P3",
               "summary": "问题摘要，说明发现了什么",
               "impact": "影响范围或风险",
-              "evidence": ["证据1", "证据2"],
+              "evidence": ["依据1", "依据2"],
               "expectedAction": "接收方需要执行的动作",
               "acceptanceCriteria": ["处理完成后的验收条件1", "处理完成后的验收条件2"],
               "suggestedComment": "可直接粘贴到外部平台评论区的完整说明",
@@ -97,7 +97,7 @@ public class VerificationAiWriteBackComposer {
         if (StringUtils.hasText(draft.impact())) {
             markdown.append("#### 影响 / 风险\n").append(draft.impact()).append("\n\n");
         }
-        appendList(markdown, "证据", draft.evidence());
+        appendList(markdown, "依据", draft.evidence());
         markdown.append("#### 期望处理动作\n").append(draft.expectedAction()).append("\n\n");
         appendList(markdown, "验收条件", draft.acceptanceCriteria());
         markdown.append("#### 可直接发送给对方的说明\n").append(draft.suggestedComment()).append('\n');
@@ -121,8 +121,8 @@ public class VerificationAiWriteBackComposer {
         prompt.append("标题: ").append(value(finding.title())).append('\n');
         prompt.append("描述: ").append(value(finding.description())).append('\n');
         prompt.append("建议: ").append(value(finding.suggestion())).append('\n');
-        prompt.append("证据等级: ").append(finding.evidenceLevel()).append('\n');
-        prompt.append("证据: ").append(json(finding.evidence())).append("\n\n");
+        prompt.append("依据等级: ").append(finding.evidenceLevel()).append('\n');
+        prompt.append("依据: ").append(json(finding.evidence())).append("\n\n");
 
         prompt.append("【关联验收标准】\n");
         if (input.criterion() == null) {
@@ -148,16 +148,16 @@ public class VerificationAiWriteBackComposer {
             prompt.append('\n');
         }
 
-        prompt.append("【关联追溯证据】\n");
+        prompt.append("【关联追溯依据】\n");
         if (input.traceLinks().isEmpty()) {
-            prompt.append("(无关联追溯证据)\n\n");
+            prompt.append("(无关联追溯依据)\n\n");
         } else {
             for (TraceLink link : input.traceLinks()) {
                 prompt.append("- ").append(link.targetType()).append(" / ").append(value(link.targetId()))
                         .append(" / ").append(link.relationType())
                         .append(" / 置信度 ").append(link.confidence())
-                        .append(" / 证据等级 ").append(link.evidenceLevel()).append('\n');
-                prompt.append("  证据: ").append(json(link.evidence())).append('\n');
+                        .append(" / 依据等级 ").append(link.evidenceLevel()).append('\n');
+                prompt.append("  依据: ").append(json(link.evidence())).append('\n');
             }
             prompt.append('\n');
         }

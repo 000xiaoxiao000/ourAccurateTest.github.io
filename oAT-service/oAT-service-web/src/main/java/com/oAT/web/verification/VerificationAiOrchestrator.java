@@ -52,18 +52,18 @@ public class VerificationAiOrchestrator {
      */
 
     private static final String SYSTEM_PROMPT = """
-            你是一个严谨的软件需求一致性分析 AI。平台对需求文档、测试用例、Bug/缺陷证据、源代码、执行报告、覆盖率报告的语义处理全部由你完成。
+            你是一个严谨的软件需求一致性分析 AI。平台对需求文档、测试用例、Bug/缺陷依据、源代码、执行报告、覆盖率报告的语义处理全部由你完成。
 
             工作边界：
             1. 只能基于用户提供的资料做抽取、匹配、判断和建议，不能编造不存在的需求、用例、类、方法、Bug 或执行结果。
-            2. 你负责完成以下 AI 任务：需求验收标准抽取、测试用例结构化、需求-用例-源码-执行/覆盖证据追溯、问题发现。
+            2. 你负责完成以下 AI 任务：需求验收标准抽取、测试用例结构化、需求-用例-源码-执行/覆盖依据追溯、问题发现。
             3. 常规程序不会替你做关键词匹配、相似度匹配或规则判定；因此你的输出必须完整、可落库、可追溯。
             4. 不确定时降低 confidence，并输出 AMBIGUOUS_REQUIREMENT、NOT_VERIFIABLE、MISSING_EVIDENCE 等发现，不要硬判满足。
-            5. 源码实现证据必须引用输入中真实存在的类名、方法名、文件片段或源码快照定位。
-            6. 测试用例证据必须引用输入中真实存在的用例编号/标题/定位。
-            7. Bug/缺陷资料如果出现在输入中，应作为反向验证证据：它可能证明需求未满足、用例遗漏、实现偏差或历史风险。
-            8. 证据链不足时只能输出 STATICALLY_CONSISTENT 或 NOT_VERIFIABLE，不能输出 SATISFIED。
-               SATISFIED 要求测试用例、实现证据、执行或覆盖率三类中至少两类有支撑。
+            5. 源码实现依据必须引用输入中真实存在的类名、方法名、文件片段或源码快照定位。
+            6. 测试用例依据必须引用输入中真实存在的用例编号/标题/定位。
+            7. Bug/缺陷资料如果出现在输入中，应作为反向验证依据：它可能证明需求未满足、用例遗漏、实现偏差或历史风险。
+            8. 依据链不足时只能输出 STATICALLY_CONSISTENT 或 NOT_VERIFIABLE，不能输出 SATISFIED。
+               SATISFIED 要求测试用例、实现依据、执行或覆盖率三类中至少两类有支撑。
 
             只允许输出严格 JSON，不要 Markdown，不要解释文本。JSON 结构必须如下：
             {
@@ -101,7 +101,7 @@ public class VerificationAiOrchestrator {
                   "confidence": 0.0,
                   "evidenceLevel": "E0|E1|E2|E3|E4",
                   "reviewStatus": "PENDING|CONFIRMED",
-                  "evidence": {"reason":"为什么建立该关系","locator":"证据定位"}
+                  "evidence": {"reason":"为什么建立该关系","locator":"依据定位"}
                 }
               ],
               "findings": [
@@ -111,16 +111,16 @@ public class VerificationAiOrchestrator {
                   "perspective": "PRODUCT|TEST|DEVELOPMENT|CROSS",
                   "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
                   "title": "问题标题",
-                  "description": "证据化说明",
+                  "description": "依据化说明",
                   "suggestion": "可执行建议",
                   "confidence": 0.0,
                   "evidenceLevel": "E0|E1|E2|E3|E4",
                   "verdict": "SATISFIED|STATICALLY_CONSISTENT|PARTIAL|NOT_SATISFIED|AMBIGUOUS|NOT_VERIFIABLE|STALE",
-                  "evidence": [{"type":"REQUIREMENT|TESTCASE|SOURCE|EXECUTION|COVERAGE|DEFECT","id":"证据ID","locator":"证据定位","summary":"证据摘要"}]
+                  "evidence": [{"type":"REQUIREMENT|TESTCASE|SOURCE|EXECUTION|COVERAGE|DEFECT","id":"依据ID","locator":"依据定位","summary":"依据摘要"}]
                 }
               ]
             }
-            每一个 criteria 至少输出一条 findings。若该验收标准已满足，输出 findingType=SATISFIED_SUMMARY、severity=INFO、verdict=SATISFIED，并说明支撑证据。
+            每一个 criteria 至少输出一条 findings。若该验收标准已满足，输出 findingType=SATISFIED_SUMMARY、severity=INFO、verdict=SATISFIED，并说明支撑依据。
             """;
 
     private final LLMService llmService;
@@ -137,7 +137,7 @@ public class VerificationAiOrchestrator {
         if (!llmService.isAvailable()) {
             throw new IllegalStateException("AI服务不可用，无法执行需求一致性分析");
         }
-        progress.accept("正在请求 AI 生成需求、用例和证据关系");
+        progress.accept("正在请求 AI 生成需求、用例和依据关系");
         String response = llmService.chat(SYSTEM_PROMPT, buildUserMessage(input));
         if (!StringUtils.hasText(response)) {
             throw new IllegalStateException("AI分析没有返回结果");
@@ -832,9 +832,9 @@ public class VerificationAiOrchestrator {
             if (verdict == Verdict.SATISFIED) {
                 if (existing.isEmpty()) {
                     result.add(autoFinding(baselineId, criterion, "SATISFIED_SUMMARY", Perspective.CROSS,
-                            Severity.INFO, "证据链已覆盖验收标准",
-                            "已找到测试、源码、执行或覆盖率中的多类证据，可作为当前验收标准的满足结论。",
-                            "人工抽查关键证据是否引用准确，确认后可关闭该发现。",
+                            Severity.INFO, "依据链已覆盖验收标准",
+                            "已找到测试、源码、执行或覆盖率中的多类依据，可作为当前验收标准的满足结论。",
+                            "人工抽查关键依据是否引用准确，确认后可关闭该发现。",
                             0.55, level, verdict));
                 }
                 continue;
@@ -844,18 +844,18 @@ public class VerificationAiOrchestrator {
                 result.add(autoFinding(baselineId, criterion, "REQUIREMENT_CONFIRMATION", Perspective.PRODUCT,
                         severity, criterion.acKey() + " 确认验收口径和优先级",
                         "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
-                                + " 尚未形成完整证据链。产品需要确认该标准是否属于本轮验收范围、验收口径是否清晰，以及是否需要拆分更具体的验收条件。验收标准：" + criterion.content(),
+                                + " 尚未形成完整依据链。产品需要确认该标准是否属于本轮验收范围、验收口径是否清晰，以及是否需要拆分更具体的验收条件。验收标准：" + criterion.content(),
                         "补充验收边界、业务规则、优先级和不满足时的业务影响，再重新运行分析。",
                         0.55, level, verdict));
             }
             if ((!hasTestcase || !hasExecutionOrCoverage)
                     && existing.stream().noneMatch(finding -> finding.perspective() == Perspective.TEST)) {
-                String title = !hasTestcase ? "补充覆盖该验收标准的测试用例" : "补充测试执行或覆盖率证据";
+                String title = !hasTestcase ? "补充覆盖该验收标准的测试用例" : "补充测试执行或覆盖率依据";
                 String description = !hasTestcase
                         ? "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
                         + " 没有对应测试用例。测试人员需要补充用例编号、前置条件、步骤、测试数据和明确预期结果。验收标准：" + criterion.content()
                         : "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
-                        + " 已有关联用例或静态证据，但缺少测试执行结果或覆盖率记录。测试人员需要补充最近一次执行状态、报告链接或覆盖率证据。验收标准：" + criterion.content();
+                        + " 已有关联用例或静态依据，但缺少测试执行结果或覆盖率记录。测试人员需要补充最近一次执行状态、报告链接或覆盖率依据。验收标准：" + criterion.content();
                 String suggestion = !hasTestcase
                         ? "新增或关联测试用例，并在预期结果中写清可判断的验收条件。"
                         : "导入测试执行报告或覆盖率报告，确保记录能关联到该验收标准或对应测试用例。";
@@ -864,9 +864,9 @@ public class VerificationAiOrchestrator {
             }
             if (!hasImplementation && existing.stream().noneMatch(finding -> finding.perspective() == Perspective.DEVELOPMENT)) {
                 result.add(autoFinding(baselineId, criterion, "MISSING_IMPLEMENTATION_EVIDENCE", Perspective.DEVELOPMENT,
-                        severity, criterion.acKey() + " 未识别到源码实现关联证据",
+                        severity, criterion.acKey() + " 未识别到源码实现关联依据",
                         "需求 " + criterion.requirementKey() + " / " + criterion.acKey()
-                                + " 尚未关联到本次导入范围内的静态源码类、方法或接口证据。这不等同于代码尚未实现；可能是源码快照、应用静态索引或接口定位未覆盖该实现。验收标准：" + criterion.content(),
+                                + " 尚未关联到本次导入范围内的静态源码类、方法或接口依据。这不等同于代码尚未实现；可能是源码快照、应用静态索引或接口定位未覆盖该实现。验收标准：" + criterion.content(),
                         "确认已选择正确的源码版本和应用静态索引；补充源码包、源码工程版本、接口/类/方法定位后重新分析。只有确认源码范围完整且仍无实现时，才创建开发任务。",
                         0.55, level, verdict));
             }
@@ -884,8 +884,8 @@ public class VerificationAiOrchestrator {
                 continue;
             }
             result.add(new Finding(finding.id(), finding.baselineId(), finding.acId(), "MISSING_IMPLEMENTATION_EVIDENCE",
-                    finding.perspective(), finding.severity(), "未识别到源码实现关联证据",
-                    "当前分析未关联到足以证明该验收标准的源码实现证据。这不等同于代码尚未实现；请确认源码快照、应用静态索引和接口/类/方法定位是否覆盖实现位置。原始分析说明：" + finding.description(),
+                    finding.perspective(), finding.severity(), "未识别到源码实现关联依据",
+                    "当前分析未关联到足以证明该验收标准的源码实现依据。这不等同于代码尚未实现；请确认源码快照、应用静态索引和接口/类/方法定位是否覆盖实现位置。原始分析说明：" + finding.description(),
                     "补充或选择正确的源码版本和静态索引后重新分析；仅在确认源码范围完整且仍无实现时创建开发任务。",
                     finding.confidence(), finding.evidenceLevel(), Verdict.NOT_VERIFIABLE, finding.reviewStatus(),
                     finding.evidence(), finding.externalWorkItemUrl(), finding.reviewedBy(), finding.reviewReason()));
@@ -912,10 +912,10 @@ public class VerificationAiOrchestrator {
             if (linked) continue;
             result.add(new Finding(UUID.randomUUID().toString(), baselineId, null, "ORPHAN_TESTCASE",
                     Perspective.TEST, Severity.MEDIUM,
-                    testcase.externalKey() + " 测试用例未关联需求和代码证据",
+                    testcase.externalKey() + " 测试用例未关联需求和代码依据",
                     "测试用例 " + testcase.externalKey() + " / " + testcase.title()
-                            + " 没有追溯到任何需求验收标准，也没有形成对应源码、执行或覆盖率证据链。",
-                    "确认该测试用例覆盖哪个需求；如是无效或过期用例，请清理或标记；如有效，请补充需求编号和代码/执行证据关联。",
+                            + " 没有追溯到任何需求验收标准，也没有形成对应源码、执行或覆盖率依据链。",
+                    "确认该测试用例覆盖哪个需求；如是无效或过期用例，请清理或标记；如有效，请补充需求编号和代码/执行依据关联。",
                     0.60, EvidenceLevel.E1, Verdict.NOT_VERIFIABLE, ReviewStatus.PENDING,
                     List.of(Map.of("type", "TESTCASE", "id", testcase.externalKey(),
                             "locator", value(testcase.sourceLocator()),

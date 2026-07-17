@@ -223,7 +223,7 @@ public class VerificationService {
             Baseline baseline = requiredBaseline(projectId, baselineId);
             AssetSnapshot requirement = optionalAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT);
             AssetSnapshot testcase = optionalAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
-            updateAnalysisProgress(jobId, "正在读取源码、执行、覆盖率和缺陷证据");
+            updateAnalysisProgress(jobId, "正在读取源码、执行、覆盖率和缺陷依据");
             Map<String, StaticSourceInfo> sources = loadSources(baseline.sourceAppId());
             AppVo sourceApp = StringUtils.hasText(baseline.sourceAppId()) ? appService.getApp(baseline.sourceAppId()) : null;
             String sourceAssetContent = StringUtils.hasText(baseline.sourceAssetId())

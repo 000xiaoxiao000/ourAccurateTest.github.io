@@ -109,7 +109,7 @@ public class ChangeImpactService {
             if (!linkedAcIds.contains(ac.id())) {
                 orphans.add(new OrphanItem(ac.id(), OrphanType.NO_TESTCASE, "AC",
                         ac.requirementKey() + " / " + ac.acKey(),
-                        "该验收标准没有任何追溯关系，缺少测试用例或代码证据"));
+                        "该验收标准没有任何追溯关系，缺少测试用例或代码依据"));
             }
         }
 

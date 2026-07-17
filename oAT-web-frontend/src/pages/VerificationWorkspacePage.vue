@@ -10,7 +10,7 @@
       <div>
         <div class="eyebrow">AI Requirement Verification</div>
         <h1>AI 需求一致性验证</h1>
-        <p class="subtext">围绕需求、测试用例、源码和证据建立可追溯的 AI 分析闭环。</p>
+        <p class="subtext">围绕需求、测试用例、源码和依据建立可追溯的 AI 分析闭环。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="secondary-button" :disabled="loading" @click="loadOverview">刷新</button>
@@ -217,14 +217,14 @@
           </label>
           <div class="inline-grid">
             <label>
-              <span>执行证据</span>
+              <span>执行依据</span>
               <select v-model="baselineForm.executionAssetId">
                 <option value="">未选择</option>
                 <option v-for="asset in overview.executions" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
               </select>
             </label>
             <label>
-              <span>覆盖率证据</span>
+              <span>覆盖率依据</span>
               <select v-model="baselineForm.coverageAssetId">
                 <option value="">未选择</option>
                 <option v-for="asset in overview.coverages" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
@@ -328,11 +328,11 @@
             <strong>{{ percent(detail.metrics.testcaseCoverageRate) }}</strong>
           </article>
           <article>
-            <span class="with-help" :data-help="helpText.implementationEvidence" tabindex="0">实现证据</span>
+            <span class="with-help" :data-help="helpText.implementationEvidence" tabindex="0">实现依据</span>
             <strong>{{ percent(detail.metrics.implementationCoverageRate) }}</strong>
           </article>
           <article>
-            <span class="with-help" :data-help="helpText.executionEvidence" tabindex="0">执行证据</span>
+            <span class="with-help" :data-help="helpText.executionEvidence" tabindex="0">执行依据</span>
             <strong>{{ percent(detail.metrics.executionEvidenceRate) }}</strong>
           </article>
           <article>
@@ -353,17 +353,17 @@
 
         <section v-if="activeTab === 'matrix'" class="tab-content">
           <div class="list-toolbar">
-            <input v-model.trim="matrixSearch" type="search" placeholder="搜索验收标准、测试用例、证据或结论" />
+            <input v-model.trim="matrixSearch" type="search" placeholder="搜索验收标准、测试用例、依据或结论" />
             <select v-model="matrixVerdict">
               <option value="">全部结论</option>
               <option v-for="option in matrixVerdictOptions" :key="option" :value="option">{{ verdictText(option) }}</option>
             </select>
             <select v-model="matrixEvidenceLevel">
-              <option value="">全部证据等级</option>
+              <option value="">全部依据等级</option>
               <option v-for="option in evidenceLevelOptions" :key="option" :value="option">{{ evidenceLevelText(option) }}</option>
             </select>
             <select v-model="matrixTraceTargetType">
-              <option value="">全部证据类型</option>
+              <option value="">全部依据类型</option>
               <option v-for="option in traceTargetTypeOptions" :key="option" :value="option">{{ traceTargetText(option) }}</option>
             </select>
             <select v-model="matrixTraceReviewStatus">
@@ -376,7 +376,7 @@
           <div class="table-row table-head">
             <span>验收标准</span>
             <span>测试用例</span>
-            <span>代码/运行证据</span>
+            <span>代码/运行依据</span>
             <span>结论</span>
           </div>
           <article v-for="row in pagedMatrix" :key="row.criterion.id" class="table-row">
@@ -411,7 +411,7 @@
 
         <section v-else-if="activeTab === 'findings'" class="finding-list">
           <div class="finding-toolbar">
-            <input v-model.trim="findingSearch" type="search" placeholder="搜索问题标题、描述、类型、角色、结论或证据" />
+            <input v-model.trim="findingSearch" type="search" placeholder="搜索问题标题、描述、类型、角色、结论或依据" />
             <select v-model="findingPerspective">
               <option value="">全部视角</option>
               <option value="PRODUCT">产品</option>
@@ -461,7 +461,7 @@
             <form v-if="writeBackFindingId === finding.id" class="writeback-form" @submit.prevent="writeBackFinding(finding.id)">
               <div class="writeback-intro">
                 <strong>让 AI 生成对方可直接处理的内容</strong>
-                <span>AI 会结合该问题、证据、关联验收标准和测试用例，生成外部 Bug / 任务 / 评论可直接使用的说明。</span>
+                <span>AI 会结合该问题、依据、关联验收标准和测试用例，生成外部 Bug / 任务 / 评论可直接使用的说明。</span>
               </div>
               <label>
                 <span>接收方</span>
@@ -494,26 +494,26 @@
 
         <section v-else class="evidence-panel">
           <div class="list-toolbar">
-            <input v-model.trim="evidenceSearch" type="search" placeholder="搜索证据记录、状态、连接器或内容" />
+            <input v-model.trim="evidenceSearch" type="search" placeholder="搜索依据记录、状态、连接器或内容" />
             <select v-model="evidenceSource">
               <option value="">全部来源</option>
               <option value="TRACE">追溯关系</option>
-              <option value="FINDING">AI 发现证据</option>
+              <option value="FINDING">AI 发现依据</option>
               <option value="WRITEBACK">AI 回写记录</option>
             </select>
             <select v-model="evidenceTargetType">
-              <option value="">全部证据类型</option>
+              <option value="">全部依据类型</option>
               <option v-for="option in evidenceTargetTypeOptions" :key="option" :value="option">{{ evidenceRecordTypeText(option) }}</option>
             </select>
             <select v-model="evidenceLevelFilter">
-              <option value="">全部证据等级</option>
+              <option value="">全部依据等级</option>
               <option v-for="option in evidenceLevelOptions" :key="option" :value="option">{{ evidenceLevelText(option) }}</option>
             </select>
             <select v-model="evidenceReviewStatus">
               <option value="">全部状态</option>
               <option v-for="option in evidenceReviewStatusOptions" :key="option" :value="option">{{ evidenceStatusText(option) }}</option>
             </select>
-            <span>共 {{ filteredEvidenceRecords.length }} 条证据记录</span>
+            <span>共 {{ filteredEvidenceRecords.length }} 条依据记录</span>
           </div>
           <article>
             <strong>输入新鲜度</strong>
@@ -525,7 +525,7 @@
           </article>
           <article>
               <strong class="with-help" :data-help="helpText.conclusionScope" tabindex="0">结论口径</strong>
-              <span>没有测试执行或覆盖率证据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
+              <span>没有测试执行或覆盖率依据时，只能判断“静态一致”，不能判断“已完整满足”。</span>
           </article>
           <article v-for="record in pagedEvidenceRecords" :key="record.id" class="evidence-record">
             <div class="evidence-heading">
@@ -537,7 +537,7 @@
             <a v-if="record.url" :href="record.url" target="_blank" rel="noreferrer">{{ record.url }}</a>
             <pre v-if="record.detail" class="writeback-message">{{ record.detail }}</pre>
           </article>
-          <div v-if="!filteredEvidenceRecords.length" class="empty-state compact">没有匹配的证据记录。</div>
+          <div v-if="!filteredEvidenceRecords.length" class="empty-state compact">没有匹配的依据记录。</div>
           <PaginationControls v-if="filteredEvidenceRecords.length" :page="evidencePage" :page-count="evidencePageCount" :total="filteredEvidenceRecords.length" @update:page="evidencePage = $event" />
         </section>
       </template>
@@ -714,7 +714,7 @@ let activeHelpElement: HTMLElement | null = null
 const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: string }> = [
   { key: 'library', label: '资料库', description: '导入 / 查看资料' },
   { key: 'baseline', label: '分析基线', description: '选择资料并创建基线' },
-  { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 证据' },
+  { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 依据' },
 ]
 
 const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeholder: string }> = [
@@ -729,7 +729,7 @@ const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeho
 const tabs = [
   { key: 'matrix', label: '追溯矩阵' },
   { key: 'findings', label: 'AI 发现' },
-  { key: 'evidence', label: '证据与口径' },
+  { key: 'evidence', label: '依据与口径' },
 ] as const
 
 const findingSeverityOptions: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
@@ -744,15 +744,15 @@ const helpText = {
   ac: 'AC 是 Acceptance Criteria，指需求中的可验收标准。平台会按这些标准检查用例和代码是否覆盖。',
   requirementCount: 'AI 从需求资料中抽取并落库的验收标准数量。',
   testcaseCount: 'AI 从测试用例资料中抽取并落库的测试用例数量。',
-  defectCount: '资料库中已导入的缺陷/Bug 资料数量。缺陷资料会进入 AI 分析证据池。',
+  defectCount: '资料库中已导入的缺陷/Bug 资料数量。缺陷资料会进入 AI 分析依据池。',
   staticCodeCount: '当前基线导入的静态源码总量。Git 导入会统计仓库包中识别到的全部源码文件，不等于 AI 摘要采样数或追溯命中数。',
-  dynamicCodeCount: '当前基线导入的动态代码证据数量，来自执行报告和覆盖率报告。',
+  dynamicCodeCount: '当前基线导入的动态代码依据数量，来自执行报告和覆盖率报告。',
   testcaseCoverage: '有多少验收标准找到了对应测试用例。低于 100% 说明测试用例需要补充。',
-  implementationEvidence: '有多少验收标准在源码中找到了对应实现证据。找不到不一定代表没实现，但需要开发确认或补充关联。',
+  implementationEvidence: '有多少验收标准在源码中找到了对应实现依据。找不到不一定代表没实现，但需要开发确认或补充关联。',
   executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
-  runtimeCoverage: '有多少验收标准有覆盖率证据支撑，例如 JaCoCo、Istanbul 或流水线覆盖率。',
+  runtimeCoverage: '有多少验收标准有覆盖率依据支撑，例如 JaCoCo、Istanbul 或流水线覆盖率。',
   openFindings: '仍处于待确认或已确认状态的问题数。驳回、豁免和已回写的问题不计入开放问题。',
-  conclusionScope: '结论口径用于防止误判。只有静态证据时只能说“静态一致”，不能说线上一定满足需求。',
+  conclusionScope: '结论口径用于防止误判。只有静态依据时只能说“静态一致”，不能说线上一定满足需求。',
 }
 
 const analysisCounts = computed(() => {
@@ -986,7 +986,7 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
     const criterion = finding.acId ? criteriaById.get(finding.acId) : undefined
     const evidenceItems = finding.evidence?.length ? finding.evidence : []
     evidenceItems.forEach((item, index) => {
-      const type = stringValue(item.type) || 'AI 发现证据'
+      const type = stringValue(item.type) || 'AI 发现依据'
       const evidenceId = stringValue(item.id)
       const locator = stringValue(item.locator)
       const summary = stringValue(item.summary) || finding.description
@@ -1113,8 +1113,8 @@ const assetGroups = computed<Array<{ key: AssetType; label: string; items: Verif
   { key: 'TESTCASE', label: '测试用例资料', items: overview.value.testcases },
   { key: 'SOURCE', label: '源码资料', items: overview.value.sources },
   { key: 'DEFECT', label: '缺陷资料', items: overview.value.defects },
-  { key: 'EXECUTION', label: '执行证据', items: overview.value.executions },
-  { key: 'COVERAGE', label: '覆盖率证据', items: overview.value.coverages },
+  { key: 'EXECUTION', label: '执行依据', items: overview.value.executions },
+  { key: 'COVERAGE', label: '覆盖率依据', items: overview.value.coverages },
 ])
 
 const importedAssetCount = computed(() => assetGroups.value.reduce((total, group) => total + group.items.length, 0))
@@ -1575,7 +1575,7 @@ function analysisProgress(job: AnalysisJob) {
   if (job.status === 'QUEUED') return 5
   const message = job.message || ''
   if (message.includes('准备') || message.includes('读取需求')) return 20
-  if (message.includes('源码') || message.includes('证据')) return 35
+  if (message.includes('源码') || message.includes('依据')) return 35
   if (message.includes('请求 AI') || message.includes('生成')) return 55
   if (message.includes('格式') || message.includes('校验') || message.includes('修复')) return 75
   if (message.includes('保存')) return 90
@@ -1615,13 +1615,13 @@ function findingTypeText(value: string) {
     WEAK_ASSERTION: '断言不足',
     WRONG_EXPECTATION: '预期错误',
     MISSING_IMPLEMENTATION: '缺少源码实现',
-    MISSING_IMPLEMENTATION_EVIDENCE: '缺少源码关联证据',
+    MISSING_IMPLEMENTATION_EVIDENCE: '缺少源码关联依据',
     LOGIC_DEVIATION: '实现偏差',
     AMBIGUOUS_REQUIREMENT: '需求不明确',
     REQUIREMENT_CONFIRMATION: '需求口径确认',
     TRACEABILITY_BREAK: '追溯断点',
-    MISSING_EVIDENCE: '缺少证据',
-    MISSING_RUNTIME_EVIDENCE: '缺少执行/覆盖证据',
+    MISSING_EVIDENCE: '缺少依据',
+    MISSING_RUNTIME_EVIDENCE: '缺少执行/覆盖依据',
     ORPHAN_TESTCASE: '用例未关联',
     ORPHAN_SOURCE: '代码未关联',
     BUG_RISK: '缺陷风险',
@@ -1649,7 +1649,7 @@ function findingContextItems(finding: VerificationFinding) {
     if (!value) return
     items.push({
       key: `evidence-${finding.id}-${index}`,
-      label: evidenceRecordTypeText(type || 'AI 发现证据'),
+      label: evidenceRecordTypeText(type || 'AI 发现依据'),
       value,
     })
   })
@@ -1693,7 +1693,7 @@ async function writeBackFinding(id: string) {
       message: writeBackNote.value || undefined,
       targetRole: writeBackTargetRole.value,
     })
-    toast.success('AI 回写内容已生成，可在证据页复制给对方处理')
+    toast.success('AI 回写内容已生成，可在依据页复制给对方处理')
     cancelWriteBack()
     await selectBaseline(selectedBaselineId.value)
     activeTab.value = 'evidence'
@@ -1818,8 +1818,8 @@ function assetTypeLabel(type: AssetType) {
     REQUIREMENT: '需求资料',
     TESTCASE: '测试用例资料',
     SOURCE: '源码资料',
-    EXECUTION: '执行证据',
-    COVERAGE: '覆盖率证据',
+    EXECUTION: '执行依据',
+    COVERAGE: '覆盖率依据',
     DEFECT: '缺陷资料',
   }
   return map[type] || type
@@ -1832,7 +1832,7 @@ function selectAssetForBaseline(type: AssetType, assetId: string, notify = true)
   else if (type === 'EXECUTION') baselineForm.executionAssetId = assetId
   else if (type === 'COVERAGE') baselineForm.coverageAssetId = assetId
   else if (type === 'DEFECT') {
-    if (notify) toast.success('缺陷资料已进入 AI 分析证据池，无需在基线中单独选择')
+    if (notify) toast.success('缺陷资料已进入 AI 分析依据池，无需在基线中单独选择')
     return
   } else return
 
@@ -1916,23 +1916,23 @@ function reviewStatusText(value?: string) {
 function traceTargetText(value?: string) {
   const map: Record<string, string> = {
     TESTCASE: '测试用例',
-    SOURCE_SYMBOL: '源码证据',
-    EXECUTION: '执行证据',
-    COVERAGE: '覆盖率证据',
-    DEFECT: '缺陷证据',
+    SOURCE_SYMBOL: '源码依据',
+    EXECUTION: '执行依据',
+    COVERAGE: '覆盖率依据',
+    DEFECT: '缺陷依据',
   }
   return value ? map[value] || value : '-'
 }
 
 function evidenceRecordTypeText(value?: string) {
   const map: Record<string, string> = {
-    REQUIREMENT: '需求证据',
+    REQUIREMENT: '需求依据',
     TESTCASE: '测试用例',
-    SOURCE: '源码证据',
-    SOURCE_SYMBOL: '源码证据',
-    EXECUTION: '执行证据',
-    COVERAGE: '覆盖率证据',
-    DEFECT: '缺陷证据',
+    SOURCE: '源码依据',
+    SOURCE_SYMBOL: '源码依据',
+    EXECUTION: '执行依据',
+    COVERAGE: '覆盖率依据',
+    DEFECT: '缺陷依据',
     WRITEBACK: 'AI 回写',
   }
   return value ? map[value] || traceTargetText(value) : '-'
@@ -1946,22 +1946,22 @@ function evidenceStatusText(value?: string) {
 
 function evidenceLevelText(value?: string) {
   const map: Record<string, string> = {
-    E0: '无证据',
-    E1: '用例证据',
-    E2: '代码证据',
-    E3: '执行证据',
-    E4: '覆盖率证据',
+    E0: '无依据',
+    E1: '用例依据',
+    E2: '代码依据',
+    E3: '执行依据',
+    E4: '覆盖率依据',
   }
   return value ? map[value] || value : '-'
 }
 
 function evidenceLevelHelp(value?: string) {
   const map: Record<string, string> = {
-    E0: '没有找到可验证该验收标准的证据，需要补充测试用例、源码关联或执行记录。',
-    E1: '找到了测试用例证据，但还没有代码或运行证据。',
-    E2: '找到了代码实现证据，可判断静态一致性。',
-    E3: '找到了测试执行证据，说明相关用例实际运行过。',
-    E4: '找到了覆盖率证据，证明相关代码路径被运行覆盖。',
+    E0: '没有找到可验证该验收标准的依据，需要补充测试用例、源码关联或执行记录。',
+    E1: '找到了测试用例依据，但还没有代码或运行依据。',
+    E2: '找到了代码实现依据，可判断静态一致性。',
+    E3: '找到了测试执行依据，说明相关用例实际运行过。',
+    E4: '找到了覆盖率依据，证明相关代码路径被运行覆盖。',
   }
   return value ? map[value] || value : ''
 }
