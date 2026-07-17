@@ -404,6 +404,23 @@ export function fetchGateExemptions(projectId: string, baselineId: string) {
 
 // ── Change Impact API ─────────────────────────────────────────────────────────
 
+export interface GitImpactReport {
+  id: string
+  directChanges: Array<{ symbolKey: string; changeType: string; facets: string[] }>
+  candidates: Array<{ seedSymbol: string; targetSymbol: string; classification: string; confidence: number; reason: string }>
+  llmJudgements: Array<{ candidateId: string; decision: 'CONFIRM' | 'REJECT' | 'UNCERTAIN'; confidence: number }>
+}
+
+export interface GitChangeImpactResponse {
+  report: GitImpactReport
+  traceability: { affectedSymbols: string[]; affectedCriteria: AcceptanceCriterion[]; affectedTestcases: TestcaseProjection[] }
+}
+
+export function analyzeGitChangeImpact(projectId: string, baselineId: string, payload: { appId: string; baseCommit: string; headCommit: string }) {
+  return apiPost<GitChangeImpactResponse>(
+    `${base(projectId)}/baselines/${baselineId}/git-change-impact`, JSON.stringify(payload), 'application/json')
+}
+
 export function analyzeChangeImpact(projectId: string, baselineId: string, changeDescription?: string) {
   return apiPost<ChangeImpactReport>(
     `${base(projectId)}/baselines/${baselineId}/change-impact`,

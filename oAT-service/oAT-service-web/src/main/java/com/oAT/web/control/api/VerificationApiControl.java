@@ -21,6 +21,8 @@ import com.oAT.web.verification.connector.ConnectorRegistry;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
+import com.oAT.web.verification.impact.GitImpactAnalysisService;
+import com.oAT.web.verification.impact.ImpactTraceabilityMapper;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
@@ -77,12 +79,16 @@ public class VerificationApiControl {
     private final GitService gitService;
     private final QualityGateService qualityGateService;
     private final ChangeImpactService changeImpactService;
+    private final GitImpactAnalysisService gitImpactAnalysisService;
+    private final ImpactTraceabilityMapper impactTraceabilityMapper;
     private final ConnectorRegistry connectorRegistry;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
                                   AppService appService, GitService gitService,
                                   QualityGateService qualityGateService,
                                   ChangeImpactService changeImpactService,
+                                  GitImpactAnalysisService gitImpactAnalysisService,
+                                  ImpactTraceabilityMapper impactTraceabilityMapper,
                                   ConnectorRegistry connectorRegistry) {
         this.verificationService = verificationService;
         this.projectService = projectService;
@@ -90,6 +96,8 @@ public class VerificationApiControl {
         this.gitService = gitService;
         this.qualityGateService = qualityGateService;
         this.changeImpactService = changeImpactService;
+        this.gitImpactAnalysisService = gitImpactAnalysisService;
+        this.impactTraceabilityMapper = impactTraceabilityMapper;
         this.connectorRegistry = connectorRegistry;
     }
 
@@ -382,6 +390,22 @@ public class VerificationApiControl {
                 changeImpactService.analyzeImpact(projectId, baselineId, desc, user.getId()));
     }
 
+    @PostMapping("/baselines/{baselineId}/git-change-impact")
+    public ResultNotified<GitChangeImpactResponse> analyzeGitImpact(@PathVariable String projectId,
+                                                                     @PathVariable String baselineId,
+                                                                     @SessionAttribute UserVo user,
+                                                                     @RequestBody GitChangeImpactRequest request) {
+        ensureProjectAccess(projectId, user);
+        Assert.notNull(request, "请求不能为空");
+        Assert.hasText(request.appId(), "appId 不能为空");
+        Assert.hasText(request.baseCommit(), "baseCommit 不能为空");
+        Assert.hasText(request.headCommit(), "headCommit 不能为空");
+        AppVo app = resolveSourceApp(projectId, request.appId());
+        var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit());
+        var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
+        return ok("Git 变更影响分析完成", new GitChangeImpactResponse(report, traceability));
+    }
+
     // ── Connector types ───────────────────────────────────────────────────────
 
     @GetMapping("/connectors/types")
@@ -396,6 +420,9 @@ public class VerificationApiControl {
     public record EvaluateGateRequest(String policyId) {}
     public record ExemptionRequest(String ruleId, String reason, LocalDateTime expiresAt) {}
     public record ChangeImpactRequest(String changeDescription) {}
+    public record GitChangeImpactRequest(String appId, String baseCommit, String headCommit) {}
+    public record GitChangeImpactResponse(com.oAT.web.verification.impact.ImpactModels.ImpactReport report,
+                                          ImpactTraceabilityMapper.TraceabilityImpact traceability) {}
 
     private String readContent(MultipartFile file, AssetType assetType) throws IOException {
         if (file == null || file.isEmpty()) return "";

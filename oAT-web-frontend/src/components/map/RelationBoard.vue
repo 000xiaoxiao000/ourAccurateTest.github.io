@@ -171,11 +171,14 @@
                   </ul>
                 </button>
               </div>
-              <div v-if="nodeTotalPages > 1" class="mini-pagination" aria-label="节点分页">
-                <button type="button" :disabled="nodePage <= 1" @click="nodePage -= 1">上一页</button>
-                <span>{{ nodePage }} / {{ nodeTotalPages }}</span>
-                <button type="button" :disabled="nodePage >= nodeTotalPages" @click="nodePage += 1">下一页</button>
-              </div>
+              <AppPagination
+                v-if="filteredNodes.length"
+                v-model:page="nodePage"
+                v-model:page-size="nodePageSize"
+                :total="filteredNodes.length"
+                item-name="个节点"
+                :page-sizes="[8, 16, 24]"
+              />
             </section>
 
             <section class="panel node-detail-panel">
@@ -232,11 +235,14 @@
                   </tbody>
                 </table>
               </div>
-              <div v-if="edgeTotalPages > 1" class="mini-pagination edge-pagination" aria-label="关系分页">
-                <button type="button" :disabled="edgePage <= 1" @click="edgePage -= 1">上一页</button>
-                <span>显示 {{ edgeFirstItem }}–{{ edgeLastItem }} / 共 {{ filteredEdges.length }} 条</span>
-                <button type="button" :disabled="edgePage >= edgeTotalPages" @click="edgePage += 1">下一页</button>
-              </div>
+              <AppPagination
+                v-if="filteredEdges.length"
+                v-model:page="edgePage"
+                v-model:page-size="edgePageSize"
+                :total="filteredEdges.length"
+                item-name="条关系"
+                :page-sizes="[10, 20, 50]"
+              />
             </section>
           </div>
         </aside>
@@ -249,6 +255,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, watchEffect } from 'vue'
 import { RouterLink } from 'vue-router'
 import type { RouteLocationRaw } from 'vue-router'
+import AppPagination from '@/components/AppPagination.vue'
 import {
   actionText,
   edgeTone,
@@ -292,8 +299,8 @@ const compactSearchOpen = ref(false)
 const selectedId = ref('')
 const nodePage = ref(1)
 const edgePage = ref(1)
-const nodePageSize = 8
-const edgePageSize = 10
+const nodePageSize = ref(8)
+const edgePageSize = ref(10)
 const selectedEdgePreviewLimit = 8
 const showAllSelectedEdges = ref(false)
 const searchInputRef = ref<HTMLInputElement | null>(null)
@@ -325,19 +332,17 @@ const filteredEdges = computed(() => {
   return props.edges.filter((edge) => allowed.has(edge.source) || allowed.has(edge.target))
 })
 
-const nodeTotalPages = computed(() => Math.max(1, Math.ceil(filteredNodes.value.length / nodePageSize)))
+const nodeTotalPages = computed(() => Math.max(1, Math.ceil(filteredNodes.value.length / nodePageSize.value)))
 const paginatedNodes = computed(() => {
-  const start = (nodePage.value - 1) * nodePageSize
-  return filteredNodes.value.slice(start, start + nodePageSize)
+  const start = (nodePage.value - 1) * nodePageSize.value
+  return filteredNodes.value.slice(start, start + nodePageSize.value)
 })
 
-const edgeTotalPages = computed(() => Math.max(1, Math.ceil(filteredEdges.value.length / edgePageSize)))
+const edgeTotalPages = computed(() => Math.max(1, Math.ceil(filteredEdges.value.length / edgePageSize.value)))
 const paginatedEdges = computed(() => {
-  const start = (edgePage.value - 1) * edgePageSize
-  return filteredEdges.value.slice(start, start + edgePageSize)
+  const start = (edgePage.value - 1) * edgePageSize.value
+  return filteredEdges.value.slice(start, start + edgePageSize.value)
 })
-const edgeFirstItem = computed(() => (filteredEdges.value.length ? (edgePage.value - 1) * edgePageSize + 1 : 0))
-const edgeLastItem = computed(() => Math.min(filteredEdges.value.length, edgePage.value * edgePageSize))
 
 const selectedNode = computed(() => filteredNodes.value.find((node) => node.id === selectedId.value))
 const selectedEdges = computed(() =>
@@ -689,11 +694,15 @@ watch(
   { flush: 'post' },
 )
 
+watch([nodePageSize, edgePageSize], () => {
+  nodePage.value = 1
+  edgePage.value = 1
+})
+
 watchEffect(() => {
   if (nodePage.value > nodeTotalPages.value) nodePage.value = nodeTotalPages.value
   if (edgePage.value > edgeTotalPages.value) edgePage.value = edgeTotalPages.value
 })
-
 watchEffect(() => {
   keyword.value
   nodePage.value = 1

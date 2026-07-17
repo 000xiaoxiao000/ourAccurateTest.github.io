@@ -320,8 +320,10 @@
   gap: 8px;
   flex-wrap: wrap;
   margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(15, 23, 42, .08);
+  padding: 8px;
+  border: 1px solid rgba(15, 23, 42, .07);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, .88);
   color: #64748b;
   font-size: 12px;
   font-weight: 800;
@@ -329,17 +331,28 @@
 
 .mini-pagination button,
 .inline-more-button {
-  min-height: 32px;
+  min-height: 36px;
   border: 1px solid rgba(15, 118, 110, .16);
   border-radius: 999px;
-  padding: 5px 11px;
+  padding: 7px 12px;
   background: rgba(15, 118, 110, .07);
   color: #0f766e;
   font-weight: 800;
+  transition: background .16s ease, color .16s ease, transform .16s ease, box-shadow .16s ease;
+}
+
+.mini-pagination button:hover:not(:disabled),
+.inline-more-button:hover {
+  transform: translateY(-1px);
+  background: #0f766e;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, .14);
 }
 
 .mini-pagination button:disabled {
   opacity: .45;
+  transform: none;
+  box-shadow: none;
 }
 
 .inline-more-button {

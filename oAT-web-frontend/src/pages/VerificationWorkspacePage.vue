@@ -406,7 +406,14 @@
           </article>
           <div v-if="!filteredMatrix.length" class="empty-state compact">没有匹配的追溯数据。</div>
           </div>
-          <PaginationControls v-if="filteredMatrix.length" :page="matrixPage" :page-count="matrixPageCount" :total="filteredMatrix.length" @update:page="matrixPage = $event" />
+          <AppPagination
+            v-if="filteredMatrix.length"
+            v-model:page="matrixPage"
+            v-model:page-size="matrixPageSize"
+            :total="filteredMatrix.length"
+            item-name="条追溯记录"
+            :page-sizes="[10, 20, 50]"
+          />
         </section>
 
         <section v-else-if="activeTab === 'findings'" class="finding-list">
@@ -489,7 +496,14 @@
             </form>
           </article>
           <div v-if="!filteredFindings.length" class="empty-state compact">当前筛选下没有问题。</div>
-          <PaginationControls v-if="filteredFindings.length" :page="findingPage" :page-count="findingPageCount" :total="filteredFindings.length" @update:page="findingPage = $event" />
+          <AppPagination
+            v-if="filteredFindings.length"
+            v-model:page="findingPage"
+            v-model:page-size="findingPageSize"
+            :total="filteredFindings.length"
+            item-name="个问题"
+            :page-sizes="[10, 20, 50]"
+          />
         </section>
 
         <section v-else class="evidence-panel">
@@ -538,7 +552,14 @@
             <pre v-if="record.detail" class="writeback-message">{{ record.detail }}</pre>
           </article>
           <div v-if="!filteredEvidenceRecords.length" class="empty-state compact">没有匹配的依据记录。</div>
-          <PaginationControls v-if="filteredEvidenceRecords.length" :page="evidencePage" :page-count="evidencePageCount" :total="filteredEvidenceRecords.length" @update:page="evidencePage = $event" />
+          <AppPagination
+            v-if="filteredEvidenceRecords.length"
+            v-model:page="evidencePage"
+            v-model:page-size="evidencePageSize"
+            :total="filteredEvidenceRecords.length"
+            item-name="条依据记录"
+            :page-sizes="[10, 20, 50]"
+          />
         </section>
       </template>
     </section>
@@ -563,7 +584,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import AppPagination from '@/components/AppPagination.vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -656,7 +678,9 @@ const evidenceSearch = ref('')
 const matrixPage = ref(1)
 const findingPage = ref(1)
 const evidencePage = ref(1)
-const pageSize = 10
+const matrixPageSize = ref(10)
+const findingPageSize = ref(10)
+const evidencePageSize = ref(10)
 const loading = ref(false)
 const analyzing = ref(false)
 const creatingBaseline = ref(false)
@@ -1053,16 +1077,16 @@ const evidenceReviewStatusOptions = computed(() => Array.from(new Set(evidenceRe
   .map((record) => record.reviewStatus)
   .filter((value): value is string => Boolean(value)))).sort())
 
-const matrixPageCount = computed(() => Math.max(1, Math.ceil(filteredMatrix.value.length / pageSize)))
-const findingPageCount = computed(() => Math.max(1, Math.ceil(filteredFindings.value.length / pageSize)))
-const evidencePageCount = computed(() => Math.max(1, Math.ceil(filteredEvidenceRecords.value.length / pageSize)))
-const pagedMatrix = computed(() => pageSlice(filteredMatrix.value, matrixPage.value))
-const pagedFindings = computed(() => pageSlice(filteredFindings.value, findingPage.value))
-const pagedEvidenceRecords = computed(() => pageSlice(filteredEvidenceRecords.value, evidencePage.value))
+const matrixPageCount = computed(() => Math.max(1, Math.ceil(filteredMatrix.value.length / matrixPageSize.value)))
+const findingPageCount = computed(() => Math.max(1, Math.ceil(filteredFindings.value.length / findingPageSize.value)))
+const evidencePageCount = computed(() => Math.max(1, Math.ceil(filteredEvidenceRecords.value.length / evidencePageSize.value)))
+const pagedMatrix = computed(() => pageSlice(filteredMatrix.value, matrixPage.value, matrixPageSize.value))
+const pagedFindings = computed(() => pageSlice(filteredFindings.value, findingPage.value, findingPageSize.value))
+const pagedEvidenceRecords = computed(() => pageSlice(filteredEvidenceRecords.value, evidencePage.value, evidencePageSize.value))
 
-function pageSlice<T>(items: T[], page: number) {
-  const start = (Math.max(1, page) - 1) * pageSize
-  return items.slice(start, start + pageSize)
+function pageSlice<T>(items: T[], page: number, size: number) {
+  const start = (Math.max(1, page) - 1) * size
+  return items.slice(start, start + size)
 }
 
 watch([
@@ -1091,21 +1115,10 @@ watch(matrixPageCount, (count) => { matrixPage.value = Math.min(matrixPage.value
 watch(findingPageCount, (count) => { findingPage.value = Math.min(findingPage.value, count) })
 watch(evidencePageCount, (count) => { evidencePage.value = Math.min(evidencePage.value, count) })
 
-const PaginationControls = defineComponent({
-  props: {
-    page: { type: Number, required: true },
-    pageCount: { type: Number, required: true },
-    total: { type: Number, required: true },
-  },
-  emits: ['update:page'],
-  setup(props, { emit }) {
-    const changePage = (page: number) => emit('update:page', Math.max(1, Math.min(props.pageCount, page)))
-    return () => h('nav', { class: 'pagination-controls', 'aria-label': '分页' }, [
-      h('span', `共 ${props.total} 条，第 ${props.page} / ${props.pageCount} 页`),
-      h('button', { type: 'button', disabled: props.page <= 1, onClick: () => changePage(props.page - 1) }, '上一页'),
-      h('button', { type: 'button', disabled: props.page >= props.pageCount, onClick: () => changePage(props.page + 1) }, '下一页'),
-    ])
-  },
+watch([matrixPageSize, findingPageSize, evidencePageSize], () => {
+  matrixPage.value = 1
+  findingPage.value = 1
+  evidencePage.value = 1
 })
 
 const assetGroups = computed<Array<{ key: AssetType; label: string; items: VerificationAsset[] }>>(() => [
@@ -2536,21 +2549,6 @@ button,
 .list-toolbar > span {
   color: var(--oat-text-muted);
   font-size: 12px;
-}
-
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 4px 0;
-  color: var(--oat-text-muted);
-  font-size: 12px;
-}
-
-.pagination-controls button {
-  min-height: 32px;
-  padding: 5px 10px;
 }
 
 .matrix-table {

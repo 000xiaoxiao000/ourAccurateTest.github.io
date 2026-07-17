@@ -8,7 +8,7 @@
         </RouterLink>
         <nav class="shell-nav" aria-label="主导航">
           <RouterLink v-if="projectId" :to="`/p/${projectId}/verification`">AI 验证</RouterLink>
-          <RouterLink v-if="projectId" :to="`/p/${projectId}/search`">搜索</RouterLink>
+          <RouterLink v-if="projectId" :to="`/p/${projectId}/git-impact`">Git 影响</RouterLink>
           <RouterLink v-if="projectId" :to="`/p/${projectId}/map/home`">链路地图</RouterLink>
           <div v-if="projectId" class="nav-dropdown app-center" :class="{ open: openMenu === 'app' }" @mouseenter="openNavMenu('app')" @mouseleave="closeMenus">
             <button class="nav-dropdown-trigger" type="button" aria-haspopup="true" :aria-expanded="openMenu === 'app'" @click.stop="toggleMenu('app')">源码工程 <span class="menu-caret" aria-hidden="true">⌄</span></button>
@@ -109,7 +109,7 @@ const filteredApps = computed(() => {
 })
 const mainModeClass = computed(() => {
   const name = String(route.name || '')
-  if (['map-home', 'map-app', 'map-code', 'verification-workspace', 'search-center'].includes(name)) {
+  if (['map-home', 'map-app', 'map-code', 'verification-workspace', 'git-impact'].includes(name)) {
     return 'shell-main-wide'
   }
   if (name.includes('graph') || name.includes('code')) {

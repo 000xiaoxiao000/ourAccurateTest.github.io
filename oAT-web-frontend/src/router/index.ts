@@ -61,6 +61,11 @@ const router = createRouter({
           component: () => import('@/pages/VerificationWorkspacePage.vue'),
         },
         {
+          path: 'p/:projectId/git-impact',
+          name: 'git-impact',
+          component: () => import('@/pages/GitImpactPage.vue'),
+        },
+        {
           path: 'p/:projectId/verification/connections',
           name: 'data-connections',
           component: () => import('@/pages/DataConnectionPage.vue'),
@@ -144,11 +149,6 @@ const router = createRouter({
           path: 'p/:projectId/map/code',
           name: 'map-code',
           component: () => import('@/pages/MapCodePage.vue'),
-        },
-        {
-          path: 'p/:projectId/search',
-          name: 'search-center',
-          component: () => import('@/pages/SearchCenterPage.vue'),
         },
         {
           path: 'p/:projectId/members',

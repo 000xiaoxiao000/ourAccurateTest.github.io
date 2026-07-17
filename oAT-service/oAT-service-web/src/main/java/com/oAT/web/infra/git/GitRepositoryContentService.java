@@ -26,6 +26,7 @@ import org.springframework.util.StringUtils;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Map;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -69,15 +70,24 @@ public class GitRepositoryContentService {
                     RevCommit newRev = walk.parseCommit(newId);
                     try (DiffFormatter formatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
                         formatter.setRepository(repository);
-                        formatter.setDiffComparator(RawTextComparator.WS_IGNORE_ALL);
+                        formatter.setDiffComparator(RawTextComparator.DEFAULT);
                         formatter.setDetectRenames(true);
                         List<DiffEntry> diffs = formatter.scan(oldRev == null ? null : oldRev.getTree(), newRev.getTree());
                         for (DiffEntry entry : diffs) {
                             String path = entry.getChangeType() == DiffEntry.ChangeType.DELETE ? entry.getOldPath() : entry.getNewPath();
-                            if (!path.endsWith(".java")) {
+                            if (!isSupportedSourcePath(path)) {
                                 continue;
                             }
-                            diffList.add(new GitDiffVo(toClassName(path), changedLines(formatter, entry), entry.getChangeType().name(), path));
+                            GitDiffVo change = new GitDiffVo(toClassName(path), changedNewLines(formatter, entry),
+                                    entry.getChangeType().name(), path);
+                            change.setOldPath(entry.getOldPath());
+                            change.setNewPath(entry.getNewPath());
+                            change.setRenameScore(entry.getScore());
+                            change.setOldBlobId(entry.getOldId() == null ? null : entry.getOldId().toObjectId().name());
+                            change.setNewBlobId(entry.getNewId() == null ? null : entry.getNewId().toObjectId().name());
+                            change.setOldRanges(changedRanges(formatter, entry, true));
+                            change.setNewRanges(changedRanges(formatter, entry, false));
+                            diffList.add(change);
                         }
                     }
                 }
@@ -150,22 +160,40 @@ public class GitRepositoryContentService {
         return clonedGit;
     }
 
-    private List<Integer> changedLines(DiffFormatter formatter, DiffEntry entry) throws Exception {
+    private List<Integer> changedNewLines(DiffFormatter formatter, DiffEntry entry) throws Exception {
         List<Integer> changedLines = new ArrayList<>();
-        if (entry.getChangeType() == DiffEntry.ChangeType.DELETE) {
-            return changedLines;
+        for (GitDiffVo.LineRange range : changedRanges(formatter, entry, false)) {
+            for (int line = range.getStartLine(); line <= range.getEndLine(); line++) changedLines.add(line);
         }
+        return changedLines;
+    }
+
+    private List<GitDiffVo.LineRange> changedRanges(DiffFormatter formatter, DiffEntry entry, boolean oldSide) throws Exception {
+        if (oldSide && entry.getChangeType() == DiffEntry.ChangeType.ADD) return Collections.emptyList();
+        if (!oldSide && entry.getChangeType() == DiffEntry.ChangeType.DELETE) return Collections.emptyList();
+        List<GitDiffVo.LineRange> ranges = new ArrayList<>();
         FileHeader fileHeader = formatter.toFileHeader(entry);
         for (HunkHeader hunk : fileHeader.getHunks()) {
             for (Edit edit : hunk.toEditList()) {
-                if (edit.getType() != Edit.Type.DELETE) {
-                    for (int i = edit.getBeginB(); i < edit.getEndB(); i++) {
-                        changedLines.add(i + 1);
-                    }
+                if (oldSide ? edit.getType() != Edit.Type.INSERT : edit.getType() != Edit.Type.DELETE) {
+                    int begin = oldSide ? edit.getBeginA() : edit.getBeginB();
+                    int end = oldSide ? edit.getEndA() : edit.getEndB();
+                    if (end > begin) ranges.add(new GitDiffVo.LineRange(begin + 1, end));
                 }
             }
         }
-        return changedLines;
+        return ranges;
+    }
+
+    private boolean isSupportedSourcePath(String path) {
+        if (!StringUtils.hasText(path) || DiffEntry.DEV_NULL.equals(path)) return false;
+        String lower = path.toLowerCase();
+        return lower.endsWith(".java") || lower.endsWith(".kt") || lower.endsWith(".kts")
+                || lower.endsWith(".ts") || lower.endsWith(".tsx") || lower.endsWith(".js")
+                || lower.endsWith(".jsx") || lower.endsWith(".vue") || lower.endsWith(".py")
+                || lower.endsWith(".go") || lower.endsWith(".sql") || lower.endsWith(".xml")
+                || lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".properties")
+                || lower.endsWith(".json");
     }
 
     private String toClassName(String path) {
