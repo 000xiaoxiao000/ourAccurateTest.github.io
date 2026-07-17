@@ -216,7 +216,7 @@
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
           <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
-          <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图">
+          <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图" @click="clearMiniGraphSelection">
             <defs><marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g
               v-for="edge in dependencyGraph.edges"
@@ -229,7 +229,7 @@
               v-for="node in dependencyGraph.nodes"
               :key="node.id"
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
-              @click="selectMiniGraphNode(node)"
+              @click.stop="selectMiniGraphNode(node)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text>
@@ -238,7 +238,7 @@
         </div>
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
           <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
-          <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图">
+          <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图" @click="clearMiniGraphSelection">
             <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g
               v-for="edge in controlFlowGraph.edges"
@@ -251,7 +251,7 @@
               v-for="node in controlFlowGraph.nodes"
               :key="node.id"
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
-              @click="selectMiniGraphNode(node)"
+              @click.stop="selectMiniGraphNode(node)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
@@ -273,7 +273,7 @@
             </button>
           </div>
           <div class="call-graph-viewport">
-          <svg class="call-map-svg" :width="callGraph.width * callZoom" :height="callGraph.height * callZoom" :viewBox="`0 0 ${callGraph.width} ${callGraph.height}`" role="img" aria-label="代码调用链关系图">
+          <svg class="call-map-svg" :width="callGraph.width * callZoom" :height="callGraph.height * callZoom" :viewBox="`0 0 ${callGraph.width} ${callGraph.height}`" role="img" aria-label="代码调用链关系图" @click="clearCallGraphSelection">
             <defs>
               <marker id="call-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
                 <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
@@ -294,7 +294,7 @@
               v-for="node in callGraph.nodes"
               :key="node.id"
               :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
-              @click="selectCallGraphNode(node.id)"
+              @click.stop="selectCallGraphNode(node.id)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.shortLabel }}</text>
@@ -406,6 +406,7 @@ const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
 const selectedTraceId = ref('')
 const selectedCallGraphId = ref('')
 const selectedMiniGraphId = ref('')
+const miniGraphFocusHighlightDisabled = ref(false)
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
 const slowLoading = ref(false)
@@ -417,6 +418,8 @@ let slowLoadingTimer: number | undefined
 
 watch([activeTab, callViewMode], () => {
   exitCallGraphFullscreen()
+  selectedMiniGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = false
   if (activeTab.value === 'calls') {
     void ensureCodeDataLoaded()
   }
@@ -473,7 +476,7 @@ const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
 const visibleMiniGraph = computed(() => callViewMode.value === 'dependency' ? dependencyGraph.value : callViewMode.value === 'control' ? controlFlowGraph.value : null)
-const miniGraphHighlight = computed(() => buildMiniGraphHighlight(visibleMiniGraph.value, selectedMiniGraphId.value, map.focusId.value))
+const miniGraphHighlight = computed(() => buildMiniGraphHighlight(visibleMiniGraph.value, selectedMiniGraphId.value, miniGraphFocusHighlightDisabled.value ? '' : map.focusId.value))
 const callViewMeta = computed(() => {
   if (callViewMode.value === 'dependency') {
     return {
@@ -646,12 +649,14 @@ function selectCallGraphNode(id: string) {
   const nextId = selectedCallGraphId.value === id ? '' : id
   selectedCallGraphId.value = nextId
   selectedMiniGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = false
   map.select(nextId)
   if (nextId) openAncestors(nextId, map.codeTree.value)
 }
 
 function selectMiniGraphNode(node: MiniGraphNode) {
   selectedMiniGraphId.value = selectedMiniGraphId.value === node.id ? '' : node.id
+  miniGraphFocusHighlightDisabled.value = !selectedMiniGraphId.value
   if (node.nodeId) {
     selectedCallGraphId.value = node.nodeId
     map.select(node.nodeId)
@@ -659,9 +664,20 @@ function selectMiniGraphNode(node: MiniGraphNode) {
   }
 }
 
+function clearMiniGraphSelection() {
+  selectedMiniGraphId.value = ''
+  selectedCallGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = true
+}
+
+function clearCallGraphSelection() {
+  selectedCallGraphId.value = ''
+}
+
 async function selectCodeNode(id: string) {
   selectedCallGraphId.value = id
   selectedMiniGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = false
   map.select(id)
   openAncestors(id, map.codeTree.value)
   if (selectedBaselineId.value) {
