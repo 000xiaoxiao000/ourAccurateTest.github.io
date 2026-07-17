@@ -36,6 +36,8 @@ public class VerificationSchemaInitializer {
             ensureColumn("oat_app", "language_config_json", "ALTER TABLE oat_app ADD COLUMN IF NOT EXISTS language_config_json JSONB");
             ensureColumn("oat_verification_baseline", "execution_asset_id", "ALTER TABLE oat_verification_baseline ADD COLUMN IF NOT EXISTS execution_asset_id VARCHAR(64)");
             ensureColumn("oat_verification_baseline", "coverage_asset_id", "ALTER TABLE oat_verification_baseline ADD COLUMN IF NOT EXISTS coverage_asset_id VARCHAR(64)");
+            relaxColumnNotNull("ALTER TABLE oat_verification_baseline ALTER COLUMN requirement_asset_id DROP NOT NULL");
+            relaxColumnNotNull("ALTER TABLE oat_verification_baseline ALTER COLUMN testcase_asset_id DROP NOT NULL");
             ensureColumn("oat_verification_asset", "storage_type", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS storage_type VARCHAR(32) NOT NULL DEFAULT 'DATABASE'");
             ensureColumn("oat_verification_asset", "storage_key", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS storage_key VARCHAR(512)");
             ensureColumn("oat_verification_asset", "content_size", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS content_size BIGINT NOT NULL DEFAULT 0");
@@ -66,6 +68,14 @@ public class VerificationSchemaInitializer {
                 """, Integer.class, tableName, columnName);
         if (count == null || count == 0) {
             jdbcTemplate.execute(alterSql);
+        }
+    }
+
+    private void relaxColumnNotNull(String alterSql) {
+        try {
+            jdbcTemplate.execute(alterSql);
+        } catch (Exception e) {
+            logger.debug("Schema nullability adjustment skipped: {}", e.getMessage());
         }
     }
 

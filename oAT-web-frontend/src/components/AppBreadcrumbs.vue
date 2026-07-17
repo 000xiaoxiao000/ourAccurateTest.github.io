@@ -57,10 +57,6 @@ const backTarget = computed(() => {
     'map-app': `/p/${projectId.value}/map/home`,
     'map-code': `/p/${projectId.value}/map/home`,
     'search-center': `/p/${projectId.value}/map/home`,
-    'usecase-list': projectHome,
-    'usecase-new': `/p/${projectId.value}/usecases`,
-    'usecase-edit': `/p/${projectId.value}/usecases/${route.params.usecaseId}`,
-    'usecase-detail': `/p/${projectId.value}/usecases`,
     'project-members': projectHome,
     'project-labels': projectHome,
   }
@@ -86,10 +82,6 @@ const routeLabels: Record<string, string> = {
   'map-app': '源码关系图（旧）',
   'map-code': '代码地图（旧）',
   'search-center': '搜索中心',
-  'usecase-list': '测试用例',
-  'usecase-new': '新建用例',
-  'usecase-edit': '编辑用例',
-  'usecase-detail': '用例详情',
   'project-members': '项目成员',
   'project-labels': '标签管理',
 }

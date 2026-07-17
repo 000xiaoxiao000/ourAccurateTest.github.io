@@ -8,7 +8,6 @@ import type {
   GitCommitOption,
   GitJobSummary,
   GitPullEstimate,
-  DirectoryDeletePreview,
   MapElement,
   LabelSummary,
   PackageCommitVerify,
@@ -16,13 +15,8 @@ import type {
   ProjectLabelsPayload,
   ProjectMembersPayload,
   ProjectSummary,
-  PublicUsecasePayload,
   RepositoryConfigPayload,
   SearchKeywordPayload,
-  UsecaseBootstrapPayload,
-  UsecaseDetailPayload,
-  UsecaseImportResult,
-  UsecaseListPayload,
   UserSummary,
   VersionCenterPayload,
   VersionReportDetailPayload,
@@ -70,10 +64,6 @@ export function register(payload: {
 
 export function logout() {
   return apiPost<string>('/api/auth/logout')
-}
-
-export function fetchShareUsecase(usecaseId: string) {
-  return apiGet<PublicUsecasePayload>(`/share/api/usecase/${usecaseId}`)
 }
 
 export function fetchProjects() {
@@ -292,112 +282,4 @@ export function fetchMapCode(projectId: string, traceId: string) {
   const query = new URLSearchParams()
   query.set('traceId', traceId)
   return apiGetRaw<MapElement[]>(`/api/projects/${projectId}/map/code?${query.toString()}`)
-}
-
-export function fetchUsecaseList(projectId: string, params?: { directory?: string; sort?: string; keyword?: string }) {
-  const query = new URLSearchParams()
-  if (params?.directory) {
-    query.set('directory', params.directory)
-  }
-  if (params?.sort) {
-    query.set('sort', params.sort)
-  }
-  if (params?.keyword) {
-    query.set('keyword', params.keyword)
-  }
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return apiGet<UsecaseListPayload>(`/api/projects/${projectId}/usecases${suffix}`)
-}
-
-export function fetchUsecaseBootstrap(projectId: string, params?: { directory?: string; id?: string }) {
-  const query = new URLSearchParams()
-  if (params?.directory) {
-    query.set('directory', params.directory)
-  }
-  if (params?.id) {
-    query.set('id', params.id)
-  }
-  const suffix = query.toString() ? `?${query.toString()}` : ''
-  return apiGet<UsecaseBootstrapPayload>(`/api/projects/${projectId}/usecases/bootstrap${suffix}`)
-}
-
-export function fetchUsecaseDetail(projectId: string, usecaseId: string) {
-  return apiGet<UsecaseDetailPayload>(`/api/projects/${projectId}/usecases/${usecaseId}`)
-}
-
-export function saveUsecase(
-  projectId: string,
-  payload: {
-    id?: string
-    title: string
-    headImage?: string
-    content?: string
-    directory: string
-    labels: string[]
-    defectsText?: string
-    prdRequirementsText?: string
-  },
-) {
-  return apiPost<string>(`/api/projects/${projectId}/usecases/save`, JSON.stringify(payload), 'application/json')
-}
-
-export function deleteUsecase(projectId: string, usecaseId: string) {
-  return apiPost<string>(`/api/projects/${projectId}/usecases/${usecaseId}/delete`, '', 'application/json')
-}
-
-export function updateUsecaseShare(projectId: string, usecaseId: string, share: boolean) {
-  return apiPost<string>(
-    `/api/projects/${projectId}/usecases/${usecaseId}/share`,
-    JSON.stringify({ share }),
-    'application/json',
-  )
-}
-
-export function uploadUsecases(projectId: string, directory: string, file: File) {
-  const formData = new FormData()
-  formData.append('directory', directory || 'root')
-  formData.append('file', file)
-  return apiPost<UsecaseImportResult>(`/api/projects/${projectId}/usecases/upload`, formData)
-}
-
-export function rebuildUsecaseSearchData(projectId: string) {
-  return apiPost<number>(`/api/projects/${projectId}/usecases/rebuild-search-data`, '', 'application/json')
-}
-
-export function createUsecaseDirectory(projectId: string, payload: { parentId?: string; name: string }) {
-  return apiPost<string>(
-    `/api/projects/${projectId}/usecases/directories/create`,
-    JSON.stringify(payload),
-    'application/json',
-  )
-}
-
-export function renameUsecaseDirectory(
-  projectId: string,
-  directoryId: string,
-  payload: { parentId: string; name: string },
-) {
-  return apiPost<string>(
-    `/api/projects/${projectId}/usecases/directories/${directoryId}/rename`,
-    JSON.stringify(payload),
-    'application/json',
-  )
-}
-
-export function fetchUsecaseDirectoryDeletePreview(projectId: string, directoryId: string) {
-  return apiGet<DirectoryDeletePreview>(
-    `/api/projects/${projectId}/usecases/directories/${directoryId}/delete-preview`,
-  )
-}
-
-export function deleteUsecaseDirectory(
-  projectId: string,
-  directoryId: string,
-  payload: { parentId: string; name: string; deleteUsecases: boolean },
-) {
-  return apiPost<DirectoryDeletePreview>(
-    `/api/projects/${projectId}/usecases/directories/${directoryId}/delete`,
-    JSON.stringify(payload),
-    'application/json',
-  )
 }

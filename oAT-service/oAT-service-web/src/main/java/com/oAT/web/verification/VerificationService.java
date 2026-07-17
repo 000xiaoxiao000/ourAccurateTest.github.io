@@ -106,17 +106,18 @@ public class VerificationService {
     }
 
     public Baseline createBaseline(String projectId, String userId, CreateBaseline command) {
-        AssetSnapshot requirement = requiredAsset(projectId, command.requirementAssetId(), AssetType.REQUIREMENT);
-        AssetSnapshot testcase = requiredAsset(projectId, command.testcaseAssetId(), AssetType.TESTCASE);
+        AssetSnapshot requirement = optionalAsset(projectId, command.requirementAssetId(), AssetType.REQUIREMENT);
+        AssetSnapshot testcase = optionalAsset(projectId, command.testcaseAssetId(), AssetType.TESTCASE);
         if (StringUtils.hasText(command.sourceAssetId())) requiredAsset(projectId, command.sourceAssetId(), AssetType.SOURCE);
         if (StringUtils.hasText(command.executionAssetId())) requiredAsset(projectId, command.executionAssetId(), AssetType.EXECUTION);
         if (StringUtils.hasText(command.coverageAssetId())) requiredAsset(projectId, command.coverageAssetId(), AssetType.COVERAGE);
         LocalDateTime now = LocalDateTime.now();
-        Freshness freshness = requirement.freshness() == Freshness.LIVE && testcase.freshness() == Freshness.LIVE
+        Freshness freshness = requirement != null && testcase != null
+                && requirement.freshness() == Freshness.LIVE && testcase.freshness() == Freshness.LIVE
                 ? Freshness.LIVE : Freshness.MANUAL;
         Baseline baseline = new Baseline(UUID.randomUUID().toString(), projectId,
                 StringUtils.hasText(command.name()) ? command.name().trim() : "AI验证 " + now.toLocalDate(),
-                requirement.id(), testcase.id(), command.sourceAssetId(), command.executionAssetId(),
+                assetId(requirement), assetId(testcase), command.sourceAssetId(), command.executionAssetId(),
                 command.coverageAssetId(), command.sourceAppId(), command.repositoryUrl(),
                 command.sourceBranch(), command.sourceCommit(), VerificationModels.ANALYZER_VERSION,
                 BaselineStatus.CREATED, freshness, userId, now, now);
@@ -131,18 +132,19 @@ public class VerificationService {
     public Baseline updateBaseline(String projectId, String baselineId, UpdateBaseline command) {
         Assert.notNull(command, "更新基线请求不能为空");
         Baseline existing = requiredBaseline(projectId, baselineId);
-        String requirementAssetId = textOrExisting(command.requirementAssetId(), existing.requirementAssetId());
-        String testcaseAssetId = textOrExisting(command.testcaseAssetId(), existing.testcaseAssetId());
-        AssetSnapshot requirement = requiredAsset(projectId, requirementAssetId, AssetType.REQUIREMENT);
-        AssetSnapshot testcase = requiredAsset(projectId, testcaseAssetId, AssetType.TESTCASE);
+        String requirementAssetId = command.requirementAssetId();
+        String testcaseAssetId = command.testcaseAssetId();
+        AssetSnapshot requirement = optionalAsset(projectId, requirementAssetId, AssetType.REQUIREMENT);
+        AssetSnapshot testcase = optionalAsset(projectId, testcaseAssetId, AssetType.TESTCASE);
         if (StringUtils.hasText(command.sourceAssetId())) requiredAsset(projectId, command.sourceAssetId(), AssetType.SOURCE);
         if (StringUtils.hasText(command.executionAssetId())) requiredAsset(projectId, command.executionAssetId(), AssetType.EXECUTION);
         if (StringUtils.hasText(command.coverageAssetId())) requiredAsset(projectId, command.coverageAssetId(), AssetType.COVERAGE);
-        Freshness freshness = requirement.freshness() == Freshness.LIVE && testcase.freshness() == Freshness.LIVE
+        Freshness freshness = requirement != null && testcase != null
+                && requirement.freshness() == Freshness.LIVE && testcase.freshness() == Freshness.LIVE
                 ? Freshness.LIVE : Freshness.MANUAL;
         Baseline updated = new Baseline(existing.id(), existing.projectId(),
                 StringUtils.hasText(command.name()) ? command.name().trim() : existing.name(),
-                requirementAssetId, testcaseAssetId, command.sourceAssetId(), command.executionAssetId(),
+                assetId(requirement), assetId(testcase), command.sourceAssetId(), command.executionAssetId(),
                 command.coverageAssetId(), command.sourceAppId(), command.repositoryUrl(), command.sourceBranch(),
                 command.sourceCommit(), existing.analyzerVersion(), BaselineStatus.CREATED, freshness,
                 existing.createdBy(), existing.createTime(), LocalDateTime.now());
@@ -162,8 +164,8 @@ public class VerificationService {
         List<TestcaseProjection> testcases = repository.findTestcases(baselineId);
         List<TraceLink> links = repository.findTraceLinks(baselineId);
         List<Finding> findings = repository.findFindings(baselineId);
-        return new BaselineDetail(baseline, requiredAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT),
-                requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE), criteria, testcases, links,
+        return new BaselineDetail(baseline, optionalAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT),
+                optionalAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE), criteria, testcases, links,
                 findings, metrics(baseline, projectId, criteria, links, findings));
     }
 
@@ -219,8 +221,8 @@ public class VerificationService {
         try {
             updateAnalysisProgress(jobId, "正在读取需求和测试用例资料");
             Baseline baseline = requiredBaseline(projectId, baselineId);
-            AssetSnapshot requirement = requiredAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT);
-            AssetSnapshot testcase = requiredAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
+            AssetSnapshot requirement = optionalAsset(projectId, baseline.requirementAssetId(), AssetType.REQUIREMENT);
+            AssetSnapshot testcase = optionalAsset(projectId, baseline.testcaseAssetId(), AssetType.TESTCASE);
             updateAnalysisProgress(jobId, "正在读取源码、执行、覆盖率和缺陷证据");
             Map<String, StaticSourceInfo> sources = loadSources(baseline.sourceAppId());
             AppVo sourceApp = StringUtils.hasText(baseline.sourceAppId()) ? appService.getApp(baseline.sourceAppId()) : null;
@@ -233,8 +235,8 @@ public class VerificationService {
             String defectContent = loadDefectAssets(projectId);
             updateAnalysisProgress(jobId, "正在请求 AI 分析并建立追溯关系");
             VerificationAiOrchestrator.AiVerificationResult result = aiOrchestrator.analyze(
-                    new VerificationAiOrchestrator.AiVerificationInput(baselineId, loadAssetContent(requirement),
-                            loadAssetContent(testcase), defectContent, sourceAssetContent, executionContent, coverageContent,
+                    new VerificationAiOrchestrator.AiVerificationInput(baselineId, loadOptionalAssetContent(requirement),
+                            loadOptionalAssetContent(testcase), defectContent, sourceAssetContent, executionContent, coverageContent,
                             new ArrayList<>(sources.values())),
                     message -> updateAnalysisProgress(jobId, message));
             updateAnalysisProgress(jobId, "AI 分析完成，正在保存验收标准、追溯关系和问题");
@@ -369,6 +371,10 @@ public class VerificationService {
             if (StringUtils.hasText(stored)) return stored;
         }
         return value(asset.content());
+    }
+
+    private String loadOptionalAssetContent(AssetSnapshot asset) {
+        return asset == null ? "" : loadAssetContent(asset);
     }
 
     private String loadSourceAssetContent(AssetSnapshot asset, AppVo sourceApp) {
@@ -508,6 +514,17 @@ public class VerificationService {
             Assert.isTrue(asset.assetType() == type, "资产类型不匹配: " + id);
         }
         return asset;
+    }
+
+    private AssetSnapshot optionalAsset(String projectId, String id, AssetType type) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        return requiredAsset(projectId, id, type);
+    }
+
+    private String assetId(AssetSnapshot asset) {
+        return asset == null ? null : asset.id();
     }
 
     private Baseline requiredBaseline(String projectId, String id) {

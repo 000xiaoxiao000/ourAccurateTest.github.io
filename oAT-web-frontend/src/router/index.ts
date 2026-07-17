@@ -33,12 +33,6 @@ const router = createRouter({
       meta: { public: true },
     },
     {
-      path: '/share/usecase/:usecaseId',
-      name: 'share-usecase',
-      component: () => import('@/pages/ShareUsecasePage.vue'),
-      meta: { public: true },
-    },
-    {
       path: '/',
       component: AppShell,
       children: [
@@ -155,26 +149,6 @@ const router = createRouter({
           path: 'p/:projectId/search',
           name: 'search-center',
           component: () => import('@/pages/SearchCenterPage.vue'),
-        },
-        {
-          path: 'p/:projectId/usecases',
-          name: 'usecase-list',
-          component: () => import('@/pages/UsecaseListPage.vue'),
-        },
-        {
-          path: 'p/:projectId/usecases/new',
-          name: 'usecase-new',
-          component: () => import('@/pages/UsecaseEditorPage.vue'),
-        },
-        {
-          path: 'p/:projectId/usecases/:usecaseId/edit',
-          name: 'usecase-edit',
-          component: () => import('@/pages/UsecaseEditorPage.vue'),
-        },
-        {
-          path: 'p/:projectId/usecases/:usecaseId',
-          name: 'usecase-detail',
-          component: () => import('@/pages/UsecaseDetailPage.vue'),
         },
         {
           path: 'p/:projectId/members',

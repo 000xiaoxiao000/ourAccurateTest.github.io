@@ -93,7 +93,6 @@
           <div class="quick-grid">
             <RouterLink :to="`/p/${projectId}/apps`">源码工程</RouterLink>
             <RouterLink :to="`/p/${projectId}/verification`">AI 需求验证</RouterLink>
-            <RouterLink :to="`/p/${projectId}/usecases`">测试用例</RouterLink>
             <RouterLink :to="`/p/${projectId}/members`">项目成员</RouterLink>
             <RouterLink :to="`/p/${projectId}/labels`">标签管理</RouterLink>
           </div>

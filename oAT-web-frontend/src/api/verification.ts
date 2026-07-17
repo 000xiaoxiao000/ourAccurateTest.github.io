@@ -36,8 +36,8 @@ export interface VerificationBaseline {
   id: string
   projectId: string
   name: string
-  requirementAssetId: string
-  testcaseAssetId: string
+  requirementAssetId?: string
+  testcaseAssetId?: string
   sourceAssetId?: string
   executionAssetId?: string
   coverageAssetId?: string
@@ -128,6 +128,8 @@ export interface VerificationMetrics {
 
 export interface BaselineDetail {
   baseline: VerificationBaseline
+  requirementAsset?: VerificationAsset
+  testcaseAsset?: VerificationAsset
   criteria: AcceptanceCriterion[]
   testcases: TestcaseProjection[]
   traceLinks: TraceLink[]
@@ -305,7 +307,7 @@ export function deleteVerificationAsset(projectId: string, assetId: string) {
 }
 
 export function createVerificationBaseline(projectId: string, payload: {
-  name: string; requirementAssetId: string; testcaseAssetId: string
+  name: string; requirementAssetId?: string; testcaseAssetId?: string
   sourceAssetId?: string; executionAssetId?: string; coverageAssetId?: string
   sourceAppId?: string; repositoryUrl?: string; sourceBranch?: string; sourceCommit?: string
 }) {
@@ -313,7 +315,7 @@ export function createVerificationBaseline(projectId: string, payload: {
 }
 
 export function updateVerificationBaseline(projectId: string, baselineId: string, payload: {
-  name: string; requirementAssetId: string; testcaseAssetId: string
+  name: string; requirementAssetId?: string; testcaseAssetId?: string
   sourceAssetId?: string; executionAssetId?: string; coverageAssetId?: string
   sourceAppId?: string; repositoryUrl?: string; sourceBranch?: string; sourceCommit?: string
 }) {

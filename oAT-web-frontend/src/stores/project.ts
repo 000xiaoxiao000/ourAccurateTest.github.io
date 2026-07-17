@@ -6,12 +6,9 @@ import {
   addProjectMembers,
   createProject,
   createProjectApp,
-  createUsecaseDirectory,
   deleteProjectLabel,
   deleteProject,
   deleteProjectApp,
-  deleteUsecase,
-  deleteUsecaseDirectory,
   fetchAppSettings,
   fetchCollectorSources,
   fetchProjectApps,
@@ -21,18 +18,9 @@ import {
   fetchProjects,
   fetchRepositoryBranches,
   fetchRepositoryConfig,
-  fetchUsecaseDirectoryDeletePreview,
-  fetchUsecaseBootstrap,
-  fetchUsecaseDetail,
-  fetchUsecaseList,
-  rebuildUsecaseSearchData,
   removeProjectMember,
-  renameUsecaseDirectory,
   saveAppSettings,
   saveRepositoryConfig,
-  saveUsecase,
-  updateUsecaseShare,
-  uploadUsecases,
   updateProject,
   updateProjectMemberRole,
   upsertProjectLabel,
@@ -41,15 +29,11 @@ import type {
   AppSummary,
   AppSettingsPayload,
   CollectorSourcesPayload,
-  DirectoryDeletePreview,
   ProjectContext,
   ProjectLabelsPayload,
   ProjectMembersPayload,
   ProjectSummary,
   RepositoryConfigPayload,
-  UsecaseBootstrapPayload,
-  UsecaseDetailPayload,
-  UsecaseListPayload,
 } from '@/api/types'
 
 export const useProjectStore = defineStore('project', () => {
@@ -61,9 +45,6 @@ export const useProjectStore = defineStore('project', () => {
   const collectorSourcesByProjectId = ref<Record<string, CollectorSourcesPayload>>({})
   const appSettingsByKey = ref<Record<string, AppSettingsPayload>>({})
   const repositoryByKey = ref<Record<string, RepositoryConfigPayload>>({})
-  const usecaseListByProjectId = ref<Record<string, UsecaseListPayload>>({})
-  const usecaseBootstrapByKey = ref<Record<string, UsecaseBootstrapPayload>>({})
-  const usecaseDetailByKey = ref<Record<string, UsecaseDetailPayload>>({})
 
   async function loadProjects() {
     projects.value = await fetchProjects()
@@ -231,17 +212,6 @@ export const useProjectStore = defineStore('project', () => {
     return fetchRepositoryBranches(projectId, appId)
   }
 
-  async function loadUsecaseList(
-    projectId: string,
-    params?: { directory?: string; sort?: string; keyword?: string },
-  ) {
-    return loadRecordByKey(usecaseListByProjectId, projectId, () => fetchUsecaseList(projectId, params))
-  }
-
-  function usecaseKey(projectId: string, usecaseId: string) {
-    return `${projectId}:${usecaseId}`
-  }
-
   function assignByKey<T>(target: Ref<Record<string, T>>, key: string, payload: T) {
     target.value = {
       ...target.value,
@@ -255,67 +225,6 @@ export const useProjectStore = defineStore('project', () => {
     return assignByKey(target, key, payload)
   }
 
-  async function loadUsecaseBootstrap(projectId: string, params?: { directory?: string; id?: string }) {
-    const key = usecaseKey(projectId, params?.id || 'new')
-    return loadRecordByKey(usecaseBootstrapByKey, key, () => fetchUsecaseBootstrap(projectId, params))
-  }
-
-  async function loadUsecaseDetail(projectId: string, usecaseId: string) {
-    return loadRecordByKey(
-      usecaseDetailByKey,
-      usecaseKey(projectId, usecaseId),
-      () => fetchUsecaseDetail(projectId, usecaseId),
-    )
-  }
-
-  async function persistUsecase(
-    projectId: string,
-    payload: Parameters<typeof saveUsecase>[1],
-  ) {
-    const usecaseId = await saveUsecase(projectId, payload)
-    return usecaseId
-  }
-
-  async function removeUsecase(projectId: string, usecaseId: string) {
-    return deleteUsecase(projectId, usecaseId)
-  }
-
-  async function changeUsecaseShare(projectId: string, usecaseId: string, share: boolean) {
-    return updateUsecaseShare(projectId, usecaseId, share)
-  }
-
-  async function importUsecases(projectId: string, directory: string, file: File) {
-    return uploadUsecases(projectId, directory, file)
-  }
-
-  async function rebuildUsecaseSearch(projectId: string) {
-    return rebuildUsecaseSearchData(projectId)
-  }
-
-  async function addUsecaseDirectory(projectId: string, payload: { parentId?: string; name: string }) {
-    return createUsecaseDirectory(projectId, payload)
-  }
-
-  async function updateUsecaseDirectory(
-    projectId: string,
-    directoryId: string,
-    payload: { parentId: string; name: string },
-  ) {
-    return renameUsecaseDirectory(projectId, directoryId, payload)
-  }
-
-  async function previewUsecaseDirectoryDelete(projectId: string, directoryId: string) {
-    return fetchUsecaseDirectoryDeletePreview(projectId, directoryId)
-  }
-
-  async function removeUsecaseDirectory(
-    projectId: string,
-    directoryId: string,
-    payload: { parentId: string; name: string; deleteUsecases: boolean },
-  ) {
-    return deleteUsecaseDirectory(projectId, directoryId, payload)
-  }
-
   return {
     projects,
     contextByProjectId,
@@ -325,9 +234,6 @@ export const useProjectStore = defineStore('project', () => {
     collectorSourcesByProjectId,
     appSettingsByKey,
     repositoryByKey,
-    usecaseListByProjectId,
-    usecaseBootstrapByKey,
-    usecaseDetailByKey,
     loadProjects,
     createManagedProject,
     updateManagedProject,
@@ -349,17 +255,5 @@ export const useProjectStore = defineStore('project', () => {
     loadRepository,
     updateRepository,
     loadRepositoryBranches,
-    loadUsecaseList,
-    loadUsecaseBootstrap,
-    loadUsecaseDetail,
-    persistUsecase,
-    removeUsecase,
-    changeUsecaseShare,
-    importUsecases,
-    rebuildUsecaseSearch,
-    addUsecaseDirectory,
-    updateUsecaseDirectory,
-    previewUsecaseDirectoryDelete,
-    removeUsecaseDirectory,
   }
 })

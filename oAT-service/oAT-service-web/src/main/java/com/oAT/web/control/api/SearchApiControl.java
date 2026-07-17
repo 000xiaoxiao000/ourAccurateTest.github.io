@@ -63,7 +63,7 @@ public class SearchApiControl {
         result.setRemoteContentFragments(item.getRemoteContentFragments());
         result.setUpdateTimeText(item.getUpdateTime() == null ? null : item.getUpdateTime().toString());
         result.setDescription(item.getContentFragments() == null ? null : String.join("</br>", item.getContentFragments()));
-        result.setTargetPath("/p/" + item.getProjectId() + "/usecases/" + item.getId());
+        result.setTargetPath("/p/" + item.getProjectId() + "/home");
         return result;
     }
 

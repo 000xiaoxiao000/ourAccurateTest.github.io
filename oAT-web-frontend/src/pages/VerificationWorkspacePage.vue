@@ -68,7 +68,7 @@
                 <small>{{ files[asset.type]?.name ? '已选择文件，可重新选择或拖放替换' : '点击选择文件，或把文件拖放到此区域' }}</small>
               </label>
               <textarea v-model="pasteInputs[asset.type]" :placeholder="asset.placeholder"></textarea>
-              <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号（可选）" />
+              <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号" />
               <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
                 {{ importing === asset.type ? '导入中...' : `导入${asset.label}` }}
               </button>
@@ -122,7 +122,7 @@
         <p class="section-tip">这里仅查看已导入资料。点击资料可把它预选到“分析基线”。</p>
         <div v-if="!importedAssetCount" class="empty-state compact">
           <strong>还没有导入资料</strong>
-          <span>至少导入需求和测试用例后，才能创建分析基线。</span>
+          <span>导入任意资料后，可在创建分析基线时选择使用。</span>
         </div>
         <div v-else class="asset-library">
           <article v-for="group in visibleAssetGroups" :key="group.key" class="asset-group">
@@ -157,7 +157,7 @@
           </label>
           <label>
             <span>版本号 / Commit / 批次号</span>
-            <input v-model.trim="assetEditForm.sourceVersion" type="text" placeholder="可选" />
+            <input v-model.trim="assetEditForm.sourceVersion" type="text" placeholder="版本号 / Commit / 批次号" />
           </label>
           <label>
             <span>资料内容</span>
@@ -190,26 +190,26 @@
           <label>
             <span>选择需求资料版本</span>
             <select v-model="baselineForm.requirementAssetId">
-              <option value="">请选择</option>
+              <option value="">不选择需求资料</option>
               <option v-for="asset in overview.requirements" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
             </select>
           </label>
           <label>
             <span>选择测试用例资料版本</span>
             <select v-model="baselineForm.testcaseAssetId">
-              <option value="">请选择</option>
+              <option value="">不选择测试用例资料</option>
               <option v-for="asset in overview.testcases" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
             </select>
           </label>
           <label>
-            <span>选择源码资料版本（可选）</span>
+            <span>选择源码资料版本</span>
             <select v-model="baselineForm.sourceAssetId">
               <option value="">使用应用静态索引或暂不选择</option>
               <option v-for="asset in overview.sources" :key="asset.id" :value="asset.id">{{ assetLabel(asset) }}</option>
             </select>
           </label>
           <label>
-            <span>应用静态索引（可选）</span>
+            <span>应用静态索引</span>
             <select v-model="baselineForm.sourceAppId">
               <option value="">不绑定应用</option>
               <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
@@ -273,7 +273,7 @@
         </article>
         <div v-if="!overview.baselines.length" class="empty-state compact">
           <strong>还没有分析基线</strong>
-          <span>先选择需求资料和测试用例资料，再创建基线。</span>
+          <span>选择需要锁定的资料后创建基线。</span>
         </div>
       </section>
     </section>
@@ -473,11 +473,11 @@
                 </select>
               </label>
               <label>
-                <span>外部 Bug / 任务 / 评论链接（可选）</span>
+                <span>外部 Bug / 任务 / 评论链接</span>
                 <input v-model.trim="writeBackUrl" type="url" placeholder="已有外部事项时填写 https://..." autocomplete="off" />
               </label>
               <label>
-                <span>补充说明（可选）</span>
+                <span>补充说明</span>
                 <textarea v-model.trim="writeBackNote" rows="3" placeholder="例如：希望生成给开发的修复说明，或说明对方平台的任务背景..." />
               </label>
               <div class="writeback-actions">
@@ -721,8 +721,8 @@ const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeho
   { type: 'REQUIREMENT', label: '需求', hint: 'Word / Markdown / Excel / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },
   { type: 'TESTCASE', label: '测试用例', hint: 'XMind脑图 / Excel / CSV / JSON / 文本', placeholder: '粘贴用例ID、步骤、预期结果...' },
   { type: 'SOURCE', label: '源码', hint: '上传源码包 / 粘贴源码 / 从源码工程导入', placeholder: '粘贴 Controller / Service / 核心逻辑...' },
-  { type: 'DEFECT', label: '缺陷 / Bug', hint: 'Excel / CSV / JSON / 文本，可选', placeholder: '粘贴 Bug、缺陷、生产问题或外部任务摘要...' },
-  { type: 'EXECUTION', label: '执行报告', hint: 'Excel / CSV / JSON / 文本，可选', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
+  { type: 'DEFECT', label: '缺陷 / Bug', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴 Bug、缺陷、生产问题或外部任务摘要...' },
+  { type: 'EXECUTION', label: '执行报告', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
   { type: 'COVERAGE', label: '覆盖率', hint: 'JaCoCo / Istanbul / LCOV / Cobertura / Go / Python 等', placeholder: '粘贴多语言覆盖率报告摘要...' },
 ]
 
@@ -1330,10 +1330,6 @@ async function importAsset(type: AssetType) {
 }
 
 async function saveBaseline() {
-  if (!baselineForm.requirementAssetId || !baselineForm.testcaseAssetId) {
-    toast.warning('需求资料和测试用例资料不能为空')
-    return
-  }
   creatingBaseline.value = true
   try {
     const updating = !!editingBaselineId.value

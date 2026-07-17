@@ -30,7 +30,6 @@
               <div class="nav-menu compact right-aligned">
                 <RouterLink to="/projects?create=1" @click="closeMenus">创建新项目</RouterLink>
                 <RouterLink :to="`/p/${projectId}/apps?create=1`" @click="closeMenus">添加源码工程</RouterLink>
-                <RouterLink :to="`/p/${projectId}/usecases/new`" @click="closeMenus">新建用例</RouterLink>
               </div>
             </div>
             <RouterLink v-if="projectId" class="icon-trigger" :to="`/projects?edit=${projectId}`" aria-label="项目设置" title="设置" @click="closeMenus">⚙</RouterLink>

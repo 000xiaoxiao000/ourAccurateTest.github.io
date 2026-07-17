@@ -125,16 +125,6 @@ export interface TraceItemSummary {
   status?: string
 }
 
-export interface UsecaseImportError {
-  rowNumber: number
-  message: string
-}
-
-export interface UsecaseImportResult {
-  successCount: number
-  errors?: UsecaseImportError[]
-}
-
 export interface PulledZipItem {
   fileName: string
   cachePath: string
@@ -243,82 +233,6 @@ export interface SearchKeywordResult {
 export interface SearchKeywordPayload {
   total: number
   results: SearchKeywordResult[]
-}
-
-export interface UsecaseDirectory {
-  id: string
-  name: string
-  parentId?: string
-  projectId?: string
-  updateTimeText?: string
-  updateTimeRelativeText?: string
-}
-
-export interface UsecaseSummary {
-  id: string
-  projectId: string
-  title: string
-  headImage?: string
-  content?: string
-  directory: string
-  defects?: string[]
-  prdRequirements?: string[]
-  defectsText?: string
-  prdRequirementsText?: string
-  labels?: string[]
-  authors?: string[]
-  lastUpdateAuthor?: string
-  createTime?: string
-  updateTime?: string
-  updateTimeText?: string
-  share?: boolean
-}
-
-export interface RelationOption {
-  id: string
-  name: string
-  url?: string
-  external: boolean
-}
-
-export interface UsecaseListPayload {
-  currentDirectory: string
-  currentDirectoryName: string
-  sort: string
-  keyword?: string
-  usecases: UsecaseSummary[]
-  directories: UsecaseDirectory[]
-  directoryTiers?: UsecaseDirectory[]
-  maintainerNameMap: Record<string, string>
-  apps: AppSummary[]
-  currentUserRole: string
-}
-
-export interface UsecaseBootstrapPayload {
-  currentDirectory: string
-  currentDirectoryName: string
-  labels: LabelSummary[]
-  usecase?: UsecaseSummary
-  selectedLabelNames: string[]
-  defectsText?: string
-  prdRequirementsText?: string
-  currentUserRole: string
-}
-
-export interface UsecaseDetailPayload {
-  usecase: UsecaseSummary
-  lastUpdateAuthor?: UserSummary
-  labels?: LabelSummary[]
-  defects?: RelationOption[]
-  prdRequirements?: RelationOption[]
-  contentHtml?: string
-  currentUserRole: string
-}
-
-export interface DirectoryDeletePreview {
-  requiresCascade: boolean
-  directoryCount: number
-  usecaseCount: number
 }
 
 export interface VersionItemSummary {
@@ -482,8 +396,4 @@ export interface ProjectMemberLite {
   memberName?: string
   memberEmail?: string
   role?: string
-}
-
-export interface PublicUsecasePayload extends UsecaseDetailPayload {
-  projectId: string
 }

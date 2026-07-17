@@ -125,14 +125,13 @@
             <InfoLine label="来源" :value="item.sourceNames" />
             <div class="usecase-links">
               <span>关联用例：</span>
-              <RouterLink
+              <span
                 v-for="usecase in item.linkedUsecases"
                 :key="usecase.id"
                 class="mini-link"
-                :to="`/p/${projectId}/usecases/${usecase.id}`"
               >
                 {{ usecase.title || usecase.id }}
-              </RouterLink>
+              </span>
               <span v-if="!item.linkedUsecases.length" class="muted">暂无</span>
             </div>
           </div>

@@ -155,7 +155,7 @@
               <div v-show="openUsecaseGroups.has(group.directory)" class="impact-list">
                 <article v-for="item in paginatedUsecaseGroupItems(group.items)" :key="item.id" class="impact-card usecase-card">
                   <div class="impact-top">
-                    <RouterLink v-if="item.available !== false" class="result-link" :to="`/p/${projectId}/usecases/${item.id}`">{{ item.title }}</RouterLink>
+                    <span v-if="item.available !== false" class="result-link">{{ item.title }}</span>
                     <span v-else class="result-link unavailable">{{ item.title }}</span>
                     <button class="inline-link" type="button" @click="toggleUsecase(item.id)">影响点：{{ item.differences.length }}</button>
                   </div>
@@ -201,9 +201,9 @@
               </div>
               <div v-if="endpoint.linkedUsecases?.length" class="linked-usecases">
                 <strong>关联用例</strong>
-                <RouterLink v-for="usecase in endpoint.linkedUsecases" :key="usecase.id" :to="`/p/${projectId}/usecases/${usecase.id}`">
+                <span v-for="usecase in endpoint.linkedUsecases" :key="usecase.id">
                   {{ usecase.title || usecase.id }}<small v-if="usecase.directory">{{ usecase.directory }}</small>
-                </RouterLink>
+                </span>
               </div>
               <div v-else class="linked-usecases muted">暂无接口关联用例</div>
             </article>
