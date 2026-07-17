@@ -218,11 +218,17 @@
           <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图">
             <defs><marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
-            <g v-for="edge in dependencyGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#dependency-arrow)" /></g>
+            <g
+              v-for="edge in dependencyGraph.edges"
+              :key="edge.id"
+              :class="['mini-graph-edge', { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
+            >
+              <path :d="edge.path" marker-end="url(#dependency-arrow)" />
+            </g>
             <g
               v-for="node in dependencyGraph.nodes"
               :key="node.id"
-              :class="['mini-graph-node', node.tone, { active: selectedMiniGraphId === node.id || (!!node.nodeId && map.focusId.value === node.nodeId) }]"
+              :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click="selectMiniGraphNode(node)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
@@ -234,11 +240,17 @@
           <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图">
             <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
-            <g v-for="edge in controlFlowGraph.edges" :key="edge.id" class="mini-graph-edge"><path :d="edge.path" marker-end="url(#control-arrow)" /></g>
+            <g
+              v-for="edge in controlFlowGraph.edges"
+              :key="edge.id"
+              :class="['mini-graph-edge', { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
+            >
+              <path :d="edge.path" marker-end="url(#control-arrow)" />
+            </g>
             <g
               v-for="node in controlFlowGraph.nodes"
               :key="node.id"
-              :class="['mini-graph-node', node.tone, { active: selectedMiniGraphId === node.id || (!!node.nodeId && map.focusId.value === node.nodeId) }]"
+              :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click="selectMiniGraphNode(node)"
             >
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
@@ -379,7 +391,7 @@ interface SvgEdge {
   raw: TraceabilityEdge
 }
 interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; tone: string; nodeId?: string }
-interface MiniGraphEdge { id: string; path: string }
+interface MiniGraphEdge { id: string; source: string; target: string; path: string }
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId || ''))
@@ -460,6 +472,8 @@ const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredE
 const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
+const visibleMiniGraph = computed(() => callViewMode.value === 'dependency' ? dependencyGraph.value : callViewMode.value === 'control' ? controlFlowGraph.value : null)
+const miniGraphHighlight = computed(() => buildMiniGraphHighlight(visibleMiniGraph.value, selectedMiniGraphId.value, map.focusId.value))
 const callViewMeta = computed(() => {
   if (callViewMode.value === 'dependency') {
     return {
@@ -936,7 +950,7 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
     const endX = target.x
     const endY = target.y + target.height / 2
     const midX = (startX + endX) / 2
-    return { id: `dependency:${index}`, path: `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}` }
+    return { id: `dependency:${index}`, source: source.id, target: target.id, path: `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}` }
   })
   return { width: 860, height: Math.max(420, Math.max(sources.length * 76, targets.length * 58) + 80), nodes: graphNodes, edges }
 }
@@ -963,9 +977,26 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
   for (let index = 1; index < graphNodes.length; index++) {
     const source = graphNodes[index - 1]
     const target = graphNodes[index]
-    edges.push({ id: `control:${index}`, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
+    edges.push({ id: `control:${index}`, source: source.id, target: target.id, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
   }
   return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
+}
+
+function buildMiniGraphHighlight(graph: { nodes: MiniGraphNode[]; edges: MiniGraphEdge[] } | null, selectedId: string, focusId: string) {
+  const activeNodeId = selectedId || graph?.nodes.find((node) => node.nodeId && node.nodeId === focusId)?.id || ''
+  const relatedNodeIds = new Set<string>()
+  const relatedEdgeIds = new Set<string>()
+  if (!graph || !activeNodeId) {
+    return { activeNodeId, relatedNodeIds, relatedEdgeIds, hasSelection: false }
+  }
+  relatedNodeIds.add(activeNodeId)
+  graph.edges.forEach((edge) => {
+    if (edge.source !== activeNodeId && edge.target !== activeNodeId) return
+    relatedEdgeIds.add(edge.id)
+    relatedNodeIds.add(edge.source)
+    relatedNodeIds.add(edge.target)
+  })
+  return { activeNodeId, relatedNodeIds, relatedEdgeIds, hasSelection: true }
 }
 
 function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], controlFlows: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, selectedNodeId: string, scope: 'overview' | 'impact' | 'context', keyword: string) {
@@ -1697,14 +1728,18 @@ onBeforeUnmount(() => {
 .coverage-data-panel { flex:1; overflow:auto; background:#fff; }
 .code-analysis-panel { flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
-.mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; }
+.mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
+.mini-graph-edge.active path { stroke:#0f766e; stroke-width:3; opacity:1; }
+.mini-graph-edge.dimmed { opacity:.14; }
 .mini-graph-node { cursor:pointer; }
-.mini-graph-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.5; }
+.mini-graph-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.5; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
 .mini-graph-node.source rect { fill:#dbeafe; stroke:#2563eb; }
 .mini-graph-node.target rect { fill:#fef3c7; stroke:#d97706; }
 .mini-graph-node.branch rect { fill:#fed7aa; stroke:#f97316; }
 .mini-graph-node.exit rect { fill:#fecaca; stroke:#dc2626; }
 .mini-graph-node.active rect { stroke:#7c3aed; stroke-width:2.8; filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
+.mini-graph-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
+.mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
 .coverage-table { width:100%; border-collapse:collapse; font-size:13px; }

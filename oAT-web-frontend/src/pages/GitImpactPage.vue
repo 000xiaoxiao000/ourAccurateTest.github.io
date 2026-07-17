@@ -69,8 +69,14 @@
 
       <div class="summary-grid">
         <div class="summary-item"><strong>{{ result.report.changeSet.files.length }}</strong><span>变更文件</span></div>
-        <div class="summary-item"><strong>{{ result.report.directChanges.length }}</strong><span>直接结构变更</span></div>
-        <div class="summary-item"><strong>{{ transitiveCandidates.length }}</strong><span>传播候选</span></div>
+        <div class="summary-item">
+          <strong>{{ result.report.directChanges.length }}</strong>
+          <span class="summary-help" title="直接结构变更：本次 Git diff 中实际发生新增、修改或删除的代码结构元素，如类、方法、字段等。">直接结构变更</span>
+        </div>
+        <div class="summary-item">
+          <strong>{{ transitiveCandidates.length }}</strong>
+          <span class="summary-help" title="传播候选：由直接代码变更沿调用、依赖、继承或引用关系推导出的潜在受影响对象，需要进一步确认是否真的受影响。">传播候选</span>
+        </div>
         <div class="summary-item"><strong>{{ result.traceability.affectedCriteria.length }}</strong><span>验收标准</span></div>
         <div class="summary-item"><strong>{{ result.traceability.affectedTestcases.length }}</strong><span>回归用例</span></div>
       </div>
@@ -665,6 +671,7 @@ onBeforeUnmount(() => {
 .summary-item { display: grid; gap: 2px; min-height: 72px; align-content: center; padding: 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; }
 .summary-item strong { font-size: 24px; line-height: 1; color: var(--oat-text); }
 .summary-item span { color: var(--oat-text-muted); font-size: 12px; font-weight: 700; }
+.summary-help { width: fit-content; cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .commit-strip { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; padding: 12px; border: 1px solid rgba(15, 118, 110, .14); border-radius: 8px; background: #f0fdfa; }
 .commit-strip div { display: grid; gap: 4px; min-width: 0; }
 .commit-strip span { color: #0f766e; font-size: 12px; font-weight: 800; }
