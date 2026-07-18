@@ -2,7 +2,9 @@ package com.oAT.web.api.map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.oAT.web.common.UtilJson;
+import com.oAT.web.esDao.ClassCoverageIndexRepository;
 import com.oAT.web.esDao.StaticInfoRepository;
+import com.oAT.web.esDao.entity.ClassCoverageIndex;
 import com.oAT.web.esDao.entity.StaticSourceInfo;
 import com.oAT.web.esDao.entity.StaticSourceMethodInfo;
 import com.oAT.web.exceptions.FriendlyException;
@@ -79,17 +81,20 @@ public class TraceabilityMapService {
     private final AssetContentStore assetContentStore;
     private final CodeSymbolNormalizer normalizer;
     private final AppService appService;
+    private final ClassCoverageIndexRepository classCoverageIndexRepository;
 
     public TraceabilityMapService(VerificationRepository verificationRepository,
                                   StaticInfoRepository staticInfoRepository,
                                   AssetContentStore assetContentStore,
                                   CodeSymbolNormalizer normalizer,
-                                  AppService appService) {
+                                  AppService appService,
+                                  ClassCoverageIndexRepository classCoverageIndexRepository) {
         this.verificationRepository = verificationRepository;
         this.staticInfoRepository = staticInfoRepository;
         this.assetContentStore = assetContentStore;
         this.normalizer = normalizer;
         this.appService = appService;
+        this.classCoverageIndexRepository = classCoverageIndexRepository;
     }
 
     public TraceabilityMapResponse build(String projectId, String baselineId, String focusId, String direction,
@@ -613,8 +618,21 @@ public class TraceabilityMapService {
         Set<String> covered = new LinkedHashSet<>();
         List<CallPair> calls = new ArrayList<>();
         if (StringUtils.hasText(baseline.coverageAssetId())) {
-            verificationRepository.findAsset(projectId, baseline.coverageAssetId())
-                    .ifPresent(asset -> covered.addAll(matchCodeMentions(assetContent(asset), codeIndex)));
+            List<ClassCoverageIndex> coverageIndexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
+            if (coverageIndexes.isEmpty()) {
+                verificationRepository.findAsset(projectId, baseline.coverageAssetId())
+                        .ifPresent(asset -> covered.addAll(matchCodeMentions(assetContent(asset), codeIndex)));
+            } else {
+                for (ClassCoverageIndex index : coverageIndexes) {
+                    if (index.getCoveredLines() <= 0 && index.getCoveredBranchTargets() <= 0 && index.getCoveredMethods() <= 0) {
+                        continue;
+                    }
+                    String nodeId = codeIndex.resolve(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
+                    if (nodeId != null) {
+                        covered.add(nodeId);
+                    }
+                }
+            }
         }
         if (StringUtils.hasText(baseline.executionAssetId())) {
             Optional<AssetSnapshot> asset = verificationRepository.findAsset(projectId, baseline.executionAssetId());

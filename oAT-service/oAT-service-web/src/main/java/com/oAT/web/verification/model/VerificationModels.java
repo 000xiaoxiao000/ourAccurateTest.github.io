@@ -148,7 +148,14 @@ public final class VerificationModels {
             double runtimeCoverageRate,
             double closedLoopRate,
             int staticCodeCount,
-            int dynamicCodeCount) {
+            int dynamicCodeCount,
+            int coverageFileCount,
+            int coveredLines,
+            int totalLines,
+            double lineCoverageRate,
+            int coveredBranches,
+            int totalBranches,
+            double branchCoverageRate) {
     }
 
     public record WriteBackAction(

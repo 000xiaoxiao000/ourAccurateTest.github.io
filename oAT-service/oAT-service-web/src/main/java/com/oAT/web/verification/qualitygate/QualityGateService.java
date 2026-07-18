@@ -1,5 +1,7 @@
 package com.oAT.web.verification.qualitygate;
 
+import com.oAT.web.esDao.ClassCoverageIndexRepository;
+import com.oAT.web.esDao.entity.ClassCoverageIndex;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.VerificationModels.*;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,10 +24,13 @@ public class QualityGateService {
 
     private final VerificationRepository verificationRepository;
     private final JdbcTemplate jdbc;
+    private final ClassCoverageIndexRepository classCoverageIndexRepository;
 
-    public QualityGateService(VerificationRepository verificationRepository, JdbcTemplate jdbc) {
+    public QualityGateService(VerificationRepository verificationRepository, JdbcTemplate jdbc,
+                              ClassCoverageIndexRepository classCoverageIndexRepository) {
         this.verificationRepository = verificationRepository;
         this.jdbc = jdbc;
+        this.classCoverageIndexRepository = classCoverageIndexRepository;
     }
 
     // ── Policy CRUD ───────────────────────────────────────────────────────────
@@ -84,7 +89,7 @@ public class QualityGateService {
         List<AcceptanceCriterion> criteria = verificationRepository.findCriteria(baselineId);
         List<TraceLink> links = verificationRepository.findTraceLinks(baselineId);
         List<Finding> findings = verificationRepository.findFindings(baselineId);
-        Metrics metrics = buildMetrics(criteria, links, findings);
+        Metrics metrics = buildMetrics(baseline, criteria, links, findings);
 
         List<GateExemption> activeExemptions = loadActiveExemptions(projectId, baselineId);
         Set<String> exemptedRules = new HashSet<>();
@@ -187,8 +192,8 @@ public class QualityGateService {
                 """, this::exemption, projectId, baselineId);
     }
 
-    private Metrics buildMetrics(List<AcceptanceCriterion> criteria,
-                                  List<TraceLink> links, List<Finding> findings) {
+    private Metrics buildMetrics(Baseline baseline, List<AcceptanceCriterion> criteria,
+                                 List<TraceLink> links, List<Finding> findings) {
         Set<String> tested = new HashSet<>(), implemented = new HashSet<>(),
                 executed = new HashSet<>(), runtimeCovered = new HashSet<>();
         for (TraceLink l : links) {
@@ -203,11 +208,31 @@ public class QualityGateService {
         int total = criteria.size();
         long open = findings.stream().filter(f -> f.reviewStatus() == ReviewStatus.PENDING
                 || f.reviewStatus() == ReviewStatus.CONFIRMED).count();
+        CoverageMetrics coverageMetrics = coverageMetrics(baseline);
         return new Metrics(total, tested.size(), implemented.size(), executed.size(),
                 runtimeCovered.size(), closed.size(), (int) open,
                 rate(tested.size(), total), rate(implemented.size(), total),
                 rate(executed.size(), total), rate(runtimeCovered.size(), total),
-                rate(closed.size(), total), 0, 0);
+                rate(closed.size(), total), 0, coverageMetrics.fileCount(),
+                coverageMetrics.fileCount(), coverageMetrics.coveredLines(), coverageMetrics.totalLines(),
+                coverageMetrics.lineRate(), coverageMetrics.coveredBranches(), coverageMetrics.totalBranches(),
+                coverageMetrics.branchRate());
+    }
+
+    private CoverageMetrics coverageMetrics(Baseline baseline) {
+        if (baseline == null || !StringUtils.hasText(baseline.coverageAssetId())) {
+            return CoverageMetrics.empty();
+        }
+        List<ClassCoverageIndex> indexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
+        if (indexes.isEmpty()) {
+            return CoverageMetrics.empty();
+        }
+        int coveredLines = indexes.stream().mapToInt(ClassCoverageIndex::getCoveredLines).sum();
+        int totalLines = indexes.stream().mapToInt(ClassCoverageIndex::getTotalLines).sum();
+        int coveredBranches = indexes.stream().mapToInt(ClassCoverageIndex::getCoveredBranchTargets).sum();
+        int totalBranches = indexes.stream().mapToInt(ClassCoverageIndex::getTotalBranchTargets).sum();
+        return new CoverageMetrics(indexes.size(), coveredLines, totalLines, rate(coveredLines, totalLines),
+                coveredBranches, totalBranches, rate(coveredBranches, totalBranches));
     }
 
     private void saveResult(QualityGateResult r) {
@@ -254,4 +279,11 @@ public class QualityGateService {
     private double clamp(double v, double min, double max) { return Math.max(min, Math.min(max, v)); }
     private Timestamp ts(LocalDateTime v) { return v == null ? null : Timestamp.valueOf(v); }
     private LocalDateTime time(Timestamp v) { return v == null ? null : v.toLocalDateTime(); }
+
+    private record CoverageMetrics(int fileCount, int coveredLines, int totalLines, double lineRate,
+                                   int coveredBranches, int totalBranches, double branchRate) {
+        static CoverageMetrics empty() {
+            return new CoverageMetrics(0, 0, 0, 0, 0, 0, 0);
+        }
+    }
 }

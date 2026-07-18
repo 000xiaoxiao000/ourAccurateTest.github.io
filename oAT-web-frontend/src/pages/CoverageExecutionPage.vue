@@ -45,6 +45,20 @@
           <small>{{ metrics.coveredByRuntimeCriteria }} / {{ metrics.totalCriteria }} 条 AC 有运行证据</small>
         </article>
 
+        <article v-if="metrics.coverageFileCount" class="metric-card">
+          <span class="metric-label" title="覆盖率报告中已解析源码文件的行覆盖率">代码行覆盖</span>
+          <strong class="metric-value" :class="rateClass(metrics.lineCoverageRate || 0)">{{ pct(metrics.lineCoverageRate || 0) }}</strong>
+          <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.lineCoverageRate || 0), '--color': rateColor(metrics.lineCoverageRate || 0) }"></div></div>
+          <small>{{ metrics.coveredLines || 0 }} / {{ metrics.totalLines || 0 }} 行 · {{ metrics.coverageFileCount }} 个文件</small>
+        </article>
+
+        <article v-if="metrics.coverageFileCount && metrics.totalBranches" class="metric-card">
+          <span class="metric-label" title="覆盖率报告中已解析分支目标的覆盖率">代码分支覆盖</span>
+          <strong class="metric-value" :class="rateClass(metrics.branchCoverageRate || 0)">{{ pct(metrics.branchCoverageRate || 0) }}</strong>
+          <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.branchCoverageRate || 0), '--color': rateColor(metrics.branchCoverageRate || 0) }"></div></div>
+          <small>{{ metrics.coveredBranches || 0 }} / {{ metrics.totalBranches || 0 }} 个分支目标</small>
+        </article>
+
         <article class="metric-card highlight">
           <span class="metric-label" title="同时有用例和代码实现证据的验收标准比例">闭环率</span>
           <strong class="metric-value" :class="rateClass(metrics.closedLoopRate)">{{ pct(metrics.closedLoopRate) }}</strong>

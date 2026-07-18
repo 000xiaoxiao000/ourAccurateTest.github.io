@@ -339,6 +339,10 @@
             <span class="with-help" :data-help="helpText.runtimeCoverage" tabindex="0">运行覆盖</span>
             <strong>{{ percent(detail.metrics.runtimeCoverageRate) }}</strong>
           </article>
+          <article v-if="detail.metrics.coverageFileCount">
+            <span class="with-help" :data-help="helpText.lineCoverage" tabindex="0">行覆盖</span>
+            <strong>{{ percent(detail.metrics.lineCoverageRate || 0) }}</strong>
+          </article>
           <article>
             <span class="with-help" :data-help="helpText.openFindings" tabindex="0">开放问题</span>
             <strong>{{ detail.metrics.openFindings }}</strong>
@@ -771,11 +775,12 @@ const helpText = {
   testcaseCount: 'AI 从测试用例资料中抽取并落库的测试用例数量。',
   defectCount: '资料库中已导入的缺陷/Bug 资料数量。缺陷资料会进入 AI 分析依据池。',
   staticCodeCount: '当前基线导入的静态源码总量。Git 导入会统计仓库包中识别到的全部源码文件，不等于 AI 摘要采样数或追溯命中数。',
-  dynamicCodeCount: '当前基线导入的动态代码依据数量，来自执行报告和覆盖率报告。',
+  dynamicCodeCount: '当前基线导入的动态代码依据数量。覆盖率报告已解析时按覆盖率文件数统计，否则按原始报告内容估算。',
   testcaseCoverage: '有多少验收标准找到了对应测试用例。低于 100% 说明测试用例需要补充。',
   implementationEvidence: '有多少验收标准在源码中找到了对应实现依据。找不到不一定代表没实现，但需要开发确认或补充关联。',
   executionEvidence: '有多少验收标准有测试执行记录支撑，例如测试报告、CI 结果。',
   runtimeCoverage: '有多少验收标准有覆盖率依据支撑，例如 JaCoCo、Istanbul 或流水线覆盖率。',
+  lineCoverage: '覆盖率报告解析后的真实代码行覆盖率，来自 JaCoCo、Istanbul、Go cover、coverage.py、LCOV 或 gcov。',
   openFindings: '仍处于待确认或已确认状态的问题数。驳回、豁免和已回写的问题不计入开放问题。',
   conclusionScope: '结论口径用于防止误判。只有静态依据时只能说“静态一致”，不能说线上一定满足需求。',
 }

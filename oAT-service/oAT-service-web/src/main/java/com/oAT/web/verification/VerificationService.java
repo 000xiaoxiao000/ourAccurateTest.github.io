@@ -1,6 +1,9 @@
 package com.oAT.web.verification;
 
+import com.oAT.web.coverage.universal.CoverageReportService;
+import com.oAT.web.esDao.ClassCoverageIndexRepository;
 import com.oAT.web.esDao.StaticInfoRepository;
+import com.oAT.web.esDao.entity.ClassCoverageIndex;
 import com.oAT.web.esDao.entity.StaticSourceInfo;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.entity.AppVo;
@@ -39,12 +42,16 @@ public class VerificationService {
     private final AssetContentStore assetContentStore;
     private final Executor verificationAiExecutor;
     private final AppService appService;
+    private final CoverageReportService coverageReportService;
+    private final ClassCoverageIndexRepository classCoverageIndexRepository;
 
     public VerificationService(VerificationRepository repository, StaticInfoRepository staticInfoRepository,
                                VerificationAiOrchestrator aiOrchestrator, VerificationAiWriteBackComposer writeBackComposer,
                                AssetContentStore assetContentStore,
                                @Qualifier("verificationAiExecutor") Executor verificationAiExecutor,
-                               AppService appService) {
+                               AppService appService,
+                               CoverageReportService coverageReportService,
+                               ClassCoverageIndexRepository classCoverageIndexRepository) {
         this.repository = repository;
         this.staticInfoRepository = staticInfoRepository;
         this.aiOrchestrator = aiOrchestrator;
@@ -52,6 +59,8 @@ public class VerificationService {
         this.assetContentStore = assetContentStore;
         this.verificationAiExecutor = verificationAiExecutor;
         this.appService = appService;
+        this.coverageReportService = coverageReportService;
+        this.classCoverageIndexRepository = classCoverageIndexRepository;
     }
 
     public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
@@ -72,6 +81,7 @@ public class VerificationService {
                 sourceType == SourceType.API || sourceType == SourceType.AGENT ? Freshness.LIVE : Freshness.MANUAL,
                 userId, now);
         repository.saveAsset(asset);
+        indexCoverageAssetIfPossible(asset, content, appIdFrom(asset));
         return asset;
     }
 
@@ -95,6 +105,7 @@ public class VerificationService {
                 stored.storageType(), stored.storageKey(), stored.contentSize(), stored.contentPreview(),
                 existing.metadata(), existing.freshness(), userId, LocalDateTime.now());
         Assert.isTrue(repository.updateAsset(updated), "找不到指定资料");
+        indexCoverageAssetIfPossible(updated, content, appIdFrom(updated));
         return updated;
     }
 
@@ -102,6 +113,9 @@ public class VerificationService {
         AssetSnapshot asset = requiredAsset(projectId, assetId, null);
         Assert.isTrue(!repository.isAssetReferenced(projectId, assetId), "该资料已被分析基线引用，不能直接删除");
         Assert.isTrue(repository.deleteAsset(projectId, assetId), "找不到指定资料");
+        if (asset.assetType() == AssetType.COVERAGE) {
+            classCoverageIndexRepository.deleteByReportId(asset.id());
+        }
         assetContentStore.delete(asset.storageKey());
     }
 
@@ -122,6 +136,7 @@ public class VerificationService {
                 command.sourceBranch(), command.sourceCommit(), VerificationModels.ANALYZER_VERSION,
                 BaselineStatus.CREATED, freshness, userId, now, now);
         repository.saveBaseline(baseline);
+        indexCoverageForBaseline(projectId, baseline);
         return baseline;
     }
 
@@ -149,6 +164,7 @@ public class VerificationService {
                 command.sourceCommit(), existing.analyzerVersion(), BaselineStatus.CREATED, freshness,
                 existing.createdBy(), existing.createTime(), LocalDateTime.now());
         Assert.isTrue(repository.updateBaseline(updated), "找不到指定分析基线");
+        indexCoverageForBaseline(projectId, updated);
         repository.deleteAnalysis(baselineId);
         return updated;
     }
@@ -381,6 +397,38 @@ public class VerificationService {
         return SourceAssetFilter.filterContent(loadAssetContent(asset), SourceAssetFilter.fromApp(sourceApp));
     }
 
+    private void indexCoverageForBaseline(String projectId, Baseline baseline) {
+        if (baseline == null || !StringUtils.hasText(baseline.coverageAssetId()) || !StringUtils.hasText(baseline.sourceAppId())) {
+            return;
+        }
+        AssetSnapshot coverageAsset = requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE);
+        indexCoverageAsset(coverageAsset, loadAssetContent(coverageAsset), baseline.sourceAppId());
+    }
+
+    private void indexCoverageAssetIfPossible(AssetSnapshot asset, String content, String appId) {
+        if (asset == null || asset.assetType() != AssetType.COVERAGE || !StringUtils.hasText(appId)) {
+            return;
+        }
+        indexCoverageAsset(asset, content, appId);
+    }
+
+    private void indexCoverageAsset(AssetSnapshot asset, String content, String appId) {
+        Assert.hasText(appId, "覆盖率报告必须绑定应用后才能解析");
+        AppVo app = appService.getApp(appId);
+        byte[] payload = value(content).getBytes(StandardCharsets.UTF_8);
+        List<ClassCoverageIndex> indexes = coverageReportService.parse(app, payload).stream()
+                .map(file -> file.toClassCoverageIndex(appId))
+                .toList();
+        classCoverageIndexRepository.replaceReport(asset.id(), indexes);
+    }
+
+    private String appIdFrom(AssetSnapshot asset) {
+        if (asset == null) {
+            return null;
+        }
+        return metadataText(asset.metadata(), "appId");
+    }
+
     private AssetSnapshot withoutContent(AssetSnapshot asset) {
         return new AssetSnapshot(asset.id(), asset.projectId(), asset.assetType(), asset.sourceType(),
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
@@ -415,10 +463,29 @@ public class VerificationService {
         long open = findings.stream().filter(v -> v.reviewStatus() == ReviewStatus.PENDING || v.reviewStatus() == ReviewStatus.CONFIRMED).count();
         int staticCodeCount = staticCodeCount(baseline, projectId);
         int dynamicCodeCount = dynamicCodeCount(baseline, projectId);
+        CoverageMetrics coverageMetrics = coverageMetrics(baseline);
         return new Metrics(total, tested.size(), implemented.size(), executed.size(), runtimeCovered.size(),
                 closed.size(), (int) open, rate(tested.size(), total), rate(implemented.size(), total),
                 rate(executed.size(), total), rate(runtimeCovered.size(), total), rate(closed.size(), total),
-                staticCodeCount, dynamicCodeCount);
+                staticCodeCount, dynamicCodeCount, coverageMetrics.fileCount(), coverageMetrics.coveredLines(),
+                coverageMetrics.totalLines(), coverageMetrics.lineRate(), coverageMetrics.coveredBranches(),
+                coverageMetrics.totalBranches(), coverageMetrics.branchRate());
+    }
+
+    private CoverageMetrics coverageMetrics(Baseline baseline) {
+        if (baseline == null || !StringUtils.hasText(baseline.coverageAssetId())) {
+            return CoverageMetrics.empty();
+        }
+        List<ClassCoverageIndex> indexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
+        if (indexes.isEmpty()) {
+            return CoverageMetrics.empty();
+        }
+        int coveredLines = indexes.stream().mapToInt(ClassCoverageIndex::getCoveredLines).sum();
+        int totalLines = indexes.stream().mapToInt(ClassCoverageIndex::getTotalLines).sum();
+        int coveredBranches = indexes.stream().mapToInt(ClassCoverageIndex::getCoveredBranchTargets).sum();
+        int totalBranches = indexes.stream().mapToInt(ClassCoverageIndex::getTotalBranchTargets).sum();
+        return new CoverageMetrics(indexes.size(), coveredLines, totalLines, rate(coveredLines, totalLines),
+                coveredBranches, totalBranches, rate(coveredBranches, totalBranches));
     }
 
     private int staticCodeCount(Baseline baseline, String projectId) {
@@ -475,6 +542,11 @@ public class VerificationService {
             count += Math.max(1, countNonBlankDataLines(content));
         }
         if (StringUtils.hasText(baseline.coverageAssetId())) {
+            List<ClassCoverageIndex> coverageIndexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
+            if (!coverageIndexes.isEmpty()) {
+                count += coverageIndexes.size();
+                return count;
+            }
             String content = loadAssetContent(requiredAsset(projectId, baseline.coverageAssetId(), AssetType.COVERAGE));
             int coverageFiles = countMarkers(content, "// COVERAGE_FILE:");
             count += coverageFiles > 0 ? coverageFiles : Math.max(1, countNonBlankDataLines(content));
@@ -541,6 +613,13 @@ public class VerificationService {
     private double rate(int value, int total) { return total == 0 ? 0 : Math.round((double) value / total * 10000) / 10000.0; }
     private String value(String value) { return value == null ? "" : value; }
     private String textOrExisting(String value, String existing) { return StringUtils.hasText(value) ? value.trim() : existing; }
+
+    private record CoverageMetrics(int fileCount, int coveredLines, int totalLines, double lineRate,
+                                   int coveredBranches, int totalBranches, double branchRate) {
+        static CoverageMetrics empty() {
+            return new CoverageMetrics(0, 0, 0, 0, 0, 0, 0);
+        }
+    }
 
     public record CreateBaseline(String name, String requirementAssetId, String testcaseAssetId, String sourceAssetId,
                                  String executionAssetId, String coverageAssetId, String sourceAppId,

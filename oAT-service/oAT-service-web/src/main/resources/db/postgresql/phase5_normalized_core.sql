@@ -179,3 +179,32 @@ CREATE TABLE IF NOT EXISTS oat_static_source_class (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_oat_static_source_class_app_class ON oat_static_source_class (app_id, class_name);
 CREATE INDEX IF NOT EXISTS idx_oat_static_source_class_app ON oat_static_source_class (app_id);
 CREATE INDEX IF NOT EXISTS idx_oat_static_source_class_class_id ON oat_static_source_class (class_id);
+
+CREATE TABLE IF NOT EXISTS oat_class_coverage_index (
+  id VARCHAR(64) PRIMARY KEY,
+  report_id VARCHAR(64) NOT NULL,
+  app_id VARCHAR(64) NOT NULL,
+  class_name VARCHAR(512),
+  source_type VARCHAR(64),
+  language VARCHAR(64),
+  display_name VARCHAR(512),
+  source_path VARCHAR(1024) NOT NULL,
+  total_methods INT DEFAULT 0,
+  covered_methods INT DEFAULT 0,
+  total_branches INT DEFAULT 0,
+  covered_branches INT DEFAULT 0,
+  total_branch_targets INT DEFAULT 0,
+  covered_branch_targets INT DEFAULT 0,
+  total_lines INT DEFAULT 0,
+  covered_lines INT DEFAULT 0,
+  total_complexity INT DEFAULT 0,
+  line_rate DECIMAL(8,4),
+  branch_rate DECIMAL(8,4),
+  method_rate DECIMAL(8,4),
+  payload_json JSONB NOT NULL,
+  create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_oat_class_coverage_report_path ON oat_class_coverage_index (report_id, source_path);
+CREATE INDEX IF NOT EXISTS idx_oat_class_coverage_app ON oat_class_coverage_index (app_id);
+CREATE INDEX IF NOT EXISTS idx_oat_class_coverage_report ON oat_class_coverage_index (report_id);

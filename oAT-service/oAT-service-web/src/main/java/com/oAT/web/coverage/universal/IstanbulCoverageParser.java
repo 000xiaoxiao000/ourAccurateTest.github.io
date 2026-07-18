@@ -2,6 +2,7 @@ package com.oAT.web.coverage.universal;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.oAT.web.common.UtilJson;
+import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@Component
 public class IstanbulCoverageParser implements CoverageParser {
     @Override
     public SourceType sourceType() {

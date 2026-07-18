@@ -124,6 +124,13 @@ export interface VerificationMetrics {
   closedLoopRate: number
   staticCodeCount?: number
   dynamicCodeCount?: number
+  coverageFileCount?: number
+  coveredLines?: number
+  totalLines?: number
+  lineCoverageRate?: number
+  coveredBranches?: number
+  totalBranches?: number
+  branchCoverageRate?: number
 }
 
 export interface BaselineDetail {

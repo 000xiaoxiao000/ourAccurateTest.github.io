@@ -131,7 +131,8 @@ public class VerificationApiControl {
                                                      @RequestParam(required = false) String content,
                                                      @RequestParam(required = false) String externalId,
                                                      @RequestParam(required = false) String externalUrl,
-                                                     @RequestParam(required = false) String sourceVersion) throws IOException {
+                                                     @RequestParam(required = false) String sourceVersion,
+                                                     @RequestParam(required = false) String appId) throws IOException {
         ensureProjectAccess(projectId, user);
         String fileName = file == null ? null : file.getOriginalFilename();
         String importedContent = StringUtils.hasText(content) ? content : readContent(file, assetType);
@@ -140,6 +141,7 @@ public class VerificationApiControl {
         metadata.put("automaticSync", sourceType == SourceType.API || sourceType == SourceType.AGENT);
         metadata.put("inputMode", file == null ? "PASTE" : "FILE");
         if (file != null) metadata.put("size", file.getSize());
+        if (StringUtils.hasText(appId)) metadata.put("appId", appId.trim());
         AssetSnapshot result = verificationService.importAsset(projectId, user.getId(), assetType,
                 file == null && sourceType == SourceType.FILE ? SourceType.PASTE : sourceType, fileName,
                 importedContent, externalId, externalUrl, sourceVersion, metadata);

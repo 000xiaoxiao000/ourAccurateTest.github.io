@@ -32,19 +32,19 @@ public class GitImpactAnalysisService {
     private static final int LLM_REVIEW_TIMEOUT_SECONDS = 8;
     private static final int MAX_STRUCTURAL_SOURCE_CHARS = 500_000;
     private final GitService gitService;
-    private final LanguageAnalyzer javaAnalyzer;
+    private final List<LanguageAnalyzer> languageAnalyzers;
     private final StructuralDiffEngine structuralDiffEngine;
     private final ImpactPropagationEngine propagationEngine;
     private final LLMService llmService;
     private final Executor verificationAiExecutor;
     private final ConcurrentHashMap<String, LlmReviewProgress> llmReviews = new ConcurrentHashMap<>();
 
-    public GitImpactAnalysisService(GitService gitService, JavaTreeSitterAnalyzer javaAnalyzer,
+    public GitImpactAnalysisService(GitService gitService, List<LanguageAnalyzer> languageAnalyzers,
                                     StructuralDiffEngine structuralDiffEngine, ImpactPropagationEngine propagationEngine,
                                     LLMService llmService,
                                     @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.gitService = gitService;
-        this.javaAnalyzer = javaAnalyzer;
+        this.languageAnalyzers = List.copyOf(languageAnalyzers);
         this.structuralDiffEngine = structuralDiffEngine;
         this.propagationEngine = propagationEngine;
         this.llmService = llmService;
@@ -75,15 +75,16 @@ public class GitImpactAnalysisService {
             int percent = 12 + (int) Math.round(index * 58d / totalFiles);
             reporter.accept(new AnalysisProgress("ANALYZING_FILES", Math.min(70, percent), "正在解析 " + path + " (" + index + "/" + files.size() + ")"));
             fileChanges.add(new FileChange(file.getOldPath(), file.getNewPath(), FileChangeType.valueOf(file.getChangeType()), file.getRenameScore(), file.getOldBlobId(), file.getNewBlobId(), ranges(file.getOldRanges()), ranges(file.getNewRanges()), false, language(path)));
-            if (!javaAnalyzer.supports(path)) continue;
+            LanguageAnalyzer analyzer = analyzerFor(path);
+            if (analyzer == null) continue;
             String oldSource = oldSources.get(file.getOldPath());
             String newSource = newSources.get(file.getNewPath());
             if (tooLarge(oldSource) || tooLarge(newSource)) {
                 logger.info("Skip structural analysis for large changed file {}", path);
                 continue;
             }
-            List<SymbolSnapshot> oldSymbols = javaAnalyzer.analyze(path, oldSource);
-            List<SymbolSnapshot> newSymbols = javaAnalyzer.analyze(path, newSource);
+            List<SymbolSnapshot> oldSymbols = analyzer.analyze(path, oldSource);
+            List<SymbolSnapshot> newSymbols = analyzer.analyze(path, newSource);
             changes.addAll(structuralDiffEngine.diff(oldSymbols, newSymbols));
             edges.addAll(callEdges(newSymbols));
         }
@@ -192,7 +193,20 @@ public class GitImpactAnalysisService {
     }
 
     private List<LineRange> ranges(List<GitDiffVo.LineRange> ranges) { return ranges == null ? List.of() : ranges.stream().map(r -> new LineRange(r.getStartLine(), r.getEndLine())).toList(); }
-    private String language(String path) { return path != null && path.endsWith(".java") ? "java" : "unknown"; }
+    private String language(String path) {
+        if (path == null) return "unknown";
+        String lower = path.toLowerCase();
+        if (lower.endsWith(".java")) return "java";
+        if (lower.matches(".*\\.(js|jsx|ts|tsx|vue)$")) return "frontend";
+        if (lower.endsWith(".go")) return "go";
+        if (lower.endsWith(".py")) return "python";
+        if (lower.matches(".*\\.(c|cc|cpp|cxx|h|hpp)$")) return "cpp";
+        return "unknown";
+    }
+
+    private LanguageAnalyzer analyzerFor(String path) {
+        return languageAnalyzers.stream().filter(analyzer -> analyzer.supports(path)).findFirst().orElse(null);
+    }
 
     private Collection<String> readablePaths(List<GitDiffVo> files, boolean oldSide) {
         return files.stream()

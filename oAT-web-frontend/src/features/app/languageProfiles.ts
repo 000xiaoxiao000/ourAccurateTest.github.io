@@ -32,8 +32,9 @@ export const languageProfiles: Record<string, LanguageProfile> = {
     language: 'JAVA',
     label: 'Java',
     collectorType: 'RESIDENT',
-    description: '用于识别 Java 源码目录、包路径，并为 AI 验证提供源码证据。',
+    description: '用于识别 Java 源码目录、包路径、JaCoCo XML 覆盖率，并为 AI 验证提供源码证据。',
     fields: [
+      { key: 'coverageFormat', label: '覆盖率格式', options: [{ value: 'jacoco-xml', label: 'JaCoCo XML' }] },
       { key: 'sourceRoot', label: '源码根目录', placeholder: 'src/main/java', wide: true },
       { key: 'packageRoot', label: '包根路径', placeholder: 'com.example' },
     ],
@@ -42,8 +43,9 @@ export const languageProfiles: Record<string, LanguageProfile> = {
     language: 'FRONTEND',
     label: '前端 JS/TS',
     collectorType: 'BATCH',
-    description: '用于识别前端源码目录和 SourceMap 位置，辅助定位源码证据。',
+    description: '用于识别前端源码目录、SourceMap 位置和 Istanbul JSON 覆盖率，辅助定位源码证据。',
     fields: [
+      { key: 'coverageFormat', label: '覆盖率格式', options: [{ value: 'istanbul-json', label: 'Istanbul JSON' }] },
       { key: 'sourceRoot', label: '源码根目录', placeholder: 'src', wide: true },
       { key: 'sourceMapRoot', label: 'SourceMap 根目录', placeholder: 'dist/assets', wide: true },
     ],
@@ -75,7 +77,7 @@ function batchProfile(language: string, label: string, fields: LanguageConfigFie
     language,
     label,
     collectorType: 'BATCH',
-    description: `用于识别 ${label} 源码结构和覆盖率/分析报告格式，辅助 AI 验证匹配源码证据。`,
+    description: `用于识别 ${label} 源码结构，支持配置的覆盖率报告格式，并为 AI 验证匹配源码证据。`,
     fields: [
       ...fields,
       { key: 'pathMapping', label: '源码路径映射', placeholder: '/workspace=/repo', wide: true },
