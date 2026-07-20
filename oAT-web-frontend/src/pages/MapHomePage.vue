@@ -1124,7 +1124,7 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], co
       const start = { x: source.x + (forward ? source.width : 0), y: source.y + source.height / 2 }
       const end = { x: target.x + (forward ? 0 : target.width), y: target.y + target.height / 2 }
       const midX = (start.x + end.x) / 2
-      const label = callEvidenceLabel(edge)
+      const label = callEvidenceLabel(edge, nodeMap.get(edge.target))
       return {
         id: edge.id,
         source: edge.source,
@@ -1472,12 +1472,20 @@ function edgeEvidenceText(edge: TraceabilityEdge) {
   return [base, edge.generationMethod, evidence?.traceId, evidence?.caseName, evidence?.reason].filter(Boolean).join(' · ')
 }
 
-function callEvidenceLabel(edge: TraceabilityEdge) {
+function callEvidenceLabel(edge: TraceabilityEdge, targetNode?: TraceabilityNode) {
   if (edge.generationMethod === 'CODE_STRUCTURE') return '包含方法'
   if (edge.generationMethod === 'SOURCE_EXPRESSION') return '源码候选'
   if (edge.callEvidence === 'DYNAMIC_CONFIRMED') return '动态确认'
   if (edge.callEvidence === 'STATIC_BRIDGED') return '静态补全'
-  return '静态调用'
+  return edgeCallKind(edge, targetNode) === 'STATIC' ? '静态调用' : '普通调用'
+}
+
+function edgeCallKind(edge: TraceabilityEdge, targetNode?: TraceabilityNode) {
+  const metadataKind = edge.evidence
+    ?.map((item) => String(item.metadata?.callKind || '').toUpperCase())
+    .find(Boolean)
+  if (metadataKind === 'STATIC' || metadataKind === 'NORMAL') return metadataKind
+  return targetNode?.metadata?.staticMethod === true ? 'STATIC' : 'NORMAL'
 }
 
 function callNodeTone(node: TraceabilityNode) {

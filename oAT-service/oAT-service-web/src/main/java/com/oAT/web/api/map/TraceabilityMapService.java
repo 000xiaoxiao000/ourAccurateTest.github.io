@@ -383,7 +383,7 @@ public class TraceabilityMapService {
                 continue;
             }
             String calleeKey = (value(invocation.getOwner()).replace('/', '.') + "#" + invocation.getName() + value(invocation.descriptorValue()));
-            index.pendingStaticCalls.add(new PendingCall(callerId, calleeKey, "STATIC_INVOCATION_INDEX"));
+            index.pendingStaticCalls.add(new PendingCall(callerId, calleeKey, "STATIC_INVOCATION_INDEX", invocation.getOpcode()));
         }
     }
 
@@ -724,7 +724,8 @@ public class TraceabilityMapService {
                     VerificationModels.EvidenceLevel.E2, inferredFromSource ? "SOURCE_CALL_ANALYSIS" : evidence.name(), VerificationModels.ReviewStatus.PENDING,
                     List.of(new EdgeEvidence(null, null, null, null, null,
                             inferredFromSource ? "基于源码方法体静态解析生成的候选调用关系"
-                                    : evidence == CallEvidence.STATIC_BRIDGED ? "两端均有覆盖证据，调用方向来自静态索引" : "静态方法调用索引", Map.of()))));
+                                    : evidence == CallEvidence.STATIC_BRIDGED ? "两端均有覆盖证据，调用方向来自静态索引" : "静态方法调用索引",
+                            callMetadata(pair)))));
         }
     }
 
@@ -1078,8 +1079,21 @@ public class TraceabilityMapService {
     }
 
     private record SourceUnit(String path, String content) {}
-    private record PendingCall(String callerId, String calleeKey, String generationMethod) {}
-    private record CallPair(String source, String target, String assetId, String traceId, String caseName) {}
+    private Map<String, Object> callMetadata(CallPair pair) {
+        Integer opcode = pair.opcode();
+        if (opcode == null) {
+            return Map.of();
+        }
+        String callKind = opcode == 184 ? "STATIC" : "NORMAL";
+        return Map.of("opcode", opcode, "callKind", callKind);
+    }
+
+    private record PendingCall(String callerId, String calleeKey, String generationMethod, Integer opcode) {}
+    private record CallPair(String source, String target, String assetId, String traceId, String caseName, Integer opcode) {
+        CallPair(String source, String target, String assetId, String traceId, String caseName) {
+            this(source, target, assetId, traceId, caseName, null);
+        }
+    }
     private record MethodSpan(String methodId, String className, String methodName, String body) {}
     private record NormalizedRelation(String source, String target, Relation relation) {}
     private record DynamicEvidence(Set<String> coveredNodeIds, List<CallPair> callPairs) {
@@ -1139,7 +1153,7 @@ public class TraceabilityMapService {
             for (PendingCall pending : pendingStaticCalls) {
                 String callee = resolve(pending.calleeKey());
                 if (callee != null) {
-                    staticCallPairs.add(new CallPair(pending.callerId(), callee, pending.generationMethod(), null, null));
+                    staticCallPairs.add(new CallPair(pending.callerId(), callee, pending.generationMethod(), null, null, pending.opcode()));
                 }
             }
         }
@@ -1166,7 +1180,7 @@ public class TraceabilityMapService {
                     for (MethodSpan callee : entry.getValue()) {
                         String key = caller.methodId() + "->" + callee.methodId();
                         if (existing.add(key)) {
-                            pendingStaticCalls.add(new PendingCall(caller.methodId(), callee.methodId(), "SOURCE_CALL_ANALYSIS"));
+                            pendingStaticCalls.add(new PendingCall(caller.methodId(), callee.methodId(), "SOURCE_CALL_ANALYSIS", null));
                         }
                     }
                 }
