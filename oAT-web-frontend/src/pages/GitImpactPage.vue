@@ -293,17 +293,6 @@
               />
             </div>
           </div>
-          <details v-if="result.traceability.affectedSymbols.length" class="trace-detail-panel">
-            <summary>查看命中代码符号</summary>
-            <div class="trace-detail-grid">
-              <section>
-                <h4>命中代码符号</h4>
-                <div class="detail-list compact">
-                  <code v-for="symbol in result.traceability.affectedSymbols" :key="symbol">{{ symbol }}</code>
-                </div>
-              </section>
-            </div>
-          </details>
         </section>
       </div>
     </section>
@@ -913,22 +902,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   padding-top: 2px;
 }
-.trace-detail-panel {
-  overflow: hidden;
-  border: 1px solid rgba(15, 23, 42, .08);
-  border-radius: 8px;
-  background: #fff;
-}
-.trace-detail-panel summary {
-  padding: 11px 12px;
-  color: #0f766e;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 900;
-}
-.trace-detail-panel[open] summary {
-  border-bottom: 1px solid rgba(15, 23, 42, .08);
-}
 .trace-item-detail {
   align-content: start;
 }
@@ -992,70 +965,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
   font-weight: 900;
 }
-.trace-detail-grid {
-  display: grid;
-  gap: 14px;
-  padding: 12px;
-}
-.trace-detail-grid section {
-  display: grid;
-  gap: 8px;
-  min-width: 0;
-}
-.trace-detail-grid h4 {
-  margin: 0;
-  color: var(--oat-text);
-  font-size: 13px;
-}
-.detail-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.detail-list code {
-  max-width: 100%;
-  overflow: hidden;
-  border-radius: 6px;
-  padding: 4px 7px;
-  background: #f1f5f9;
-  color: #334155;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.detail-card {
-  display: grid;
-  gap: 7px;
-  min-width: 0;
-  padding: 11px;
-  border: 1px solid rgba(15, 23, 42, .08);
-  border-radius: 8px;
-  background: #f8fafc;
-}
-.detail-card strong {
-  color: #0f766e;
-  overflow-wrap: anywhere;
-}
-.detail-card p,
-.detail-card dd {
-  margin: 0;
-  color: #475569;
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.detail-card dl {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  gap: 6px 10px;
-  margin: 0;
-}
-.detail-card dt {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 900;
-}
 .detail-meta {
   display: flex;
   flex-wrap: wrap;
@@ -1088,7 +997,6 @@ onBeforeUnmount(() => {
   .analyze-action-row { justify-content: stretch; }
   .analyze-button { width: 100%; }
   .file-row .meta-line { padding-left: 0; }
-  .detail-card dl,
   .trace-inline-detail dl { grid-template-columns: 1fr; }
   .candidate-top { display: grid; }
   .confidence { margin-left: 0; }
