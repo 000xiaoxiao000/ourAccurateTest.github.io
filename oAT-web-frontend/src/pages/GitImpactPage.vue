@@ -195,7 +195,7 @@
             <div class="meta-line">
               <span>{{ directionText(candidate.direction) }}</span>
               <span>{{ candidate.distance }} 跳</span>
-              <span>{{ candidate.reason || '规则传播' }}</span>
+              <span>{{ reasonText(candidate.reason) }}</span>
             </div>
             <div v-if="candidate.path?.symbols?.length" class="path-chain">
               <template v-for="(symbol, index) in candidate.path.symbols" :key="`${candidateKey(candidate)}-${index}`">
@@ -549,6 +549,13 @@ function rangeText(range?: { startLine: number; endLine: number }) {
   return range.startLine === range.endLine ? String(range.startLine) : `${range.startLine}-${range.endLine}`
 }
 
+function reasonText(value?: string) {
+  return ({
+    'Tree-sitter call-site candidate': '静态调用点候选',
+    'golden-call': '静态调用关系',
+  } as Record<string, string>)[value || ''] || value || '规则传播'
+}
+
 function snippetLines(change: GitImpactReport['directChanges'][number]) {
   const snippet = activeSymbol(change)?.snippet || ''
   const startLine = snippetStartLine(change)
@@ -752,7 +759,7 @@ onBeforeUnmount(() => {
 .file-row,
 .change-card,
 .candidate-card,
-.trace-card { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; }
+.trace-card { display: grid; gap: 8px; min-width: 0; overflow: hidden; padding: 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; }
 .result-block > .file-row,
 .result-block > .change-card,
 .result-block > .candidate-card,
@@ -785,11 +792,14 @@ onBeforeUnmount(() => {
 .meta-line span { overflow-wrap: anywhere; }
 .facet-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .facet-list span { border-radius: 6px; padding: 3px 7px; background: var(--oat-surface-soft); color: #334155; font-size: 12px; font-weight: 700; }
-.snippet-box { border-top: 1px solid rgba(15, 23, 42, .08); padding-top: 8px; }
+.snippet-box { min-width: 0; overflow: hidden; border-top: 1px solid rgba(15, 23, 42, .08); padding-top: 8px; }
 .snippet-box summary { color: #0f766e; cursor: pointer; font-size: 13px; font-weight: 800; }
 .snippet-code {
+  width: 100%;
+  max-width: 100%;
   max-height: 260px;
   overflow: auto;
+  box-sizing: border-box;
   margin: 8px 0 0;
   border-radius: 8px;
   padding: 10px 0;

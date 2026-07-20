@@ -171,9 +171,9 @@
               <button type="button" :class="{ active: callViewMode === 'coverage' }" @click="callViewMode = 'coverage'">覆盖率数据</button>
             </div>
             <div v-if="callViewMode === 'graph'" class="segmented-control compact-control">
-              <button type="button" :class="{ active: callGraphScope === 'overview' }" @click="callGraphScope = 'overview'">全局</button>
-              <button type="button" :class="{ active: callGraphScope === 'impact' }" :disabled="!map.focusId.value" @click="callGraphScope = 'impact'">影响范围</button>
-              <button type="button" :class="{ active: callGraphScope === 'context' }" :disabled="!map.focusId.value" @click="callGraphScope = 'context'">上下文</button>
+              <button type="button" :class="{ active: callGraphScope === 'overview' && callGraphGlobalEnabled }" @click="showGlobalCallGraph">全局</button>
+              <button type="button" :class="{ active: callGraphScope === 'impact' }" :disabled="!map.focusId.value" @click="showFocusedCallGraph('impact')">影响范围</button>
+              <button type="button" :class="{ active: callGraphScope === 'context' }" :disabled="!map.focusId.value" @click="showFocusedCallGraph('context')">上下文</button>
             </div>
             <button
               v-if="callViewMode === 'graph'"
@@ -262,6 +262,10 @@
               <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
             </g>
           </svg>
+        </div>
+        <div v-else-if="callViewMode === 'graph' && !callGraphReady" class="empty-card call-graph-start">
+          <strong>请选择代码节点或查看全局调用图</strong>
+          <span>左侧代码树选择类/方法后展示上下文，或点击上方“全局”查看完整候选调用关系。</span>
         </div>
         <div v-else-if="!callGraph.nodes.length" class="empty-card">暂无代码调用关系。请确认当前基线已绑定源码，且源码快照包含可解析的类、方法和调用信息。</div>
         <div v-else class="call-map-scroll large" :class="{ fullscreen: callGraphFullscreen }">
@@ -413,6 +417,7 @@ const selectedTraceId = ref('')
 const selectedCallGraphId = ref('')
 const selectedMiniGraphId = ref('')
 const miniGraphFocusHighlightDisabled = ref(false)
+const callGraphGlobalEnabled = ref(false)
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
 const slowLoading = ref(false)
@@ -478,7 +483,10 @@ const displayOpenClasses = computed(() => {
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value, selectedTraceId.value))
-const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
+const callGraphReady = computed(() => Boolean(map.focusId.value || codeKeyword.value || callGraphGlobalEnabled.value))
+const callGraph = computed(() => callGraphReady.value
+  ? buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value)
+  : emptyCallGraph())
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
 const visibleMiniGraph = computed(() => callViewMode.value === 'dependency' ? dependencyGraph.value : callViewMode.value === 'control' ? controlFlowGraph.value : null)
@@ -587,6 +595,7 @@ async function reloadBaseline() {
   map.focusId.value = ''
   selectedTraceId.value = ''
   selectedCallGraphId.value = ''
+  callGraphGlobalEnabled.value = false
   loadedCodeDataKey.value = ''
   loadingCodeDataKey.value = ''
   if (activeTab.value === 'calls') {
@@ -644,6 +653,7 @@ function clearTraceGraphSelection() {
 async function locateTraceCodeNode(id: string) {
   activeTab.value = 'calls'
   callViewMode.value = 'graph'
+  callGraphGlobalEnabled.value = false
   selectedCallGraphId.value = id
   map.select(id)
   await loadCodeData(id)
@@ -652,6 +662,7 @@ async function locateTraceCodeNode(id: string) {
 
 async function openTraceCodeContext(id: string) {
   callGraphScope.value = 'context'
+  callGraphGlobalEnabled.value = false
   await locateTraceCodeNode(id)
 }
 
@@ -661,6 +672,7 @@ function selectCallGraphNode(id: string) {
   selectedMiniGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = false
   map.select(nextId)
+  if (nextId) callGraphGlobalEnabled.value = false
   if (nextId) openAncestors(nextId, map.codeTree.value)
 }
 
@@ -688,12 +700,24 @@ async function selectCodeNode(id: string) {
   selectedCallGraphId.value = id
   selectedMiniGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = false
+  callGraphGlobalEnabled.value = false
   map.select(id)
   openAncestors(id, map.codeTree.value)
   if (selectedBaselineId.value) {
     await loadCodeData(id)
     openAncestors(id, map.codeTree.value)
   }
+}
+
+function showGlobalCallGraph() {
+  callGraphScope.value = 'overview'
+  callGraphGlobalEnabled.value = true
+  selectedCallGraphId.value = ''
+}
+
+function showFocusedCallGraph(scope: 'impact' | 'context') {
+  callGraphScope.value = scope
+  callGraphGlobalEnabled.value = false
 }
 
 function toggleDir(path: string) {
@@ -1189,6 +1213,19 @@ function buildCallGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], co
     relatedEdgeIds: callGraphRelatedEdgeIds(selectedNodeId, graphEdges),
     hasSelection: Boolean(selectedNodeId && positioned.has(selectedNodeId)),
     selectedNodeId,
+  }
+}
+
+function emptyCallGraph() {
+  return {
+    width: 860,
+    height: 360,
+    nodes: [] as SvgNode[],
+    edges: [] as SvgEdge[],
+    relatedNodeIds: new Set<string>(),
+    relatedEdgeIds: new Set<string>(),
+    hasSelection: false,
+    selectedNodeId: '',
   }
 }
 
@@ -1750,6 +1787,20 @@ onBeforeUnmount(() => {
 .map-legend { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; color:#64748b; font-size:11px; font-weight:800; }
 .map-legend span { display:flex; align-items:center; gap:5px; }
 .empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
+.call-graph-start {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  flex:1;
+  min-height:520px;
+  border-top:1px solid #eef2f5;
+  background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0);
+  background-size:22px 22px;
+}
+.call-graph-start strong { color:#172033; font-size:15px; }
+.call-graph-start span { max-width:420px; color:#64748b; line-height:1.6; }
 .asset-group { display:grid; gap:7px; padding:12px; min-height:0; overflow:auto; }
 .testcase-group { flex:1; border-top:1px solid #eef2f5; }
 .group-head { display:flex; justify-content:space-between; align-items:center; color:#334155; font-size:13px; font-weight:700; }
