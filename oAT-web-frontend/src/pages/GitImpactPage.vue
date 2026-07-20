@@ -235,10 +235,25 @@
             <div>
               <h4>受影响验收标准</h4>
               <div v-if="!filteredCriteria.length" class="empty-inline">暂无匹配的验收标准。</div>
-              <article v-for="criterion in paginatedCriteria" :key="criterion.id" class="trace-card">
-                <strong>{{ criterion.requirementKey }} / {{ criterion.acKey }}</strong>
-                <span>{{ criterion.title || criterion.content }}</span>
-              </article>
+              <details v-for="criterion in paginatedCriteria" :key="criterion.id" class="trace-card trace-item-detail">
+                <summary>
+                  <span>
+                    <strong>{{ criterion.requirementKey }} / {{ criterion.acKey }}</strong>
+                    <em>{{ criterion.title || criterion.content }}</em>
+                  </span>
+                  <b>详情</b>
+                </summary>
+                <div class="trace-inline-detail">
+                  <p>{{ criterion.content || criterion.title || '暂无内容' }}</p>
+                  <div class="detail-meta">
+                    <span v-if="criterion.priority">优先级 {{ criterion.priority }}</span>
+                    <span>{{ criterion.testable ? '可测试' : '不可测试' }}</span>
+                    <span v-if="criterion.ambiguity">存在歧义</span>
+                    <span>置信度 {{ percent(criterion.confidence) }}</span>
+                    <span v-if="criterion.sourceLocator">{{ criterion.sourceLocator }}</span>
+                  </div>
+                </div>
+              </details>
               <AppPagination
                 v-model:page="pages.criteria"
                 v-model:page-size="pageSizes.criteria"
@@ -250,10 +265,25 @@
             <div>
               <h4>建议回归用例</h4>
               <div v-if="!filteredTestcases.length" class="empty-inline">暂无匹配的测试用例。</div>
-              <article v-for="testcase in paginatedTestcases" :key="testcase.id" class="trace-card">
-                <strong>{{ testcase.externalKey }}</strong>
-                <span>{{ testcase.title }}</span>
-              </article>
+              <details v-for="testcase in paginatedTestcases" :key="testcase.id" class="trace-card trace-item-detail">
+                <summary>
+                  <span>
+                    <strong>{{ testcase.externalKey }}</strong>
+                    <em>{{ testcase.title }}</em>
+                  </span>
+                  <b>详情</b>
+                </summary>
+                <div class="trace-inline-detail">
+                  <dl>
+                    <template v-if="testcase.requirementRefs"><dt>关联需求</dt><dd>{{ testcase.requirementRefs }}</dd></template>
+                    <template v-if="testcase.preconditions"><dt>前置条件</dt><dd>{{ testcase.preconditions }}</dd></template>
+                    <template v-if="testcase.steps"><dt>执行步骤</dt><dd>{{ testcase.steps }}</dd></template>
+                    <template v-if="testcase.testData"><dt>测试数据</dt><dd>{{ testcase.testData }}</dd></template>
+                    <template v-if="testcase.expected"><dt>预期结果</dt><dd>{{ testcase.expected }}</dd></template>
+                    <template v-if="testcase.sourceLocator"><dt>来源定位</dt><dd>{{ testcase.sourceLocator }}</dd></template>
+                  </dl>
+                </div>
+              </details>
               <AppPagination
                 v-model:page="pages.testcases"
                 v-model:page-size="pageSizes.testcases"
@@ -263,43 +293,14 @@
               />
             </div>
           </div>
-          <details
-            v-if="result.traceability.affectedSymbols.length || result.traceability.affectedCriteria.length || result.traceability.affectedTestcases.length"
-            class="trace-detail-panel"
-          >
-            <summary>查看追溯详情</summary>
+          <details v-if="result.traceability.affectedSymbols.length" class="trace-detail-panel">
+            <summary>查看命中代码符号</summary>
             <div class="trace-detail-grid">
               <section>
                 <h4>命中代码符号</h4>
                 <div class="detail-list compact">
                   <code v-for="symbol in result.traceability.affectedSymbols" :key="symbol">{{ symbol }}</code>
                 </div>
-              </section>
-              <section>
-                <h4>验收标准详情</h4>
-                <article v-for="criterion in result.traceability.affectedCriteria" :key="criterion.id" class="detail-card">
-                  <strong>{{ criterion.requirementKey }} / {{ criterion.acKey }}</strong>
-                  <p>{{ criterion.content || criterion.title || '暂无内容' }}</p>
-                  <div class="detail-meta">
-                    <span v-if="criterion.priority">优先级 {{ criterion.priority }}</span>
-                    <span>{{ criterion.testable ? '可测试' : '不可测试' }}</span>
-                    <span v-if="criterion.ambiguity">存在歧义</span>
-                    <span>置信度 {{ percent(criterion.confidence) }}</span>
-                  </div>
-                </article>
-              </section>
-              <section>
-                <h4>回归用例详情</h4>
-                <article v-for="testcase in result.traceability.affectedTestcases" :key="testcase.id" class="detail-card">
-                  <strong>{{ testcase.externalKey }} · {{ testcase.title }}</strong>
-                  <dl>
-                    <template v-if="testcase.requirementRefs"><dt>关联需求</dt><dd>{{ testcase.requirementRefs }}</dd></template>
-                    <template v-if="testcase.preconditions"><dt>前置条件</dt><dd>{{ testcase.preconditions }}</dd></template>
-                    <template v-if="testcase.steps"><dt>执行步骤</dt><dd>{{ testcase.steps }}</dd></template>
-                    <template v-if="testcase.testData"><dt>测试数据</dt><dd>{{ testcase.testData }}</dd></template>
-                    <template v-if="testcase.expected"><dt>预期结果</dt><dd>{{ testcase.expected }}</dd></template>
-                  </dl>
-                </article>
               </section>
             </div>
           </details>
@@ -928,6 +929,69 @@ onBeforeUnmount(() => {
 .trace-detail-panel[open] summary {
   border-bottom: 1px solid rgba(15, 23, 42, .08);
 }
+.trace-item-detail {
+  align-content: start;
+}
+.trace-item-detail summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.trace-item-detail summary::-webkit-details-marker {
+  display: none;
+}
+.trace-item-detail summary > span {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.trace-item-detail summary em {
+  color: var(--oat-text-muted);
+  font-size: 13px;
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+.trace-item-detail summary b {
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #fff;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 900;
+}
+.trace-item-detail[open] summary {
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(15, 23, 42, .08);
+}
+.trace-inline-detail {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
+}
+.trace-inline-detail p,
+.trace-inline-detail dd {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.trace-inline-detail dl {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px 10px;
+  margin: 0;
+}
+.trace-inline-detail dt {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
 .trace-detail-grid {
   display: grid;
   gap: 14px;
@@ -1024,7 +1088,8 @@ onBeforeUnmount(() => {
   .analyze-action-row { justify-content: stretch; }
   .analyze-button { width: 100%; }
   .file-row .meta-line { padding-left: 0; }
-  .detail-card dl { grid-template-columns: 1fr; }
+  .detail-card dl,
+  .trace-inline-detail dl { grid-template-columns: 1fr; }
   .candidate-top { display: grid; }
   .confidence { margin-left: 0; }
 }
