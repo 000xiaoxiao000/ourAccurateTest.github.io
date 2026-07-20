@@ -70,7 +70,7 @@
         <div v-if="map.loading.value" class="trace-empty"><span class="spin">◌</span><span>加载中…</span></div>
         <div v-else-if="!traceGraph.nodes.length" class="trace-empty">暂无可展示的三层追溯关系。</div>
         <div v-else class="trace-map-scroll">
-          <svg class="trace-map-svg" :viewBox="`0 0 ${traceGraph.width} ${traceGraph.height}`" role="img" aria-label="三层追溯关系图">
+          <svg class="trace-map-svg" :viewBox="`0 0 ${traceGraph.width} ${traceGraph.height}`" role="img" aria-label="三层追溯关系图" @click="clearTraceGraphSelection">
             <defs>
               <marker id="trace-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
                 <path d="M0,0 L0,6 L9,3 z" fill="#64748b" />
@@ -84,8 +84,8 @@
               <g
                 v-for="node in traceGraph.nodes"
                 :key="node.id"
-                :class="['trace-svg-node', node.tone, { active: selectedTraceId === node.id, linked: traceGraph.linkedIds.has(node.id) }]"
-                @click="selectTraceNode(node.id)"
+                :class="['trace-svg-node', node.tone, { active: traceGraph.selectedNodeId === node.id, linked: traceGraph.relatedNodeIds.has(node.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedNodeIds.has(node.id) }]"
+                @click.stop="selectTraceNode(node.id)"
               >
                 <title>{{ traceNodeTitle(node.raw) }}</title>
                 <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
@@ -94,7 +94,7 @@
               </g>
             </g>
             <g class="trace-edge-layer">
-              <g v-for="edge in traceGraph.edges" :key="edge.id" :class="['trace-svg-edge', evidenceTone(edge.raw), { active: edge.source === selectedTraceId || edge.target === selectedTraceId }]">
+              <g v-for="edge in traceGraph.edges" :key="edge.id" :class="['trace-svg-edge', evidenceTone(edge.raw), { active: traceGraph.relatedEdgeIds.has(edge.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedEdgeIds.has(edge.id) }]">
                 <title>{{ traceEdgeTitle(edge.raw) }}</title>
                 <path :d="edge.path" marker-end="url(#trace-arrow)" />
                 <text :x="edge.labelX" :y="edge.labelY">{{ relationLabel(edge.raw.relation) }}</text>
@@ -477,7 +477,7 @@ const displayOpenClasses = computed(() => {
   return classes
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
-const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value))
+const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value, selectedTraceId.value))
 const callGraph = computed(() => buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value))
 const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
 const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
@@ -635,6 +635,10 @@ async function toggleAiCallAnalysis() {
 
 function selectTraceNode(id: string) {
   selectedTraceId.value = selectedTraceId.value === id ? '' : id
+}
+
+function clearTraceGraphSelection() {
+  selectedTraceId.value = ''
 }
 
 async function locateTraceCodeNode(id: string) {
@@ -804,7 +808,7 @@ function coverageSummaryText(node: TraceabilityNode) {
   return [line, branch].filter(Boolean).join(' · ') || '已匹配覆盖证据'
 }
 
-function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[]) {
+function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], selectedNodeId: string) {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   const traceEdges = collapseTraceEdges(edges, nodeMap)
   const edgeIds = new Set<string>()
@@ -885,7 +889,40 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[]) {
         raw: edge,
       }
     })
-  return { width, height, lanes, nodes: [...positioned.values()], edges: graphEdges, linkedIds: edgeIds }
+  const relatedEdgeIds = traceGraphRelatedEdgeIds(selectedNodeId, graphEdges)
+  const relatedNodeIds = traceGraphRelatedNodeIds(selectedNodeId, graphEdges)
+  return {
+    width,
+    height,
+    lanes,
+    nodes: [...positioned.values()],
+    edges: graphEdges,
+    linkedIds: edgeIds,
+    relatedNodeIds,
+    relatedEdgeIds,
+    hasSelection: Boolean(selectedNodeId && positioned.has(selectedNodeId)),
+    selectedNodeId,
+  }
+}
+
+function traceGraphRelatedNodeIds(focusId: string, edges: SvgEdge[]) {
+  const ids = new Set<string>()
+  if (!focusId) return ids
+  ids.add(focusId)
+  edges.forEach((edge) => {
+    if (edge.source === focusId) ids.add(edge.target)
+    if (edge.target === focusId) ids.add(edge.source)
+  })
+  return ids
+}
+
+function traceGraphRelatedEdgeIds(focusId: string, edges: SvgEdge[]) {
+  const ids = new Set<string>()
+  if (!focusId) return ids
+  edges.forEach((edge) => {
+    if (edge.source === focusId || edge.target === focusId) ids.add(edge.id)
+  })
+  return ids
 }
 
 function collapseTraceEdges(edges: TraceabilityEdge[], nodeMap: Map<string, TraceabilityNode>) {
@@ -1778,19 +1815,22 @@ onBeforeUnmount(() => {
 .lane-band { fill:rgba(254,252,232,.74); stroke:#c6c453; stroke-width:1; }
 .lane-title { fill:#475569; font-size:13px; font-weight:900; text-anchor:middle; }
 .trace-edge-layer { pointer-events:none; }
-.trace-svg-edge path, .call-svg-edge path { fill:none; stroke:#64748b; stroke-width:1.4; opacity:.72; }
-.trace-svg-edge text, .call-svg-edge text { fill:#475569; font-size:11px; font-weight:800; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; }
+.trace-svg-edge path, .call-svg-edge path { fill:none; stroke:#64748b; stroke-width:1.4; opacity:.72; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
+.trace-svg-edge text, .call-svg-edge text { fill:#475569; font-size:11px; font-weight:800; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; transition:opacity .16s ease, fill .16s ease; }
 .trace-svg-edge.derived path { stroke-dasharray:4 4; opacity:.62; }
 .trace-svg-edge.dynamic path, .call-svg-edge.dynamic path { stroke:#2563eb; stroke-width:1.8; }
 .trace-svg-edge.bridged path, .call-svg-edge.bridged path { stroke:#d97706; stroke-dasharray:5 3; }
-.trace-svg-edge.active path { stroke-width:3; opacity:1; }
+.trace-svg-edge.active path { stroke:#0f766e; stroke-width:3.2; opacity:1; }
+.trace-svg-edge.active text { fill:#0f766e; opacity:1; }
+.trace-svg-edge.dimmed { opacity:.16; }
 .trace-svg-node { cursor:pointer; }
-.trace-svg-node rect { stroke-width:2; filter:drop-shadow(0 8px 12px rgba(15,23,42,.08)); }
+.trace-svg-node rect { stroke-width:2; filter:drop-shadow(0 8px 12px rgba(15,23,42,.08)); transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
 .trace-svg-node.req rect { fill:#bfdbfe; stroke:#2563eb; }
 .trace-svg-node.tc rect { fill:#fed7aa; stroke:#f97316; }
 .trace-svg-node.code rect { fill:#bbf7d0; stroke:#15803d; }
-.trace-svg-node.active rect { stroke:#7c3aed; stroke-width:3; }
-.trace-svg-node.linked:not(.active) rect { stroke-width:2.5; }
+.trace-svg-node.active rect { stroke:#7c3aed; stroke-width:3.4; filter:drop-shadow(0 10px 18px rgba(124,58,237,.22)); }
+.trace-svg-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.8; filter:drop-shadow(0 8px 15px rgba(15,118,110,.18)); }
+.trace-svg-node.dimmed { opacity:.24; }
 .node-title, .node-subtitle { text-anchor:middle; pointer-events:none; }
 .node-title { fill:#172033; font-size:12px; font-weight:900; }
 .node-subtitle { fill:#475569; font-size:11px; font-weight:700; }
