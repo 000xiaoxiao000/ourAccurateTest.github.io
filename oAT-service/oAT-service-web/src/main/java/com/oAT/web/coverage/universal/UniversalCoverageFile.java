@@ -81,7 +81,7 @@ public class UniversalCoverageFile implements Serializable {
                 .map(BranchCoverage::branchGroupKey).distinct().count());
         index.setBranchRate(rate(index.getCoveredBranchTargets(), index.getTotalBranchTargets()));
         List<ClassCoverageIndex.MethodCoverageDetail> methods = functions.stream()
-                .map(FunctionCoverage::toMethodCoverageDetail)
+                .map(function -> function.toMethodCoverageDetail(lines))
                 .peek(method -> {
                     method.setLineFootprints(lineFootprintsFor(method));
                     applyBranchesToMethod(method);
@@ -204,7 +204,9 @@ public class UniversalCoverageFile implements Serializable {
     }
 
     public static class FunctionCoverage implements Serializable {
+        private String className;
         private String name;
+        private String descriptor;
         private int startLine;
         private int endLine;
         private int coveredCount;
@@ -212,26 +214,41 @@ public class UniversalCoverageFile implements Serializable {
         public FunctionCoverage(String name, int startLine, int endLine, int coveredCount) {
             this.name = name; this.startLine = startLine; this.endLine = endLine; this.coveredCount = coveredCount;
         }
-        FunctionCoverage merge(FunctionCoverage other) {
-            return new FunctionCoverage(name, Math.min(startLine, other.startLine), Math.max(endLine, other.endLine),
-                    coveredCount + other.coveredCount);
+        public FunctionCoverage(String className, String name, String descriptor, int startLine, int endLine, int coveredCount) {
+            this(name, startLine, endLine, coveredCount);
+            this.className = className;
+            this.descriptor = descriptor;
         }
-        ClassCoverageIndex.MethodCoverageDetail toMethodCoverageDetail() {
+        FunctionCoverage merge(FunctionCoverage other) {
+            return new FunctionCoverage(className, name, descriptor, Math.min(startLine, other.startLine),
+                    Math.max(endLine, other.endLine), coveredCount + other.coveredCount);
+        }
+        ClassCoverageIndex.MethodCoverageDetail toMethodCoverageDetail(List<LineCoverage> fileLines) {
             ClassCoverageIndex.MethodCoverageDetail detail = new ClassCoverageIndex.MethodCoverageDetail();
+            detail.setClassName(className);
             detail.setMethodName(name);
-            detail.setMethodDesc(name);
-            List<Integer> total = new ArrayList<>();
-            for (int line = startLine; line <= endLine; line++) total.add(line);
+            detail.setMethodDesc(descriptor == null ? name : descriptor);
+            detail.setStartLine(startLine);
+            List<Integer> total = fileLines.stream()
+                    .filter(line -> line.line >= startLine && line.line <= endLine)
+                    .map(LineCoverage::getLine).distinct().sorted().toList();
+            List<Integer> covered = fileLines.stream()
+                    .filter(line -> line.line >= startLine && line.line <= endLine && line.coveredCount > 0)
+                    .map(LineCoverage::getLine).distinct().sorted().toList();
             detail.setTotalLineNumbers(total);
             detail.setTotalLines(total.size());
-            detail.setCoveredLineNumbers(coveredCount > 0 ? total : List.of());
-            detail.setCoveredLines(coveredCount > 0 ? total.size() : 0);
-            detail.setCovered(coveredCount > 0);
+            detail.setCoveredLineNumbers(covered);
+            detail.setCoveredLines(covered.size());
+            detail.setCovered(!covered.isEmpty() || coveredCount > 0);
             return detail;
         }
-        String key() { return name + ":" + startLine + ":" + endLine; }
+        String key() { return className + ":" + name + ":" + descriptor + ":" + startLine + ":" + endLine; }
+        public String getClassName() { return className; }
+        public void setClassName(String className) { this.className = className; }
         public String getName() { return name; }
         public void setName(String name) { this.name = name; }
+        public String getDescriptor() { return descriptor; }
+        public void setDescriptor(String descriptor) { this.descriptor = descriptor; }
         public int getStartLine() { return startLine; }
         public void setStartLine(int startLine) { this.startLine = startLine; }
         public int getEndLine() { return endLine; }

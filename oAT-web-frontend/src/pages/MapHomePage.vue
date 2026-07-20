@@ -221,48 +221,81 @@
                 <span>含覆盖报告节点</span>
               </article>
             </section>
-            <section v-if="coverageSourceLines.length" class="coverage-source-view">
-              <div class="coverage-source-head">
-                <strong>{{ coverageSourceTitle }}</strong>
-                <span>{{ selectedCoverageRow?.lineText || '无行覆盖数据' }} · {{ selectedCoverageRow?.branchText || '无分支覆盖数据' }}</span>
-              </div>
-              <div class="source-code-scroll">
-                <div
-                  v-for="line in coverageSourceLines"
-                  :key="line.number"
-                  :class="['source-line', line.state]"
-                >
-                  <span class="source-line-no">{{ line.number }}</span>
-                  <code>{{ line.text || ' ' }}</code>
+            <section class="coverage-workbench">
+              <div v-if="coverageSourceLines.length" class="coverage-source-view">
+                <div class="coverage-source-head">
+                  <strong :title="coverageSourceTitle">{{ coverageSourceTitle }}</strong>
+                  <span :title="selectedCoverageRow ? coverageRowTitle(selectedCoverageRow) : ''">{{ selectedCoverageRow?.lineText || '无行覆盖数据' }} · {{ selectedCoverageRow?.branchText || '无分支覆盖数据' }}</span>
+                </div>
+                <div ref="coverageSourceScroll" class="source-code-scroll">
+                  <div
+                    v-for="line in coverageSourceLines"
+                    :key="line.number"
+                    :class="['source-line', line.state, { located: line.number === selectedCoverageLine }]"
+                    :data-line="line.number"
+                    :title="`L${line.number}: ${line.text || ''}`"
+                  >
+                    <span class="source-line-no">{{ line.number }}</span>
+                    <code>{{ line.text || ' ' }}</code>
+                  </div>
                 </div>
               </div>
+              <div v-else class="coverage-source-view empty-card">暂无源码内容。请确认当前基线已绑定源码静态索引。</div>
+              <aside class="coverage-node-panel">
+                <div class="coverage-list-head">
+                  <strong>文件覆盖</strong>
+                  <span>{{ coverageListRows.length }} 项</span>
+                </div>
+                <div class="coverage-file-list">
+                  <button
+                    v-for="row in coverageListRows"
+                    :key="row.id"
+                    type="button"
+                    :class="['coverage-node-item', { active: row.id === selectedCoverageFileId || row.id === selectedCoverageRow?.id }]"
+                    :title="coverageRowTitle(row)"
+                    @click="selectCodeNode(row.id)"
+                  >
+                    <span>
+                      <strong :title="row.label">{{ row.label }}</strong>
+                      <small :title="row.locator">{{ row.locator }}</small>
+                    </span>
+                    <em :class="['coverage-pill', row.tone]">{{ row.stateText }}</em>
+                    <div class="coverage-meter compact">
+                      <span>{{ row.lineText }}</span>
+                      <i><b :style="{ width: row.lineWidth }"></b></i>
+                    </div>
+                  </button>
+                </div>
+                <div class="coverage-list-head method-head">
+                  <strong>当前文件方法</strong>
+                  <span>{{ filteredCoverageMethodRows.length }} / {{ selectedCoverageMethodRows.length }} 项</span>
+                </div>
+                <div class="coverage-method-filter">
+                  <input v-model.trim="coverageMethodKeyword" type="search" placeholder="搜索方法名或行号" aria-label="搜索当前文件方法" />
+                </div>
+                <div v-if="!selectedCoverageMethodRows.length" class="coverage-method-empty">当前文件暂无方法级覆盖数据。</div>
+                <div v-else-if="!filteredCoverageMethodRows.length" class="coverage-method-empty">没有匹配的方法。</div>
+                <div v-else class="coverage-method-list">
+                  <button
+                    v-for="row in filteredCoverageMethodRows"
+                    :key="row.id"
+                    type="button"
+                    :class="['coverage-method-item', { active: row.id === selectedCoverageRow?.id }]"
+                    :title="coverageRowTitle(row)"
+                    @click="selectCodeNode(row.id)"
+                  >
+                    <span>
+                      <strong :title="row.label">{{ row.label }}</strong>
+                      <small :title="row.locator">{{ row.locator }}</small>
+                    </span>
+                    <div class="coverage-meter compact">
+                      <span>{{ row.lineText }}</span>
+                      <i><b :style="{ width: row.lineWidth }"></b></i>
+                    </div>
+                  </button>
+                </div>
+              </aside>
             </section>
-            <div class="coverage-table-shell">
-              <table class="coverage-table">
-                <thead>
-                  <tr><th>代码节点</th><th>状态</th><th>行覆盖</th><th>分支覆盖</th><th>定位</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in coverageRows" :key="row.id" :class="{ active: row.id === selectedCoverageRow?.id }">
-                    <td><button type="button" @click="selectCodeNode(row.id)">{{ row.label }}</button></td>
-                    <td><span :class="['coverage-pill', row.tone]">{{ row.stateText }}</span></td>
-                    <td>
-                      <div class="coverage-meter">
-                        <span>{{ row.lineText }}</span>
-                        <i><b :style="{ width: row.lineWidth }"></b></i>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="coverage-meter">
-                        <span>{{ row.branchText }}</span>
-                        <i><b :style="{ width: row.branchWidth }"></b></i>
-                      </div>
-                    </td>
-                    <td>{{ row.locator }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
           </template>
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
@@ -409,7 +442,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
@@ -474,6 +507,8 @@ const loadedCodeDataKey = ref('')
 const loadingCodeDataKey = ref('')
 const aiCallAnalysisEnabled = ref(false)
 const searchInput = ref<HTMLInputElement | null>(null)
+const coverageSourceScroll = ref<HTMLElement | null>(null)
+const coverageMethodKeyword = ref('')
 let slowLoadingTimer: number | undefined
 
 watch([activeTab, callViewMode], () => {
@@ -559,7 +594,9 @@ const callViewMeta = computed(() => {
     return {
       title: '覆盖率数据',
       description: '展示覆盖/执行证据匹配到的代码节点',
-      count: `${coverageRows.value.length} 条数据`,
+      count: coverageFileRows.value.length
+        ? `${coverageFileRows.value.length} 个文件 · ${coverageRows.value.length} 条节点`
+        : `${coverageRows.value.length} 条数据`,
     }
   }
   return {
@@ -583,18 +620,53 @@ const coverageRows = computed(() => {
       edgeNodeIds.add(edge.target)
     }
   })
-  return map.nodes.value
-    .filter((node) => node.kind.startsWith('CODE_'))
+  const candidates = map.nodes.value
+    .filter((node) => node.kind === 'CODE_FILE' || node.kind === 'CODE_METHOD')
     .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
     .filter((node) => hasCoverageSummary(node) || node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH' || edgeNodeIds.has(node.id))
     .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
+  const fileKeys = new Set(candidates
+    .filter((node) => node.kind === 'CODE_FILE')
+    .map(coverageNodeFileKey)
+    .filter(Boolean))
+  return candidates
+    .filter((node) => !isDuplicateCoverageMethod(node, fileKeys))
     .map(toCoverageRow)
+    .filter(uniqueCoverageRow())
     .sort((left, right) => Number(right.hasReport) - Number(left.hasReport)
       || right.coveredLines - left.coveredLines
       || left.label.localeCompare(right.label))
 })
+const coverageFileRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_FILE'))
+const coverageMethodRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_METHOD'))
+const coverageListRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
+const selectedCoverageFileId = computed(() => {
+  const row = selectedCoverageRow.value
+  if (!row) return ''
+  const node = map.nodeById.value.get(row.id)
+  if (!node) return row.id
+  return nearestCodeFileId(node) || row.id
+})
+const selectedCoverageMethodRows = computed(() => {
+  const fileId = selectedCoverageFileId.value
+  if (!fileId) return []
+  return coverageMethodRows.value.filter((row) => {
+    const node = map.nodeById.value.get(row.id)
+    return node ? nearestCodeFileId(node) === fileId : false
+  })
+})
+const filteredCoverageMethodRows = computed(() => {
+  const keyword = normalizeSearch(coverageMethodKeyword.value)
+  if (!keyword) return selectedCoverageMethodRows.value
+  return selectedCoverageMethodRows.value.filter((row) => normalizeSearch([
+    row.label,
+    row.locator,
+    lineFromLocator(row.locator) || '',
+  ].join(' ')).includes(keyword))
+})
 const coverageOverview = computed(() => {
-  const rows = coverageRows.value
+  const fileRows = coverageFileRows.value
+  const rows = fileRows.length ? fileRows : coverageRows.value
   const coveredLines = rows.reduce((total, row) => total + row.coveredLines, 0)
   const totalLines = rows.reduce((total, row) => total + row.totalLines, 0)
   const coveredBranches = rows.reduce((total, row) => total + row.coveredBranches, 0)
@@ -625,15 +697,30 @@ const coverageSourceTitle = computed(() => selectedCoverageRow.value
   : '源码覆盖')
 const coverageSourceLines = computed(() => {
   const row = selectedCoverageRow.value
-  if (!row?.sourceContent) return []
-  const covered = new Set(row.coveredLineNumbers)
-  const total = new Set(row.totalLineNumbers)
-  const start = row.sourceStartLine || 1
-  return row.sourceContent.split(/\r?\n/).slice(0, 420).map((text, index) => {
+  if (!row) return []
+  const source = coverageSourceNode(row.id)
+  const content = stringMetadata(source?.metadata?.sourceContent) || row.sourceContent
+  if (!content) return []
+  const sourceMetadata = source?.metadata || {}
+  // JaCoCo line numbers belong to the complete source file, never a method snippet.
+  const covered = new Set(numberArrayMetadata(sourceMetadata.coverageCoveredLines).length
+    ? numberArrayMetadata(sourceMetadata.coverageCoveredLines)
+    : row.coveredLineNumbers)
+  const total = new Set(numberArrayMetadata(sourceMetadata.coverageTotalLines).length
+    ? numberArrayMetadata(sourceMetadata.coverageTotalLines)
+    : row.totalLineNumbers)
+  const start = numberMetadata(sourceMetadata.sourceStartLine) || row.sourceStartLine || 1
+  return content.split(/\r?\n/).map((text, index) => {
     const number = start + index
     const state = covered.has(number) ? 'covered' : total.has(number) ? 'missed' : 'neutral'
     return { number, text, state }
   })
+})
+const selectedCoverageLine = computed(() => {
+  const row = selectedCoverageRow.value
+  if (!row) return undefined
+  const node = map.nodeById.value.get(row.id)
+  return lineFromLocator(node?.locator) || numberMetadata(node?.metadata?.line)
 })
 const relationSummaryRows = computed(() => {
   const req = map.nodes.value.find((node) => node.kind === 'REQUIREMENT')
@@ -808,6 +895,16 @@ async function selectCodeNode(id: string) {
     await loadCodeData(id)
     openAncestors(id, map.codeTree.value)
   }
+  await nextTick()
+  scrollToCoverageLine(id)
+}
+
+function scrollToCoverageLine(id: string) {
+  const node = map.nodeById.value.get(id)
+  const line = lineFromLocator(node?.locator) || numberMetadata(node?.metadata?.line)
+  if (!line || !coverageSourceScroll.value) return
+  const target = coverageSourceScroll.value.querySelector<HTMLElement>(`[data-line="${line}"]`)
+  target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
 }
 
 function showGlobalCallGraph() {
@@ -936,6 +1033,7 @@ function coverageSummaryText(node: TraceabilityNode) {
 function toCoverageRow(node: TraceabilityNode) {
   const coverage = node.coverage
   const metadata = node.metadata || {}
+  const source = coverageSourceMetadata(node)
   const coveredLines = coverage?.coveredLines ?? 0
   const totalLines = coverage?.totalLines ?? 0
   const coveredBranches = coverage?.coveredBranches ?? 0
@@ -958,11 +1056,94 @@ function toCoverageRow(node: TraceabilityNode) {
     branchText: coverageRatioText(coveredBranches, totalBranches, coverage?.branchRate),
     lineWidth: coverageWidth(coverage?.lineRate, coveredLines, totalLines),
     branchWidth: coverageWidth(coverage?.branchRate, coveredBranches, totalBranches),
-    sourceContent: stringMetadata(metadata.sourceContent),
-    sourceStartLine: numberMetadata(metadata.sourceStartLine) || lineFromLocator(node.locator) || 1,
+    sourceContent: source.content,
+    sourceStartLine: source.content ? source.startLine : lineFromLocator(node.locator) || numberMetadata(metadata.line) || 1,
     totalLineNumbers: numberArrayMetadata(metadata.coverageTotalLines),
     coveredLineNumbers: numberArrayMetadata(metadata.coverageCoveredLines),
   }
+}
+
+function coverageRowTitle(row: ReturnType<typeof toCoverageRow>) {
+  return [
+    row.label,
+    `位置：${row.locator}`,
+    `状态：${row.stateText}`,
+    `行覆盖：${row.lineText}`,
+    `分支覆盖：${row.branchText}`,
+  ].join('\n')
+}
+
+function uniqueCoverageRow() {
+  const seen = new Set<string>()
+  return (row: ReturnType<typeof toCoverageRow>) => {
+    const key = [
+      normalizeCoveragePath(row.locator),
+      normalizeSearch(row.label),
+      row.totalLines,
+      row.coveredLines,
+      row.totalBranches,
+      row.coveredBranches,
+    ].join('|')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }
+}
+
+function isDuplicateCoverageMethod(node: TraceabilityNode, fileKeys: Set<string>) {
+  if (node.kind !== 'CODE_METHOD') return false
+  const methodName = normalizeSearch(node.label || node.symbol || node.id)
+  const className = normalizeSearch(String(node.symbol || '').split('#')[0] || '')
+  const fileKey = coverageNodeFileKey(node)
+  if (!fileKey || !fileKeys.has(fileKey)) return false
+  return Boolean(methodName && className && (methodName === className || className.endsWith(`.${methodName}`)))
+}
+
+function coverageNodeFileKey(node: TraceabilityNode) {
+  const path = normalizeCoveragePath(node.locator || node.description || String(node.metadata?.sourcePath || '') || node.symbol || node.id)
+  if (path) return path
+  const symbolOwner = String(node.symbol || '').split('#')[0]
+  if (!symbolOwner) return ''
+  return normalizeSearch(symbolOwner.replace(/\./g, '/').replace(/\$/g, '/'))
+}
+
+function nearestCodeFileId(node: TraceabilityNode) {
+  let current: TraceabilityNode | undefined = node
+  const visited = new Set<string>()
+  while (current && visited.add(current.id)) {
+    if (current.kind === 'CODE_FILE') return current.id
+    current = current.parentId ? map.nodeById.value.get(current.parentId) : undefined
+  }
+  return ''
+}
+
+function normalizeCoveragePath(value?: string) {
+  const raw = String(value || '').split(':')[0].replace(/\\/g, '/')
+  const javaPath = raw.match(/(?:^|\/)([^?#]+\.java)$/i)?.[1] || ''
+  return normalizeSearch(javaPath || raw)
+}
+
+function coverageSourceMetadata(node: TraceabilityNode) {
+  let current: TraceabilityNode | undefined = node
+  const visited = new Set<string>()
+  while (current && visited.add(current.id)) {
+    const content = stringMetadata(current.metadata?.sourceContent)
+    if (content) {
+      return { content, startLine: numberMetadata(current.metadata?.sourceStartLine) || 1 }
+    }
+    current = current.parentId ? map.nodeById.value.get(current.parentId) : undefined
+  }
+  return { content: '', startLine: 1 }
+}
+
+function coverageSourceNode(nodeId: string) {
+  let current = map.nodeById.value.get(nodeId)
+  const visited = new Set<string>()
+  while (current && visited.add(current.id)) {
+    if (stringMetadata(current.metadata?.sourceContent)) return current
+    current = current.parentId ? map.nodeById.value.get(current.parentId) : undefined
+  }
+  return undefined
 }
 
 function hasCoverageSummary(node: TraceabilityNode) {
@@ -2075,10 +2256,11 @@ onBeforeUnmount(() => {
 .call-map-scroll.large.fullscreen .call-graph-viewport { height:calc(100vh - 58px); }
 :global(body.trace-call-graph-fullscreen) { overflow:hidden; }
 .coverage-data-panel { flex:1; min-width:0; overflow:auto; background:#fff; }
-.coverage-overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; padding:14px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
-.coverage-overview-grid article { display:grid; gap:4px; min-width:0; padding:11px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+.coverage-overview-grid article { display:grid; gap:3px; min-width:0; padding:9px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-overview-grid strong { color:#172033; font-size:18px; line-height:1.1; }
 .coverage-overview-grid span { color:#64748b; font-size:11px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.coverage-workbench { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; padding:10px 12px; align-items:stretch; min-height:0; }
 .code-analysis-panel { flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
@@ -2095,15 +2277,17 @@ onBeforeUnmount(() => {
 .mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
-.coverage-source-view { margin:14px; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-source-view { min-width:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }
 .coverage-source-head span { flex:0 0 auto; color:#64748b; font-size:12px; font-weight:800; }
-.source-code-scroll { max-height:420px; overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
+.source-code-scroll { height:clamp(480px,calc(100vh - 340px),680px); overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
 .source-line { display:grid; grid-template-columns:52px minmax(0,1fr); min-width:760px; }
 .source-line.covered { background:#dcfce7; }
 .source-line.missed { background:#fee2e2; }
 .source-line.neutral { background:#fff; }
+.source-line.located { box-shadow:inset 3px 0 #2563eb; }
+.source-line.located .source-line-no { color:#1d4ed8; font-weight:900; }
 .source-line-no { padding:2px 10px; border-right:1px solid #e5e7eb; color:#94a3b8; text-align:right; user-select:none; }
 .source-line code { padding:2px 10px; color:#172033; white-space:pre; }
 .coverage-table-shell { margin:14px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; }
@@ -2123,6 +2307,27 @@ onBeforeUnmount(() => {
 .coverage-meter span { color:#334155; font-size:12px; font-weight:800; white-space:nowrap; }
 .coverage-meter i { display:block; height:7px; overflow:hidden; border-radius:999px; background:#fee2e2; }
 .coverage-meter b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#22c55e,#16a34a); }
+.coverage-meter.compact { min-width:0; }
+.coverage-meter.compact span { font-size:11px; }
+.coverage-node-panel { display:grid; grid-template-rows:auto minmax(130px,1fr) auto auto minmax(180px,1.25fr); height:clamp(526px,calc(100vh - 340px),726px); min-width:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-list-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+.coverage-list-head strong { color:#172033; font-size:13px; }
+.coverage-list-head span { color:#64748b; font-size:11px; font-weight:900; }
+.coverage-list-head.method-head { border-top:1px solid #e5e7eb; }
+.coverage-file-list, .coverage-method-list { min-height:0; overflow:auto; padding:8px; }
+.coverage-method-filter { padding:7px 8px; border-bottom:1px solid #e5e7eb; background:#fff; }
+.coverage-method-filter input { width:100%; height:30px; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:5px; padding:0 9px; outline:none; color:#172033; font-size:12px; }
+.coverage-method-filter input:focus { border-color:#14b8a6; box-shadow:0 0 0 2px rgba(20,184,166,.14); }
+.coverage-node-item, .coverage-method-item { display:grid; width:100%; min-width:0; gap:8px; border:1px solid transparent; border-radius:7px; background:#fff; padding:9px 10px; text-align:left; cursor:pointer; }
+.coverage-node-item { grid-template-columns:minmax(0,1fr) auto; }
+.coverage-node-item .coverage-meter { grid-column:1 / -1; }
+.coverage-method-item { grid-template-columns:minmax(0,1fr); }
+.coverage-node-item:hover, .coverage-method-item:hover { border-color:#ccfbf1; background:#f0fdfa; }
+.coverage-node-item.active, .coverage-method-item.active { border-color:#5eead4; background:#ecfeff; }
+.coverage-node-item span, .coverage-method-item span { min-width:0; display:grid; gap:3px; }
+.coverage-node-item strong, .coverage-method-item strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#0f766e; font-size:12px; }
+.coverage-node-item small, .coverage-method-item small { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#64748b; font-size:10.5px; font-weight:700; }
+.coverage-method-empty { padding:16px 12px; color:#94a3b8; font-size:12px; font-weight:800; text-align:center; }
 .call-svg-edge path { stroke:#94a3b8; stroke-width:1.2; opacity:.62; }
 .call-svg-edge.structure path { stroke:#0f766e; stroke-width:.9; opacity:.28; stroke-dasharray:3 4; }
 .call-svg-edge.inferred path { stroke:#0f766e; stroke-width:1.3; opacity:.72; stroke-dasharray:5 4; }
@@ -2150,6 +2355,6 @@ onBeforeUnmount(() => {
 .call-svg-node .call-node-subtitle { fill:#64748b; font-size:10px; font-weight:800; }
 .code-tree-head { border-top:1px solid #eef2f5; }
 .tree-scroll { flex:1; min-height:160px; overflow-y:auto; padding:8px 6px 12px; }
-@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } }
+@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
 @media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
 </style>

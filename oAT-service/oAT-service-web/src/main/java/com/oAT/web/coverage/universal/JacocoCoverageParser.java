@@ -13,6 +13,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayInputStream;
 import java.io.StringReader;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -158,6 +159,7 @@ public class JacocoCoverageParser implements CoverageParser {
 
     private void addMethodCoverage(UniversalCoverageFile file, Element packageNode, String sourceFileName) {
         NodeList classes = packageNode.getElementsByTagName("class");
+        List<JacocoMethod> methodsForFile = new ArrayList<>();
         for (int classIndex = 0; classIndex < classes.getLength(); classIndex++) {
             Element classNode = (Element) classes.item(classIndex);
             if (!sourceFileName.equals(classNode.getAttribute("sourcefilename"))) continue;
@@ -165,14 +167,23 @@ public class JacocoCoverageParser implements CoverageParser {
             for (int methodIndex = 0; methodIndex < methods.getLength(); methodIndex++) {
                 Element method = (Element) methods.item(methodIndex);
                 int line = integer(method.getAttribute("line"));
-                if (line <= 0) continue;
-                Element methodCounter = counter(method, "METHOD");
-                int covered = methodCounter == null ? 0 : integer(methodCounter.getAttribute("covered"));
-                file.getFunctions().add(new UniversalCoverageFile.FunctionCoverage(
-                        method.getAttribute("name"), line, line, covered));
+                if (line > 0) methodsForFile.add(new JacocoMethod(classNode.getAttribute("name"), method, line));
             }
         }
+        methodsForFile.sort(Comparator.comparingInt(JacocoMethod::line));
+        int lastFileLine = file.getLines().stream().mapToInt(UniversalCoverageFile.LineCoverage::getLine).max().orElse(0);
+        for (int methodIndex = 0; methodIndex < methodsForFile.size(); methodIndex++) {
+            JacocoMethod item = methodsForFile.get(methodIndex);
+            int nextLine = methodIndex + 1 < methodsForFile.size() ? methodsForFile.get(methodIndex + 1).line() : lastFileLine + 1;
+            Element methodCounter = counter(item.element(), "METHOD");
+            int covered = methodCounter == null ? 0 : integer(methodCounter.getAttribute("covered"));
+            file.getFunctions().add(new UniversalCoverageFile.FunctionCoverage(
+                    item.className(), item.element().getAttribute("name"), item.element().getAttribute("desc"),
+                    item.line(), Math.max(item.line(), nextLine - 1), covered));
+        }
     }
+
+    private record JacocoMethod(String className, Element element, int line) {}
 
     private Element counter(Element parent, String type) {
         NodeList counters = parent.getElementsByTagName("counter");

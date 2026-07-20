@@ -1,16 +1,17 @@
 <template>
   <!-- directory node -->
   <div v-if="node.isDir" class="tree-node">
-    <button
+    <div
       class="tree-row tree-row--dir"
       :style="{ paddingLeft: `${8 + depth * 14}px` }"
-      @click="$emit('toggle-dir', node.key)"
     >
-      <span class="tree-icon-toggle">{{ openDirs.has(node.key) ? '▾' : '▸' }}</span>
+      <button type="button" class="tree-toggle-button" :aria-label="openDirs.has(node.key) ? '折叠目录' : '展开目录'" @click.stop="$emit('toggle-dir', node.key)">
+        {{ openDirs.has(node.key) ? '▾' : '▸' }}
+      </button>
       <span class="tree-icon-file">📁</span>
       <span class="tree-label" :title="node.key">{{ node.displayName }}</span>
       <em class="tree-count">{{ countFiles(node) }}</em>
-    </button>
+    </div>
     <template v-if="openDirs.has(node.key)">
       <TreeNodeRow
         v-for="child in node.children"
@@ -31,16 +32,22 @@
 
   <!-- file / class node -->
   <div v-else-if="node.file" class="tree-node">
-    <button
+    <div
       :class="['tree-row', 'tree-row--file', { active: selectedId === node.file.nodeId, linked: linkedIds.has(node.file.nodeId) }]"
       :style="{ paddingLeft: `${8 + depth * 14}px` }"
-      @click="$emit('toggle-class', node.file.id); $emit('select', node.file.nodeId)"
+      role="button"
+      tabindex="0"
+      @click="$emit('select', node.file.nodeId)"
+      @keydown.enter.prevent="$emit('select', node.file.nodeId)"
+      @keydown.space.prevent="$emit('select', node.file.nodeId)"
     >
-      <span class="tree-icon-toggle">{{ openClasses.has(node.file.id) ? '▾' : '▸' }}</span>
+      <button type="button" class="tree-toggle-button" :aria-label="openClasses.has(node.file.id) ? '折叠方法' : '展开方法'" @click.stop="$emit('toggle-class', node.file.id)">
+        {{ openClasses.has(node.file.id) ? '▾' : '▸' }}
+      </button>
       <span class="tree-icon-file">{{ node.file.name.endsWith('.java') || node.name.endsWith('java') ? '☕' : '📄' }}</span>
       <span class="tree-label" :title="node.file.name || node.name">{{ node.name }}</span>
       <em v-if="linkedIds.has(node.file.nodeId)" class="tree-count tree-count--linked">{{ linkCount(node.file.nodeId) }}</em>
-    </button>
+    </div>
     <div v-if="openClasses.has(node.file.id)" class="tree-methods-block">
       <button
         v-for="method in node.file.methods"
@@ -120,6 +127,29 @@ function methodTitle(method: CodeTreeMethod): string {
   min-width: 0;
 }
 
+.tree-toggle-button {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.tree-toggle-button:hover {
+  background: #e2e8f0;
+  color: #0f766e;
+}
+.tree-toggle-button:focus-visible {
+  outline: 2px solid #99f6e4;
+  outline-offset: 1px;
+}
+
 .tree-row--dir  { color: #374151; font-size: 12.5px; font-weight: 700; }
 .tree-row--dir:hover  { background: #f1f5f9; }
 
@@ -133,7 +163,6 @@ function methodTitle(method: CodeTreeMethod): string {
 .tree-row--method.active { background: #ede9fe; color: #6d28d9; }
 .tree-row--method.linked .tree-label--method { color: #7c3aed; font-weight: 600; }
 
-.tree-icon-toggle { flex-shrink: 0; width: 12px; color: #9ca3af; font-size: 10px; }
 .tree-icon-file   { flex-shrink: 0; font-size: 13px; }
 .tree-icon-method { flex-shrink: 0; width: 14px; text-align: center; color: #9ca3af; font-size: 11px; }
 .tree-row--method.linked .tree-icon-method { color: #7c3aed; }

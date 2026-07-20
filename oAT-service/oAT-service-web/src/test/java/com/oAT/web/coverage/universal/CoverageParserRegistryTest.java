@@ -63,6 +63,32 @@ class CoverageParserRegistryTest {
     }
 
     @Test
+    void assignsOnlyActualExecutableLinesToEachJacocoMethod() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                <report><package name="demo">
+                  <class name="demo/Order" sourcefilename="Order.java">
+                    <method name="create" desc="()V" line="7"><counter type="METHOD" missed="0" covered="1"/></method>
+                    <method name="cancel" desc="()V" line="12"><counter type="METHOD" missed="1" covered="0"/></method>
+                  </class>
+                  <sourcefile name="Order.java">
+                    <line nr="7" ci="3"/><line nr="9" ci="0"/>
+                    <line nr="12" ci="0"/><line nr="14" ci="0"/>
+                  </sourcefile>
+                </package></report>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        com.oAT.web.esDao.entity.ClassCoverageIndex index = file.toClassCoverageIndex("app");
+        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail create = index.getMethods().get(0);
+        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail cancel = index.getMethods().get(1);
+        assertEquals("demo/Order", create.getClassName());
+        assertEquals(7, create.getStartLine());
+        assertEquals(List.of(7, 9), create.getTotalLineNumbers());
+        assertEquals(List.of(7), create.getCoveredLineNumbers());
+        assertEquals(List.of(12, 14), cancel.getTotalLineNumbers());
+        assertEquals(List.of(), cancel.getCoveredLineNumbers());
+    }
+
+    @Test
     void parsesJacocoHtmlSourcePagesFromUploadedArchiveSummary() {
         List<UniversalCoverageFile> files = new JacocoCoverageParser().parse("""
                 多语言覆盖率资料

@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @RestControllerAdvice(basePackages = "com.oAT.web.control.api")
 public class ApiExceptionHandler {
@@ -53,10 +54,35 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResultNotified<Object>> handleUnexpected(Exception e) {
+        if (isClientDisconnected(e)) {
+            logger.debug("客户端已断开连接，停止写入 API 响应: {}", e.getMessage());
+            return null;
+        }
         logger.error("API request failed unexpectedly", e);
         ResultNotified<Object> result = new ResultNotified<>(false, "系统暂时无法处理请求，请稍后重试");
         result.setErrorMessage("INTERNAL_ERROR");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(result);
+    }
+
+    private boolean isClientDisconnected(Throwable error) {
+        Throwable current = error;
+        int inspected = 0;
+        while (current != null && inspected++ < 12) {
+            if (current instanceof AsyncRequestNotUsableException) return true;
+            String type = current.getClass().getName();
+            String message = current.getMessage();
+            if (type.endsWith("ClientAbortException") || containsIgnoreCase(message, "broken pipe")
+                    || containsIgnoreCase(message, "connection reset by peer")
+                    || containsIgnoreCase(message, "响应不可用")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean containsIgnoreCase(String value, String expected) {
+        return value != null && expected != null && value.toLowerCase().contains(expected.toLowerCase());
     }
 
     private String safeMessage(String message, String fallback) {

@@ -81,8 +81,10 @@ public class ClassCoverageIndex implements Serializable {
     public void setHasCodeChanges(Boolean hasCodeChanges) { this.hasCodeChanges = hasCodeChanges; }
 
     public static class MethodCoverageDetail implements Serializable {
+        private String className;
         private String methodName;
         private String methodDesc;
+        private int startLine;
         private int totalLines;
         private int coveredLines;
         private int totalBranches;
@@ -101,10 +103,14 @@ public class ClassCoverageIndex implements Serializable {
         private Double branchRate;
         private boolean hasCodeChanges;
 
+        public String getClassName() { return className; }
+        public void setClassName(String className) { this.className = className; }
         public String getMethodName() { return methodName; }
         public void setMethodName(String methodName) { this.methodName = methodName; }
         public String getMethodDesc() { return methodDesc; }
         public void setMethodDesc(String methodDesc) { this.methodDesc = methodDesc; }
+        public int getStartLine() { return startLine; }
+        public void setStartLine(int startLine) { this.startLine = startLine; }
         public int getTotalLines() { return totalLines; }
         public void setTotalLines(int totalLines) { this.totalLines = totalLines; }
         public int getCoveredLines() { return coveredLines; }
