@@ -202,19 +202,68 @@
         </div>
         <div v-else-if="callViewMode === 'coverage'" class="coverage-data-panel">
           <div v-if="!coverageRows.length" class="empty-card">暂无可展示的覆盖率数据。请在分析基线中选择覆盖率或执行资产。</div>
-          <table v-else class="coverage-table">
-            <thead>
-              <tr><th>代码节点</th><th>证据状态</th><th>覆盖摘要</th><th>定位</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in coverageRows" :key="row.id">
-                <td><button type="button" @click="selectCodeNode(row.id)">{{ row.label }}</button></td>
-                <td><span :class="['coverage-pill', row.state.toLowerCase()]">{{ row.state }}</span></td>
-                <td>{{ row.summary }}</td>
-                <td>{{ row.locator }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <template v-else>
+            <section class="coverage-overview-grid" aria-label="覆盖率概览">
+              <article>
+                <strong>{{ coverageOverview.coveredNodes }} / {{ coverageOverview.totalNodes }}</strong>
+                <span>动态命中节点</span>
+              </article>
+              <article>
+                <strong>{{ coveragePercent(coverageOverview.lineRate) }}</strong>
+                <span>行覆盖 · {{ coverageOverview.coveredLines }} / {{ coverageOverview.totalLines }}</span>
+              </article>
+              <article>
+                <strong>{{ coveragePercent(coverageOverview.branchRate) }}</strong>
+                <span>分支覆盖 · {{ coverageOverview.coveredBranches }} / {{ coverageOverview.totalBranches }}</span>
+              </article>
+              <article>
+                <strong>{{ coverageOverview.reportNodes }}</strong>
+                <span>含覆盖报告节点</span>
+              </article>
+            </section>
+            <section v-if="coverageSourceLines.length" class="coverage-source-view">
+              <div class="coverage-source-head">
+                <strong>{{ coverageSourceTitle }}</strong>
+                <span>{{ selectedCoverageRow?.lineText || '无行覆盖数据' }} · {{ selectedCoverageRow?.branchText || '无分支覆盖数据' }}</span>
+              </div>
+              <div class="source-code-scroll">
+                <div
+                  v-for="line in coverageSourceLines"
+                  :key="line.number"
+                  :class="['source-line', line.state]"
+                >
+                  <span class="source-line-no">{{ line.number }}</span>
+                  <code>{{ line.text || ' ' }}</code>
+                </div>
+              </div>
+            </section>
+            <div class="coverage-table-shell">
+              <table class="coverage-table">
+                <thead>
+                  <tr><th>代码节点</th><th>状态</th><th>行覆盖</th><th>分支覆盖</th><th>定位</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in coverageRows" :key="row.id" :class="{ active: row.id === selectedCoverageRow?.id }">
+                    <td><button type="button" @click="selectCodeNode(row.id)">{{ row.label }}</button></td>
+                    <td><span :class="['coverage-pill', row.tone]">{{ row.stateText }}</span></td>
+                    <td>
+                      <div class="coverage-meter">
+                        <span>{{ row.lineText }}</span>
+                        <i><b :style="{ width: row.lineWidth }"></b></i>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="coverage-meter">
+                        <span>{{ row.branchText }}</span>
+                        <i><b :style="{ width: row.branchWidth }"></b></i>
+                      </div>
+                    </td>
+                    <td>{{ row.locator }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
           <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
@@ -537,15 +586,54 @@ const coverageRows = computed(() => {
   return map.nodes.value
     .filter((node) => node.kind.startsWith('CODE_'))
     .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
-    .filter((node) => node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH' || edgeNodeIds.has(node.id))
+    .filter((node) => hasCoverageSummary(node) || node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH' || edgeNodeIds.has(node.id))
     .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
-    .map((node) => ({
-      id: node.id,
-      label: node.label || node.symbol || node.id,
-      state: node.evidenceState,
-      summary: coverageSummaryText(node),
-      locator: node.locator || node.symbol || '-',
-    }))
+    .map(toCoverageRow)
+    .sort((left, right) => Number(right.hasReport) - Number(left.hasReport)
+      || right.coveredLines - left.coveredLines
+      || left.label.localeCompare(right.label))
+})
+const coverageOverview = computed(() => {
+  const rows = coverageRows.value
+  const coveredLines = rows.reduce((total, row) => total + row.coveredLines, 0)
+  const totalLines = rows.reduce((total, row) => total + row.totalLines, 0)
+  const coveredBranches = rows.reduce((total, row) => total + row.coveredBranches, 0)
+  const totalBranches = rows.reduce((total, row) => total + row.totalBranches, 0)
+  return {
+    totalNodes: rows.length,
+    coveredNodes: rows.filter((row) => row.isCovered).length,
+    reportNodes: rows.filter((row) => row.hasReport).length,
+    coveredLines,
+    totalLines,
+    lineRate: totalLines ? coveredLines / totalLines : undefined,
+    coveredBranches,
+    totalBranches,
+    branchRate: totalBranches ? coveredBranches / totalBranches : undefined,
+  }
+})
+const selectedCoverageRow = computed(() => {
+  if (!coverageRows.value.length) return null
+  const focused = coverageRows.value.find((row) => row.id === map.focusId.value)
+  return focused && (focused.hasReport || focused.sourceContent) ? focused
+    : coverageRows.value.find((row) => row.hasReport && row.sourceContent)
+    || coverageRows.value.find((row) => row.sourceContent)
+    || coverageRows.value.find((row) => row.hasReport)
+    || coverageRows.value[0]
+})
+const coverageSourceTitle = computed(() => selectedCoverageRow.value
+  ? `${selectedCoverageRow.value.label} · ${selectedCoverageRow.value.locator}`
+  : '源码覆盖')
+const coverageSourceLines = computed(() => {
+  const row = selectedCoverageRow.value
+  if (!row?.sourceContent) return []
+  const covered = new Set(row.coveredLineNumbers)
+  const total = new Set(row.totalLineNumbers)
+  const start = row.sourceStartLine || 1
+  return row.sourceContent.split(/\r?\n/).slice(0, 420).map((text, index) => {
+    const number = start + index
+    const state = covered.has(number) ? 'covered' : total.has(number) ? 'missed' : 'neutral'
+    return { number, text, state }
+  })
 })
 const relationSummaryRows = computed(() => {
   const req = map.nodes.value.find((node) => node.kind === 'REQUIREMENT')
@@ -567,7 +655,20 @@ const relationSummaryRows = computed(() => {
 async function loadOverview() {
   const overview = await fetchVerificationOverview(projectId.value)
   baselines.value = overview.baselines
-  selectedBaselineId.value = selectedBaselineId.value || overview.baselines.find((b) => ['WAITING_REVIEW', 'COMPLETED'].includes(b.status))?.id || overview.baselines[0]?.id || ''
+  selectedBaselineId.value = selectedBaselineId.value || preferredBaselineId(overview.baselines)
+}
+
+function preferredBaselineId(items: VerificationBaseline[]) {
+  const sorted = [...items].sort((left, right) => timeValue(right.updateTime || right.createTime) - timeValue(left.updateTime || left.createTime))
+  return sorted.find((baseline) => Boolean(baseline.coverageAssetId || baseline.executionAssetId))?.id
+    || sorted.find((baseline) => ['WAITING_REVIEW', 'COMPLETED'].includes(baseline.status))?.id
+    || sorted[0]?.id
+    || ''
+}
+
+function timeValue(value?: string) {
+  const time = value ? new Date(value).getTime() : 0
+  return Number.isFinite(time) ? time : 0
 }
 
 async function reload() {
@@ -830,6 +931,83 @@ function coverageSummaryText(node: TraceabilityNode) {
   const line = coverage.lineRate !== undefined ? `行覆盖 ${Math.round(coverage.lineRate * 100)}%` : ''
   const branch = coverage.branchRate !== undefined ? `分支覆盖 ${Math.round(coverage.branchRate * 100)}%` : ''
   return [line, branch].filter(Boolean).join(' · ') || '已匹配覆盖证据'
+}
+
+function toCoverageRow(node: TraceabilityNode) {
+  const coverage = node.coverage
+  const metadata = node.metadata || {}
+  const coveredLines = coverage?.coveredLines ?? 0
+  const totalLines = coverage?.totalLines ?? 0
+  const coveredBranches = coverage?.coveredBranches ?? 0
+  const totalBranches = coverage?.totalBranches ?? 0
+  const hasReport = Boolean(coverage && (totalLines > 0 || totalBranches > 0))
+  const isCovered = coveredLines > 0 || coveredBranches > 0 || node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH'
+  return {
+    id: node.id,
+    label: node.label || node.symbol || node.id,
+    locator: node.locator || node.symbol || '-',
+    hasReport,
+    isCovered,
+    coveredLines,
+    totalLines,
+    coveredBranches,
+    totalBranches,
+    stateText: coverageStateText(node, hasReport, isCovered),
+    tone: coverageStateTone(node, hasReport, isCovered),
+    lineText: coverageRatioText(coveredLines, totalLines, coverage?.lineRate),
+    branchText: coverageRatioText(coveredBranches, totalBranches, coverage?.branchRate),
+    lineWidth: coverageWidth(coverage?.lineRate, coveredLines, totalLines),
+    branchWidth: coverageWidth(coverage?.branchRate, coveredBranches, totalBranches),
+    sourceContent: stringMetadata(metadata.sourceContent),
+    sourceStartLine: numberMetadata(metadata.sourceStartLine) || lineFromLocator(node.locator) || 1,
+    totalLineNumbers: numberArrayMetadata(metadata.coverageTotalLines),
+    coveredLineNumbers: numberArrayMetadata(metadata.coverageCoveredLines),
+  }
+}
+
+function hasCoverageSummary(node: TraceabilityNode) {
+  const coverage = node.coverage
+  return Boolean(coverage && ((coverage.totalLines ?? 0) > 0 || (coverage.totalBranches ?? 0) > 0))
+}
+
+function coverageStateText(node: TraceabilityNode, hasReport: boolean, isCovered: boolean) {
+  if (hasReport && isCovered) return '已覆盖'
+  if (hasReport) return '未覆盖'
+  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return '动态证据'
+  return '无报告'
+}
+
+function coverageStateTone(node: TraceabilityNode, hasReport: boolean, isCovered: boolean) {
+  if (hasReport && isCovered) return 'covered'
+  if (hasReport) return 'missed'
+  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return 'dynamic'
+  return 'none'
+}
+
+function coverageRatioText(covered: number, total: number, rate?: number) {
+  if (!total) return '-'
+  return `${coveragePercent(rate ?? covered / total)} · ${covered} / ${total}`
+}
+
+function coverageWidth(rate: number | undefined, covered: number, total: number) {
+  if (!total) return '0%'
+  return coveragePercent(rate ?? covered / total)
+}
+
+function coveragePercent(value?: number) {
+  return value === undefined || Number.isNaN(value) ? '-' : `${Math.round(value * 100)}%`
+}
+
+function stringMetadata(value: unknown) {
+  return typeof value === 'string' ? value : ''
+}
+
+function numberMetadata(value: unknown) {
+  return typeof value === 'number' ? value : undefined
+}
+
+function numberArrayMetadata(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : []
 }
 
 function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], selectedNodeId: string) {
@@ -1721,7 +1899,7 @@ onBeforeUnmount(() => {
 .workspace-tabs button.active { border-color:#0f766e; color:#0f766e; }
 .tab-page { min-height:calc(100vh - 340px); }
 .trace-tab { display:flex; flex-direction:column; gap:14px; min-width:0; }
-.calls-tab { display:grid; grid-template-columns:360px minmax(620px,1fr); grid-template-areas:'tree graph'; gap:14px; min-height:calc(100vh - 340px); }
+.calls-tab { display:grid; grid-template-columns:360px minmax(0,1fr); grid-template-areas:'tree graph'; gap:14px; min-height:calc(100vh - 340px); overflow:hidden; }
 .call-graph-pane, .code-side-pane, .map-pane, .reference-panel { overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:14px; background:rgba(255,255,255,.96); box-shadow:0 14px 36px rgba(15,23,42,.05); }
 .trace-map-pane { display:flex; flex-direction:column; min-height:620px; min-width:0; }
 .call-graph-pane, .code-side-pane { display:flex; flex-direction:column; min-width:0; }
@@ -1770,11 +1948,11 @@ onBeforeUnmount(() => {
 .call-color.static { background:#fed7aa; border-color:#f97316; }
 .call-color.recursive { background:#fecaca; border-color:#dc2626; }
 .call-actions { display:flex !important; grid-template-columns:none !important; grid-auto-flow:column; align-items:center; justify-content:flex-end; gap:8px; }
-.segmented-control { display:flex; flex-wrap:wrap; max-width:100%; overflow:visible; border:1px solid #dbe4ee; border-radius:9px; background:#f8fafc; }
+.segmented-control { display:flex; flex-wrap:nowrap; max-width:100%; overflow:visible; border:1px solid #dbe4ee; border-radius:9px; background:#f8fafc; }
 .segmented-control button { flex:0 0 auto; border:0; padding:7px 10px; background:transparent; color:#475569; font-size:12px; font-weight:900; cursor:pointer; white-space:nowrap; }
 .segmented-control button.active { background:#0f766e; color:#fff; }
 .segmented-control button:disabled { cursor:not-allowed; opacity:.45; }
-.mode-control { max-width:420px; }
+.mode-control { max-width:none; }
 .compact-control button { padding:7px 8px; font-size:11px; }
 .ai-call-toggle { flex:0 0 auto; border:1px solid #dbe4ee; border-radius:8px; padding:7px 9px; background:#fff; color:#475569; font-size:12px; font-weight:900; cursor:pointer; white-space:nowrap; }
 .ai-call-toggle.active { border-color:#0f766e; background:#ecfdf5; color:#0f766e; }
@@ -1896,7 +2074,11 @@ onBeforeUnmount(() => {
 .call-map-svg { display:block; min-width:760px; min-height:300px; }
 .call-map-scroll.large.fullscreen .call-graph-viewport { height:calc(100vh - 58px); }
 :global(body.trace-call-graph-fullscreen) { overflow:hidden; }
-.coverage-data-panel { flex:1; overflow:auto; background:#fff; }
+.coverage-data-panel { flex:1; min-width:0; overflow:auto; background:#fff; }
+.coverage-overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; padding:14px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+.coverage-overview-grid article { display:grid; gap:4px; min-width:0; padding:11px 12px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-overview-grid strong { color:#172033; font-size:18px; line-height:1.1; }
+.coverage-overview-grid span { color:#64748b; font-size:11px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .code-analysis-panel { flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
@@ -1913,14 +2095,34 @@ onBeforeUnmount(() => {
 .mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
-.coverage-table { width:100%; border-collapse:collapse; font-size:13px; }
+.coverage-source-view { margin:14px; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+.coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }
+.coverage-source-head span { flex:0 0 auto; color:#64748b; font-size:12px; font-weight:800; }
+.source-code-scroll { max-height:420px; overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
+.source-line { display:grid; grid-template-columns:52px minmax(0,1fr); min-width:760px; }
+.source-line.covered { background:#dcfce7; }
+.source-line.missed { background:#fee2e2; }
+.source-line.neutral { background:#fff; }
+.source-line-no { padding:2px 10px; border-right:1px solid #e5e7eb; color:#94a3b8; text-align:right; user-select:none; }
+.source-line code { padding:2px 10px; color:#172033; white-space:pre; }
+.coverage-table-shell { margin:14px; overflow:auto; border:1px solid #e2e8f0; border-radius:8px; }
+.coverage-table { width:100%; min-width:860px; border-collapse:collapse; font-size:13px; }
 .coverage-table th, .coverage-table td { border-bottom:1px solid #e5e7eb; padding:10px 12px; text-align:left; vertical-align:middle; }
 .coverage-table th { position:sticky; top:0; z-index:1; background:#f8fafc; color:#172033; font-weight:900; }
+.coverage-table tr.active td { background:#f0fdfa; }
 .coverage-table button { border:0; background:transparent; color:#0f766e; font-weight:900; cursor:pointer; }
 .coverage-pill { display:inline-flex; align-items:center; border-radius:999px; padding:2px 8px; background:#f1f5f9; color:#475569; font-size:11px; font-weight:900; }
 .coverage-pill.dynamic { background:#dbeafe; color:#1d4ed8; }
 .coverage-pill.both { background:#ccfbf1; color:#0f766e; }
 .coverage-pill.static { background:#dcfce7; color:#15803d; }
+.coverage-pill.covered { background:#dcfce7; color:#15803d; }
+.coverage-pill.missed { background:#fee2e2; color:#b91c1c; }
+.coverage-pill.none { background:#f1f5f9; color:#64748b; }
+.coverage-meter { display:grid; gap:5px; min-width:150px; }
+.coverage-meter span { color:#334155; font-size:12px; font-weight:800; white-space:nowrap; }
+.coverage-meter i { display:block; height:7px; overflow:hidden; border-radius:999px; background:#fee2e2; }
+.coverage-meter b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#22c55e,#16a34a); }
 .call-svg-edge path { stroke:#94a3b8; stroke-width:1.2; opacity:.62; }
 .call-svg-edge.structure path { stroke:#0f766e; stroke-width:.9; opacity:.28; stroke-dasharray:3 4; }
 .call-svg-edge.inferred path { stroke:#0f766e; stroke-width:1.3; opacity:.72; stroke-dasharray:5 4; }

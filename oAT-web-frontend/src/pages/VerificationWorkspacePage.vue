@@ -214,6 +214,9 @@
               <option value="">不绑定应用</option>
               <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
             </select>
+            <small v-if="baselineForm.coverageAssetId && !baselineForm.sourceAppId" class="field-warning">
+              覆盖率行/分支数据需要绑定应用静态索引后才能和代码节点匹配。
+            </small>
           </label>
           <div class="inline-grid">
             <label>
@@ -1329,7 +1332,7 @@ function assetAccept(type: AssetType) {
     SOURCE: '.zip,.jar,.java,.kt,.js,.jsx,.ts,.tsx,.vue,.py,.go,.rs,.cs,.php,.rb,.xml,.yaml,.yml,.json,.properties',
     DEFECT: '.xls,.xlsx,.csv,.tsv,.json,.txt,.md,.markdown,.doc,.docx',
     EXECUTION: '.xls,.xlsx,.csv,.tsv,.json,.txt,.md,.markdown,.xml',
-    COVERAGE: '.zip,.xml,.json,.info,.lcov,.out,.cov,.coverage,.csv,.tsv,.txt',
+    COVERAGE: '.zip,.exec,.xml,.json,.info,.lcov,.out,.cov,.coverage,.csv,.tsv,.txt',
   }
   return map[type]
 }
@@ -1360,6 +1363,11 @@ async function importAsset(type: AssetType) {
 
 async function saveBaseline() {
   if (creatingBaseline.value) return
+  if (baselineForm.coverageAssetId && !baselineForm.sourceAppId) {
+    error.value = '已选择覆盖率依据时，请同时选择应用静态索引；覆盖率数据不需要运行 AI 分析，创建或更新基线后即可在链路地图查看。'
+    toast.error(error.value)
+    return
+  }
   creatingBaseline.value = true
   try {
     const updating = !!editingBaselineId.value
@@ -2150,6 +2158,14 @@ function messageOf(err: unknown) {
   color: var(--oat-text-muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.field-warning {
+  margin-top: -2px;
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
 }
 
 .field-help a {

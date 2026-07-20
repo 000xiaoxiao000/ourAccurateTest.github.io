@@ -63,6 +63,17 @@ public class UniversalCoverageFile implements Serializable {
         index.setTotalLines(lines.size());
         index.setCoveredLines((int) lines.stream().filter(line -> line.coveredCount > 0).count());
         index.setLineRate(rate(index.getCoveredLines(), index.getTotalLines()));
+        index.setTotalLineNumbers(lines.stream()
+                .map(LineCoverage::getLine)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toCollection(ArrayList::new)));
+        index.setCoveredLineNumbers(lines.stream()
+                .filter(line -> line.coveredCount > 0)
+                .map(LineCoverage::getLine)
+                .distinct()
+                .sorted()
+                .collect(Collectors.toCollection(ArrayList::new)));
         index.setTotalBranchTargets(branches.size());
         index.setCoveredBranchTargets((int) branches.stream().filter(branch -> branch.coveredCount > 0).count());
         index.setTotalBranches((int) branches.stream().map(BranchCoverage::branchGroupKey).distinct().count());

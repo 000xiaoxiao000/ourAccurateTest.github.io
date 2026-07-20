@@ -2,6 +2,7 @@ package com.oAT.web.control.api;
 
 import com.alibaba.excel.EasyExcel;
 import com.oAT.web.control.entity.ResultNotified;
+import com.oAT.web.coverage.universal.JacocoExecToXmlConverter;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.ProjectService;
@@ -46,7 +47,10 @@ import java.io.File;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Set;
@@ -70,7 +74,7 @@ public class VerificationApiControl {
             ".cs", ".php", ".rb", ".swift", ".m", ".mm",
             ".sql", ".xml", ".yaml", ".yml", ".json", ".properties");
     private static final Set<String> COVERAGE_EXTENSIONS = Set.of(
-            ".xml", ".json", ".info", ".lcov", ".txt", ".out", ".cov", ".coverage", ".csv", ".tsv");
+            ".exec", ".xml", ".html", ".json", ".info", ".lcov", ".txt", ".out", ".cov", ".coverage", ".csv", ".tsv");
     private static final Set<String> X_MIND_TEXT_ENTRIES = Set.of(
             "content.json", "content.xml", "metadata.json", "manifest.json");
     private static final String SOURCE_TREE_BEGIN = "// SOURCE_TREE_BEGIN";
@@ -87,6 +91,7 @@ public class VerificationApiControl {
     private final GitImpactAnalysisService gitImpactAnalysisService;
     private final ImpactTraceabilityMapper impactTraceabilityMapper;
     private final ConnectorRegistry connectorRegistry;
+    private final JacocoExecToXmlConverter jacocoExecToXmlConverter;
     private final Executor verificationAiExecutor;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
@@ -96,6 +101,7 @@ public class VerificationApiControl {
                                   GitImpactAnalysisService gitImpactAnalysisService,
                                   ImpactTraceabilityMapper impactTraceabilityMapper,
                                   ConnectorRegistry connectorRegistry,
+                                  JacocoExecToXmlConverter jacocoExecToXmlConverter,
                                   @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.verificationService = verificationService;
         this.projectService = projectService;
@@ -106,6 +112,7 @@ public class VerificationApiControl {
         this.gitImpactAnalysisService = gitImpactAnalysisService;
         this.impactTraceabilityMapper = impactTraceabilityMapper;
         this.connectorRegistry = connectorRegistry;
+        this.jacocoExecToXmlConverter = jacocoExecToXmlConverter;
         this.verificationAiExecutor = verificationAiExecutor;
     }
 
@@ -526,6 +533,9 @@ public class VerificationApiControl {
                 Files.deleteIfExists(tempZip.toPath());
             }
         }
+        if (name.endsWith(".exec") && assetType == AssetType.COVERAGE) {
+            throw new IllegalArgumentException("JaCoCo exec 需要与 classfiles 一起上传，请打包为 zip，包含 jacoco.exec 和 classes/ 或 target/classes/");
+        }
         if (name.endsWith(".xmind")) {
             File tempXmind = Files.createTempFile("oat-verification-upload-mindmap-", ".xmind").toFile();
             try {
@@ -596,6 +606,9 @@ public class VerificationApiControl {
     }
 
     private String summarizeCoverageArchive(File archiveFile) throws IOException {
+        String jacocoXml = convertJacocoExecArchiveIfPresent(archiveFile);
+        if (jacocoXml != null) return jacocoXml;
+
         StringBuilder builder = new StringBuilder("多语言覆盖率资料\n");
         int count = 0;
         try (ZipFile zip = new ZipFile(archiveFile, StandardCharsets.UTF_8)) {
@@ -614,6 +627,165 @@ public class VerificationApiControl {
         }
         Assert.isTrue(count > 0, "覆盖率压缩包中未找到可读取的覆盖率文件");
         return builder.toString();
+    }
+
+    private String convertJacocoExecArchiveIfPresent(File archiveFile) throws IOException {
+        try (ZipFile zip = new ZipFile(archiveFile, StandardCharsets.UTF_8)) {
+            boolean hasExec = zip.stream().anyMatch(entry -> !entry.isDirectory()
+                    && entry.getName().toLowerCase().endsWith(".exec"));
+            if (!hasExec) return null;
+        }
+
+        Path tempDir = Files.createTempDirectory("oat-jacoco-exec-");
+        try {
+            unzipSafely(archiveFile, tempDir);
+            List<File> execFiles = listFiles(tempDir, path -> path.getFileName().toString().toLowerCase().endsWith(".exec"))
+                    .stream()
+                    .map(Path::toFile)
+                    .toList();
+            Assert.isTrue(execFiles.size() == 1, "覆盖率压缩包中必须包含且仅包含一个 JaCoCo exec 文件");
+
+            List<File> classRoots = discoverClassRoots(tempDir);
+            Assert.notEmpty(classRoots, "JaCoCo exec 覆盖率包中未找到业务 class 文件，请包含 classes/、target/classes/、应用 jar 或 war");
+            List<File> sourceRoots = discoverSourceRoots(tempDir);
+            if (sourceRoots.isEmpty()) sourceRoots = List.of(tempDir.toFile());
+            String xml = jacocoExecToXmlConverter.convert(execFiles.get(0), classRoots, sourceRoots);
+            Assert.isTrue(xml.contains("<sourcefile ") && xml.contains("<line "),
+                    "JaCoCo exec 已读取，但未匹配到可展示的行覆盖率。请确认 zip 中的 exec 来自同一个目标 jar/war，且目标包保留了行号调试信息。");
+            return xml;
+        } finally {
+            deleteIteratively(tempDir);
+        }
+    }
+
+    private void unzipSafely(File archiveFile, Path targetDir) throws IOException {
+        try (ZipFile zip = new ZipFile(archiveFile, StandardCharsets.UTF_8)) {
+            List<? extends ZipEntry> entries = zip.stream()
+                    .filter(entry -> !entry.isDirectory())
+                    .filter(entry -> !isMacOsMetadataEntry(entry.getName()))
+                    .sorted(Comparator.comparing(ZipEntry::getName))
+                    .toList();
+            for (ZipEntry entry : entries) {
+                Path target = targetDir.resolve(entry.getName()).normalize();
+                if (!target.startsWith(targetDir)) throw new IllegalArgumentException("覆盖率压缩包包含非法路径: " + entry.getName());
+                Files.createDirectories(target.getParent());
+                Files.copy(zip.getInputStream(entry), target);
+            }
+        }
+    }
+
+    private List<File> discoverClassRoots(Path root) throws IOException {
+        Set<Path> roots = new java.util.LinkedHashSet<>();
+        for (Path path : listFiles(root, path -> {
+            String name = path.getFileName().toString().toLowerCase();
+            return !isMacOsMetadataEntry(root.relativize(path).toString())
+                    && (name.endsWith(".class") || (isJavaArchive(path) && !isDependencyArchive(root, path)));
+        })) {
+            roots.add(classRootFor(root, path));
+        }
+        return roots.stream().map(Path::toFile).toList();
+    }
+
+    private boolean isMacOsMetadataEntry(String name) {
+        String normalized = name == null ? "" : name.replace('\\', '/');
+        int slash = normalized.lastIndexOf('/');
+        String fileName = slash >= 0 ? normalized.substring(slash + 1) : normalized;
+        return normalized.startsWith("__MACOSX/") || fileName.startsWith("._") || ".DS_Store".equals(fileName);
+    }
+
+    private Path classRootFor(Path archiveRoot, Path classFile) {
+        Path relative = archiveRoot.relativize(classFile);
+        int nameCount = relative.getNameCount();
+        for (int i = 0; i < nameCount; i++) {
+            String segment = relative.getName(i).toString();
+            if ("classes".equals(segment)) return archiveRoot.resolve(relative.subpath(0, i + 1));
+            if ("BOOT-INF".equals(segment) && i + 1 < nameCount && "classes".equals(relative.getName(i + 1).toString())) {
+                return archiveRoot.resolve(relative.subpath(0, i + 2));
+            }
+            if ("WEB-INF".equals(segment) && i + 1 < nameCount && "classes".equals(relative.getName(i + 1).toString())) {
+                return archiveRoot.resolve(relative.subpath(0, i + 2));
+            }
+        }
+        if (isJavaArchive(classFile)) return classFile;
+        return archiveRoot;
+    }
+
+    private boolean isDependencyArchive(Path archiveRoot, Path archiveFile) {
+        Path relative = archiveRoot.relativize(archiveFile);
+        for (int i = 0; i + 1 < relative.getNameCount(); i++) {
+            String segment = relative.getName(i).toString();
+            if (("BOOT-INF".equals(segment) || "WEB-INF".equals(segment))
+                    && "lib".equals(relative.getName(i + 1).toString())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean isJavaArchive(Path path) {
+        String name = path.getFileName().toString().toLowerCase();
+        return name.endsWith(".jar") || name.endsWith(".war");
+    }
+
+    private List<File> discoverSourceRoots(Path root) throws IOException {
+        Set<Path> roots = new java.util.LinkedHashSet<>();
+        for (Path path : listFiles(root, path -> SOURCE_EXTENSIONS.stream()
+                .anyMatch(ext -> path.getFileName().toString().toLowerCase().endsWith(ext)))) {
+            roots.add(sourceRootFor(root, path));
+        }
+        return roots.stream().map(Path::toFile).toList();
+    }
+
+    private Path sourceRootFor(Path archiveRoot, Path sourceFile) {
+        Path relative = archiveRoot.relativize(sourceFile);
+        int nameCount = relative.getNameCount();
+        for (int i = 0; i < nameCount; i++) {
+            String segment = relative.getName(i).toString();
+            if ("sources".equals(segment) || "source".equals(segment)) return archiveRoot.resolve(relative.subpath(0, i + 1));
+            if ("src".equals(segment) && i + 2 < nameCount
+                    && "main".equals(relative.getName(i + 1).toString())
+                    && "java".equals(relative.getName(i + 2).toString())) {
+                return archiveRoot.resolve(relative.subpath(0, i + 3));
+            }
+        }
+        return archiveRoot;
+    }
+
+    private void deleteIteratively(Path root) throws IOException {
+        if (root == null || !Files.exists(root)) return;
+        List<Path> entries = listEntries(root);
+        entries.sort(Comparator.reverseOrder());
+        for (Path entry : entries) Files.deleteIfExists(entry);
+    }
+
+    private List<Path> listFiles(Path root, PathMatcher matcher) throws IOException {
+        List<Path> result = new ArrayList<>();
+        for (Path entry : listEntries(root)) {
+            if (Files.isRegularFile(entry) && matcher.matches(entry)) result.add(entry);
+        }
+        result.sort(Comparator.naturalOrder());
+        return result;
+    }
+
+    private List<Path> listEntries(Path root) throws IOException {
+        List<Path> result = new ArrayList<>();
+        ArrayDeque<Path> pending = new ArrayDeque<>();
+        pending.add(root);
+        while (!pending.isEmpty()) {
+            Path current = pending.removeFirst();
+            result.add(current);
+            if (Files.isDirectory(current)) {
+                try (var entries = Files.newDirectoryStream(current)) {
+                    for (Path entry : entries) pending.addLast(entry);
+                }
+            }
+        }
+        return result;
+    }
+
+    @FunctionalInterface
+    private interface PathMatcher {
+        boolean matches(Path path);
     }
 
     private ProjectVo ensureProjectAccess(String projectId, UserVo user) {

@@ -32,7 +32,7 @@ class TraceabilityMapServiceSourceParsingTest {
                     static class User {}
                 }
                 """;
-        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null);
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
 
         Method parser = TraceabilityMapService.class.getDeclaredMethod("parseJavaSource", String.class, String.class);
         parser.setAccessible(true);

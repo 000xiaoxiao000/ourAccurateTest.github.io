@@ -15,6 +15,7 @@ import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.oAT.web.common.UtilJson;
+import com.oAT.web.coverage.universal.CoverageReportService;
 import com.oAT.web.esDao.ClassCoverageIndexRepository;
 import com.oAT.web.esDao.StaticInfoRepository;
 import com.oAT.web.esDao.entity.ClassCoverageIndex;
@@ -97,19 +98,22 @@ public class TraceabilityMapService {
     private final CodeSymbolNormalizer normalizer;
     private final AppService appService;
     private final ClassCoverageIndexRepository classCoverageIndexRepository;
+    private final CoverageReportService coverageReportService;
 
     public TraceabilityMapService(VerificationRepository verificationRepository,
                                   StaticInfoRepository staticInfoRepository,
                                   AssetContentStore assetContentStore,
                                   CodeSymbolNormalizer normalizer,
                                   AppService appService,
-                                  ClassCoverageIndexRepository classCoverageIndexRepository) {
+                                  ClassCoverageIndexRepository classCoverageIndexRepository,
+                                  CoverageReportService coverageReportService) {
         this.verificationRepository = verificationRepository;
         this.staticInfoRepository = staticInfoRepository;
         this.assetContentStore = assetContentStore;
         this.normalizer = normalizer;
         this.appService = appService;
         this.classCoverageIndexRepository = classCoverageIndexRepository;
+        this.coverageReportService = coverageReportService;
     }
 
     public TraceabilityMapResponse build(String projectId, String baselineId, String focusId, String direction,
@@ -414,8 +418,12 @@ public class TraceabilityMapService {
         for (SourceUnit unit : units) {
             String path = normalizer.normalizePath(unit.path());
             String fileId = normalizer.fileId(languageFromPath(path), path);
+            Map<String, Object> fileMetadata = new LinkedHashMap<>();
+            fileMetadata.put("sourceAssetId", asset.id());
+            fileMetadata.put("sourceContent", sourceSnippet(unit.content()));
+            fileMetadata.put("sourceStartLine", 1);
             index.putCodeNode(new TraceabilityNode(fileId, NodeKind.CODE_FILE, normalizer.simpleFileName(path), path, path,
-                    "CODE", languageFromPath(path), path, null, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
+                    "CODE", languageFromPath(path), path, null, EvidenceState.STATIC, null, fileMetadata));
             if (collectCodeAnalysis) {
                 Matcher importMatcher = IMPORT_PATTERN.matcher(unit.content());
                 while (importMatcher.find() && index.dependencies.size() < 5000) {
@@ -429,8 +437,12 @@ public class TraceabilityMapService {
             }
             for (ParsedSourceClass parsedClass : parsedClasses) {
                 String classId = normalizer.classId(languageFromPath(path), path, parsedClass.className());
+                Map<String, Object> classMetadata = new LinkedHashMap<>();
+                classMetadata.put("sourceAssetId", asset.id());
+                classMetadata.put("sourceContent", sourceSnippet(unit.content()));
+                classMetadata.put("sourceStartLine", 1);
                 index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, simpleClassName(parsedClass.className()), parsedClass.className(), path,
-                        "CODE", languageFromPath(path), parsedClass.className(), fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
+                        "CODE", languageFromPath(path), parsedClass.className(), fileId, EvidenceState.STATIC, null, classMetadata));
                 index.alias(path, classId);
                 index.alias(parsedClass.className(), classId);
                 for (ParsedSourceMethod method : parsedClass.methods()) {
@@ -441,6 +453,8 @@ public class TraceabilityMapService {
                     metadata.put("visibility", method.visibility());
                     metadata.put("staticMethod", method.staticMethod());
                     metadata.put("descriptor", method.descriptor());
+                    metadata.put("sourceContent", sourceSnippet(method.body()));
+                    metadata.put("sourceStartLine", method.line());
                     index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, method.methodName(), method.signature(), path + ":" + method.line(),
                             "CODE", languageFromPath(path), parsedClass.className() + "#" + method.methodName(), classId, EvidenceState.STATIC,
                             null, metadata));
@@ -463,8 +477,12 @@ public class TraceabilityMapService {
         String path = normalizer.normalizePath(unit.path());
         String className = extractClassName(path, unit.content());
         String classId = normalizer.classId(languageFromPath(path), path, className);
+        Map<String, Object> classMetadata = new LinkedHashMap<>();
+        classMetadata.put("sourceAssetId", asset.id());
+        classMetadata.put("sourceContent", sourceSnippet(unit.content()));
+        classMetadata.put("sourceStartLine", 1);
         index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, className, className, path,
-                "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
+                "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, classMetadata));
         index.alias(path, classId);
         index.alias(className, classId);
         Matcher matcher = METHOD_PATTERN.matcher(unit.content());
@@ -476,17 +494,22 @@ public class TraceabilityMapService {
             int line = lineNumber(unit.content(), matcher.start());
             String methodId = normalizer.methodId(languageFromPath(path), path, className, methodName, null);
             String declaration = unit.content().substring(matcher.start(), matcher.end());
+            int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
+            String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("line", line);
+            metadata.put("sourceAssetId", asset.id());
+            metadata.put("visibility", declaration.contains("private") ? "PRIVATE" : declaration.contains("protected") ? "PROTECTED" : "PUBLIC");
+            metadata.put("staticMethod", declaration.contains("static"));
+            metadata.put("sourceContent", sourceSnippet(body));
+            metadata.put("sourceStartLine", line);
             index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, "", path + ":" + line,
                     "CODE", languageFromPath(path), className + "#" + methodName, classId, EvidenceState.STATIC,
-                    null, Map.of("line", line, "sourceAssetId", asset.id(),
-                            "visibility", declaration.contains("private") ? "PRIVATE" : declaration.contains("protected") ? "PROTECTED" : "PUBLIC",
-                            "staticMethod", declaration.contains("static"))));
+                    null, metadata));
             index.alias(methodName, methodId);
             index.alias(className + "#" + methodName, methodId);
             index.alias(path + "#" + methodName, methodId);
             if (collectCodeAnalysis) {
-                int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
-                String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
                 index.methodSpans.add(new MethodSpan(methodId, className, methodName, body, inferredInvocations(body)));
                 addControlFlowSteps(index, methodId, methodName, body);
             }
@@ -673,18 +696,28 @@ public class TraceabilityMapService {
         if (StringUtils.hasText(baseline.coverageAssetId())) {
             List<ClassCoverageIndex> coverageIndexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
             if (coverageIndexes.isEmpty()) {
-                verificationRepository.findAsset(projectId, baseline.coverageAssetId())
-                        .ifPresent(asset -> covered.addAll(matchCodeMentions(assetContent(asset), codeIndex)));
-            } else {
+                Optional<AssetSnapshot> coverageAsset = verificationRepository.findAsset(projectId, baseline.coverageAssetId());
+                coverageIndexes = parseCoverageIndexesFromAsset(coverageAsset.orElse(null), baseline.sourceAppId(), warnings);
+                if (coverageIndexes.isEmpty()) {
+                    coverageAsset.ifPresent(asset -> covered.addAll(matchCodeMentions(assetContent(asset), codeIndex)));
+                }
+            }
+            if (!coverageIndexes.isEmpty()) {
                 for (ClassCoverageIndex index : coverageIndexes) {
+                    String nodeId = codeIndex.resolveCoverageNode(index);
+                    if (nodeId != null) {
+                        codeIndex.applyCoverageSummary(nodeId, coverageSummary(index), coverageMetadata(index));
+                        codeIndex.applyMethodCoverage(index);
+                    }
                     if (index.getCoveredLines() <= 0 && index.getCoveredBranchTargets() <= 0 && index.getCoveredMethods() <= 0) {
                         continue;
                     }
-                    String nodeId = codeIndex.resolve(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
                     if (nodeId != null) {
                         covered.add(nodeId);
                     }
                 }
+            } else {
+                warnings.add("覆盖率报告未解析出可匹配的行/分支数据，仅展示动态证据匹配结果");
             }
         }
         if (StringUtils.hasText(baseline.executionAssetId())) {
@@ -702,6 +735,20 @@ public class TraceabilityMapService {
             warnings.add("当前基线无动态执行或覆盖资产，仅展示静态追溯关系");
         }
         return new DynamicEvidence(covered, calls);
+    }
+
+    private List<ClassCoverageIndex> parseCoverageIndexesFromAsset(AssetSnapshot asset, String appId, List<String> warnings) {
+        if (asset == null || !StringUtils.hasText(appId)) return List.of();
+        try {
+            AppVo app = appService.getApp(appId);
+            if (app == null) return List.of();
+            return coverageReportService.parse(app, assetContent(asset).getBytes(StandardCharsets.UTF_8)).stream()
+                    .map(file -> file.toClassCoverageIndex(appId))
+                    .toList();
+        } catch (RuntimeException exception) {
+            warnings.add("覆盖率报告即时解析失败：" + exception.getMessage());
+            return List.of();
+        }
     }
 
     private Set<String> matchCodeMentions(String content, CodeIndex codeIndex) {
@@ -857,6 +904,7 @@ public class TraceabilityMapService {
             }
             MutableTreeNode file = new MutableTreeNode(node.id(), CodeTreeKind.FILE, node.label(), path, parentKey, node.language());
             file.evidenceState = dynamicNodes.contains(node.id()) ? EvidenceState.BOTH : node.evidenceState();
+            file.coverage = node.coverage();
             currentLevel.put(node.id(), file);
             attachCodeChildren(index, file, node.id(), dynamicNodes);
         }
@@ -871,9 +919,56 @@ public class TraceabilityMapService {
                     CodeTreeKind kind = node.kind() == NodeKind.CODE_CLASS ? CodeTreeKind.CLASS : CodeTreeKind.METHOD;
                     MutableTreeNode child = new MutableTreeNode(node.id(), kind, node.label(), node.locator(), parent.id, node.language());
                     child.evidenceState = dynamicNodes.contains(node.id()) ? EvidenceState.BOTH : node.evidenceState();
+                    child.coverage = node.coverage();
                     parent.children.put(node.id(), child);
                     attachCodeChildren(index, child, node.id(), dynamicNodes);
                 });
+    }
+
+    private CoverageSummary coverageSummary(ClassCoverageIndex index) {
+        return new CoverageSummary(index.getCoveredLines(), index.getTotalLines(), index.getLineRate(),
+                index.getCoveredBranchTargets(), index.getTotalBranchTargets(), index.getBranchRate());
+    }
+
+    private Map<String, Object> coverageMetadata(ClassCoverageIndex index) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        Set<Integer> totalLines = new LinkedHashSet<>();
+        Set<Integer> coveredLines = new LinkedHashSet<>();
+        if (index.getTotalLineNumbers() != null) totalLines.addAll(index.getTotalLineNumbers());
+        if (index.getCoveredLineNumbers() != null) coveredLines.addAll(index.getCoveredLineNumbers());
+        if (index.getMethods() != null) {
+            for (ClassCoverageIndex.MethodCoverageDetail method : index.getMethods()) {
+                if (method == null) continue;
+                if (method.getTotalLineNumbers() != null) totalLines.addAll(method.getTotalLineNumbers());
+                if (method.getCoveredLineNumbers() != null) coveredLines.addAll(method.getCoveredLineNumbers());
+            }
+        }
+        metadata.put("coverageTotalLines", new ArrayList<>(totalLines));
+        metadata.put("coverageCoveredLines", new ArrayList<>(coveredLines));
+        return metadata;
+    }
+
+    private CoverageSummary mergeCoverage(CoverageSummary current, CoverageSummary incoming) {
+        if (current == null) return incoming;
+        int coveredLines = integer(current.coveredLines()) + integer(incoming.coveredLines());
+        int totalLines = integer(current.totalLines()) + integer(incoming.totalLines());
+        int coveredBranches = integer(current.coveredBranches()) + integer(incoming.coveredBranches());
+        int totalBranches = integer(current.totalBranches()) + integer(incoming.totalBranches());
+        return new CoverageSummary(coveredLines, totalLines, rate(coveredLines, totalLines),
+                coveredBranches, totalBranches, rate(coveredBranches, totalBranches));
+    }
+
+    private int integer(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private Double rate(int covered, int total) {
+        return total == 0 ? null : Math.round((double) covered / total * 10000) / 10000.0;
+    }
+
+    private String sourceSnippet(String source) {
+        String value = value(source);
+        return value.length() <= 60_000 ? value : value.substring(0, 60_000);
     }
 
     private String resolveTraceNode(String type, String id, CodeIndex codeIndex) {
@@ -1249,6 +1344,34 @@ public class TraceabilityMapService {
             alias(node.label(), node.id());
         }
 
+        void applyCoverageSummary(String nodeId, CoverageSummary coverage, Map<String, Object> coverageMetadata) {
+            TraceabilityNode node = nodes.get(nodeId);
+            if (node == null || coverage == null) return;
+            Map<String, Object> metadata = new LinkedHashMap<>(node.metadata() == null ? Map.of() : node.metadata());
+            if (coverageMetadata != null) metadata.putAll(coverageMetadata);
+            nodes.put(nodeId, new TraceabilityNode(node.id(), node.kind(), node.label(), node.description(),
+                    node.locator(), node.layer(), node.language(), node.symbol(), node.parentId(),
+                    node.evidenceState(), mergeCoverage(node.coverage(), coverage), metadata));
+        }
+
+        void applyMethodCoverage(ClassCoverageIndex index) {
+            if (index == null || index.getMethods() == null) return;
+            String classText = firstText(index.getClassName(), index.getSourcePath(), index.getDisplayName());
+            for (ClassCoverageIndex.MethodCoverageDetail method : index.getMethods()) {
+                if (method == null || !StringUtils.hasText(method.getMethodName())) continue;
+                String methodId = resolve(classText + "#" + method.getMethodName());
+                if (methodId == null) methodId = resolve(classText + "." + method.getMethodName());
+                if (methodId == null) methodId = resolve(method.getMethodName());
+                if (methodId == null) continue;
+                CoverageSummary coverage = new CoverageSummary(method.getCoveredLines(), method.getTotalLines(), rate(method.getCoveredLines(), method.getTotalLines()),
+                        method.getCoveredBranchTargets(), method.getTotalBranchTargets(), method.getBranchRate());
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("coverageTotalLines", method.getTotalLineNumbers() == null ? List.of() : method.getTotalLineNumbers());
+                metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
+                applyCoverageSummary(methodId, coverage, metadata);
+            }
+        }
+
         void alias(String alias, String id) {
             String key = normalizer.normalizeLookupKey(alias);
             if (StringUtils.hasText(key)) {
@@ -1272,6 +1395,26 @@ public class TraceabilityMapService {
                     .filter(entry -> normalized.contains(entry.getKey()) || entry.getKey().contains(normalized))
                     .max(Comparator.comparingInt(entry -> entry.getKey().length()))
                     .map(Map.Entry::getValue)
+                    .orElse(null);
+        }
+
+        String resolveCoverageNode(ClassCoverageIndex index) {
+            if (index == null) return null;
+            String direct = resolve(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
+            if (direct != null) return direct;
+            String sourcePath = normalizer.normalizePath(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
+            String simpleName = simpleClassName(firstText(index.getClassName(), index.getDisplayName(), sourcePath)).toLowerCase(Locale.ROOT);
+            return nodes.values().stream()
+                    .filter(node -> node.kind() == NodeKind.CODE_FILE || node.kind() == NodeKind.CODE_CLASS)
+                    .filter(node -> {
+                        String locator = normalizer.normalizePath(firstText(node.locator(), node.symbol(), node.description()));
+                        String label = value(node.label()).toLowerCase(Locale.ROOT);
+                        String symbol = value(node.symbol()).toLowerCase(Locale.ROOT);
+                        return (StringUtils.hasText(sourcePath) && (locator.endsWith(sourcePath) || sourcePath.endsWith(locator)))
+                                || (StringUtils.hasText(simpleName) && (label.equals(simpleName) || symbol.endsWith("." + simpleName)));
+                    })
+                    .max(Comparator.comparingInt(node -> value(node.locator()).length()))
+                    .map(TraceabilityNode::id)
                     .orElse(null);
         }
 
@@ -1467,6 +1610,7 @@ public class TraceabilityMapService {
         private final String parentId;
         private final String language;
         private EvidenceState evidenceState = EvidenceState.STATIC;
+        private CoverageSummary coverage;
         private final Map<String, MutableTreeNode> children = new LinkedHashMap<>();
 
         private MutableTreeNode(String id, CodeTreeKind kind, String label, String path, String parentId, String language) {
@@ -1479,7 +1623,7 @@ public class TraceabilityMapService {
         }
 
         private CodeTreeNode toPayload() {
-            return new CodeTreeNode(id, kind, label, path, parentId, language, evidenceState, null,
+            return new CodeTreeNode(id, kind, label, path, parentId, language, evidenceState, coverage,
                     children.values().stream().map(MutableTreeNode::toPayload).toList());
         }
     }

@@ -26,6 +26,8 @@ public class ClassCoverageIndex implements Serializable {
     private Double lineRate;
     private Double branchRate;
     private Double methodRate;
+    private List<Integer> coveredLineNumbers = new ArrayList<>();
+    private List<Integer> totalLineNumbers = new ArrayList<>();
     private List<MethodCoverageDetail> methods = new ArrayList<>();
     private Boolean hasCodeChanges;
 
@@ -69,6 +71,10 @@ public class ClassCoverageIndex implements Serializable {
     public void setBranchRate(Double branchRate) { this.branchRate = branchRate; }
     public Double getMethodRate() { return methodRate; }
     public void setMethodRate(Double methodRate) { this.methodRate = methodRate; }
+    public List<Integer> getCoveredLineNumbers() { return coveredLineNumbers; }
+    public void setCoveredLineNumbers(List<Integer> coveredLineNumbers) { this.coveredLineNumbers = coveredLineNumbers; }
+    public List<Integer> getTotalLineNumbers() { return totalLineNumbers; }
+    public void setTotalLineNumbers(List<Integer> totalLineNumbers) { this.totalLineNumbers = totalLineNumbers; }
     public List<MethodCoverageDetail> getMethods() { return methods; }
     public void setMethods(List<MethodCoverageDetail> methods) { this.methods = methods; }
     public Boolean getHasCodeChanges() { return hasCodeChanges; }
