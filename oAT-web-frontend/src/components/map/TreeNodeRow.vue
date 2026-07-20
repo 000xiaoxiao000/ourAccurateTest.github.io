@@ -38,7 +38,7 @@
     >
       <span class="tree-icon-toggle">{{ openClasses.has(node.file.id) ? '▾' : '▸' }}</span>
       <span class="tree-icon-file">{{ node.file.name.endsWith('.java') || node.name.endsWith('java') ? '☕' : '📄' }}</span>
-      <span class="tree-label">{{ node.name }}</span>
+      <span class="tree-label" :title="node.file.name || node.name">{{ node.name }}</span>
       <em v-if="linkedIds.has(node.file.nodeId)" class="tree-count tree-count--linked">{{ linkCount(node.file.nodeId) }}</em>
     </button>
     <div v-if="openClasses.has(node.file.id)" class="tree-methods-block">
@@ -50,7 +50,7 @@
         @click="$emit('select', method.nodeId)"
       >
         <span class="tree-icon-method">{{ linkedIds.has(method.nodeId) ? '◉' : '○' }}</span>
-        <span class="tree-label tree-label--method">{{ method.name }}</span>
+        <span class="tree-label tree-label--method" :title="methodTitle(method)">{{ method.name }}</span>
         <span v-if="method.line" class="tree-lineno">L{{ method.line }}</span>
         <em v-if="linkedIds.has(method.nodeId)" class="tree-count tree-count--linked">{{ linkCount(method.nodeId) }}</em>
       </button>
@@ -94,6 +94,10 @@ function countFiles(node: TreeNode): number {
 
 function linkCount(nodeId: string): number {
   return props.getLinkCount(nodeId)
+}
+
+function methodTitle(method: CodeTreeMethod): string {
+  return method.line ? `${method.name} · L${method.line}` : method.name
 }
 </script>
 

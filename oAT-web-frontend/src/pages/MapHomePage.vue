@@ -87,6 +87,7 @@
                 :class="['trace-svg-node', node.tone, { active: selectedTraceId === node.id, linked: traceGraph.linkedIds.has(node.id) }]"
                 @click="selectTraceNode(node.id)"
               >
+                <title>{{ traceNodeTitle(node.raw) }}</title>
                 <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
                 <text class="node-title" :x="node.x + node.width / 2" :y="node.y + 22">{{ node.shortLabel }}</text>
                 <text class="node-subtitle" :x="node.x + node.width / 2" :y="node.y + 40">{{ node.shortDesc }}</text>
@@ -94,6 +95,7 @@
             </g>
             <g class="trace-edge-layer">
               <g v-for="edge in traceGraph.edges" :key="edge.id" :class="['trace-svg-edge', evidenceTone(edge.raw), { active: edge.source === selectedTraceId || edge.target === selectedTraceId }]">
+                <title>{{ traceEdgeTitle(edge.raw) }}</title>
                 <path :d="edge.path" marker-end="url(#trace-arrow)" />
                 <text :x="edge.labelX" :y="edge.labelY">{{ relationLabel(edge.raw.relation) }}</text>
               </g>
@@ -231,6 +233,7 @@
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
             >
+              <title>{{ miniNodeTitle(node) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text>
             </g>
@@ -253,6 +256,7 @@
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
             >
+              <title>{{ miniNodeTitle(node) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
               <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
@@ -284,6 +288,7 @@
               :key="edge.id"
               :class="['call-svg-edge', evidenceTone(edge.raw), { structure: edge.raw.generationMethod === 'CODE_STRUCTURE', inferred: edge.raw.generationMethod === 'SOURCE_EXPRESSION', recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedEdgeIds.has(edge.id) }]"
             >
+              <title>{{ callEdgeTitle(edge.raw) }}</title>
               <path :d="edge.path" marker-end="url(#call-arrow)" />
               <template v-if="edge.raw.generationMethod !== 'CODE_STRUCTURE'">
                 <rect class="edge-label-bg" :x="edge.labelX - edge.labelWidth / 2" :y="edge.labelY - 13" :width="edge.labelWidth" height="19" rx="4" />
@@ -296,6 +301,7 @@
               :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
               @click.stop="selectCallGraphNode(node.id)"
             >
+              <title>{{ traceNodeTitle(node.raw) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.shortLabel }}</text>
               <text class="call-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 36">{{ node.shortDesc }}</text>
@@ -1427,6 +1433,56 @@ function nodeKindLabel(kind?: string) {
 
 function relationLabel(relation: TraceRelation) {
   return ({ VERIFIED_BY: '验证', COVERS: '覆盖', IMPLEMENTED_BY: '实现', CALLS: '调用' } as Record<TraceRelation, string>)[relation]
+}
+
+function traceNodeTitle(node: TraceabilityNode) {
+  return [
+    `${nodeKindLabel(node.kind)}：${node.label || node.id}`,
+    node.symbol ? `符号：${node.symbol}` : '',
+    node.locator ? `位置：${node.locator}` : '',
+    node.description ? `说明：${node.description}` : '',
+    node.language ? `语言：${node.language}` : '',
+    node.metadata?.staticMethod === true ? '方法类型：静态方法' : '',
+    node.metadata?.visibility ? `可见性：${node.metadata.visibility}` : '',
+    node.metadata?.recursive === true ? '递归：是' : '',
+    `ID：${node.id}`,
+  ].filter(Boolean).join('\n')
+}
+
+function traceEdgeTitle(edge: TraceabilityEdge) {
+  const source = map.nodeById.value.get(edge.source)
+  const target = map.nodeById.value.get(edge.target)
+  return [
+    `${source?.label || edge.source} → ${target?.label || edge.target}`,
+    `关系：${relationLabel(edge.relation)}`,
+    edge.evidenceLevel ? `证据等级：${edge.evidenceLevel}` : '',
+    edge.reviewStatus ? `状态：${edge.reviewStatus}` : '',
+    edge.confidence !== undefined ? `置信度：${Math.round(edge.confidence * 100)}%` : '',
+    edgeEvidenceText(edge) ? `依据：${edgeEvidenceText(edge)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function callEdgeTitle(edge: TraceabilityEdge) {
+  const source = map.nodeById.value.get(edge.source)
+  const target = map.nodeById.value.get(edge.target)
+  return [
+    `${source?.label || edge.source} → ${target?.label || edge.target}`,
+    `调用类型：${callEvidenceLabel(edge, target)}`,
+    edgeCallKind(edge, target) === 'STATIC' ? '方法调用：静态调用' : '方法调用：普通调用',
+    edge.generationMethod ? `生成方式：${edge.generationMethod}` : '',
+    edge.evidenceLevel ? `证据等级：${edge.evidenceLevel}` : '',
+    edgeEvidenceText(edge) ? `依据：${edgeEvidenceText(edge)}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+function miniNodeTitle(node: MiniGraphNode) {
+  const source = node.nodeId ? map.nodeById.value.get(node.nodeId) : undefined
+  return [
+    node.label,
+    node.subtitle,
+    source?.locator ? `位置：${source.locator}` : '',
+    source?.symbol ? `符号：${source.symbol}` : '',
+  ].filter(Boolean).join('\n')
 }
 
 function evidenceTone(edge: TraceabilityEdge) {
