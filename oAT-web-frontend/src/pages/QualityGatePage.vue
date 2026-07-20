@@ -222,6 +222,7 @@ const exemptedRules = computed(() => {
 onMounted(load)
 
 async function load() {
+  if (loading.value) return
   loading.value = true; error.value = ''
   try {
     const [p, r] = await Promise.all([
@@ -236,6 +237,7 @@ async function load() {
 }
 
 async function runEvaluate() {
+  if (evaluating.value) return
   if (!selectedPolicyId.value) return
   evaluating.value = true
   try {
@@ -247,6 +249,7 @@ async function runEvaluate() {
 }
 
 async function savePolicy() {
+  if (saving.value) return
   saving.value = true
   try {
     const p = await createQualityGatePolicy(projectId.value, { ...draft })
@@ -268,6 +271,7 @@ function openExemption(ruleId: string) {
 }
 
 async function submitExemption() {
+  if (exemptSubmitting.value) return
   if (!exemptForm.reason) return
   exemptSubmitting.value = true
   try {

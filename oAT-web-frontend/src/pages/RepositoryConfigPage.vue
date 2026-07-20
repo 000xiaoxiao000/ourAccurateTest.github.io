@@ -102,6 +102,7 @@ async function load() {
     error.value = '缺少 projectId 或 appId'
     return
   }
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -115,6 +116,7 @@ async function load() {
 }
 
 async function save() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -133,6 +135,7 @@ async function loadBranches() {
     error.value = '请先填写仓库地址'
     return
   }
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {

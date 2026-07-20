@@ -203,6 +203,7 @@ const paginatedVersions = computed(() => {
 })
 
 async function load() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -215,6 +216,7 @@ async function load() {
 }
 
 async function refreshVersions() {
+  if (refreshing.value || loading.value || saving.value) return
   refreshing.value = true
   error.value = ''
   try {
@@ -227,6 +229,7 @@ async function refreshVersions() {
 }
 
 async function useCurrent(item: VersionItemSummary) {
+  if (saving.value) return
   saving.value = true
   error.value = ''
   try {
@@ -244,6 +247,7 @@ async function useCurrent(item: VersionItemSummary) {
 }
 
 async function removeVersion(id: string) {
+  if (saving.value) return
   saving.value = true
   error.value = ''
   try {
@@ -257,6 +261,7 @@ async function removeVersion(id: string) {
 }
 
 async function removeFile(filePath: string) {
+  if (saving.value) return
   saving.value = true
   error.value = ''
   try {

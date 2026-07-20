@@ -206,6 +206,7 @@ async function load() {
 }
 
 async function submitCreate() {
+  if (submittingCreate.value) return
   if (!form.name) {
     createError.value = '工程名称不能为空'
     return
@@ -252,6 +253,7 @@ function cancelDelete() {
 }
 
 async function submitDelete(appId: string) {
+  if (submittingDelete.value) return
   if (!deletePassword.value) {
     deleteError.value = '请输入登录密码'
     return

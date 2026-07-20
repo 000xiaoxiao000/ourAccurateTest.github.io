@@ -77,6 +77,7 @@ async function load() {
     error.value = '缺少 projectId'
     return
   }
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -89,6 +90,7 @@ async function load() {
 }
 
 async function save(type: string, name: string, color: string) {
+  if (loading.value) return
   if (!name.trim()) {
     error.value = '标签名称不能为空'
     return
@@ -106,6 +108,7 @@ async function save(type: string, name: string, color: string) {
 }
 
 async function remove(type: string, name: string) {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {

@@ -144,6 +144,7 @@ function syncProfile(payload: {
 }
 
 async function load() {
+  if (loading.value) return
   loading.value = true
   profileMessage.value = ''
   passwordMessage.value = ''
@@ -159,6 +160,7 @@ async function load() {
 }
 
 async function saveProfile() {
+  if (savingProfile.value) return
   if (!profileForm.name || !profileForm.email) {
     profileError.value = true
     profileMessage.value = '用户名称和邮箱地址不能为空'
@@ -181,6 +183,7 @@ async function saveProfile() {
 }
 
 async function savePassword() {
+  if (savingPassword.value) return
   if (!passwordForm.oldPassword || !passwordForm.newPassword || !passwordForm.newPasswordConfirm) {
     passwordError.value = true
     passwordMessage.value = '请完整填写密码信息'

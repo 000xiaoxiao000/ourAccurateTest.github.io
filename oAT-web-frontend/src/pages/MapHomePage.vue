@@ -619,7 +619,7 @@ function codeDataKey(focusId = '') {
 }
 
 async function toggleAiCallAnalysis() {
-  aiCallAnalysisEnabled.value = !aiCallAnalysisEnabled.value
+  aiCallAnalysisEnabled.value = true
   loadedCodeDataKey.value = ''
   loadingCodeDataKey.value = ''
   if (activeTab.value === 'calls') {

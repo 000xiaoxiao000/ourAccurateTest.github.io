@@ -121,6 +121,7 @@ const wbRole = ref<Perspective>('CROSS')
 const wbUrl = ref('')
 const wbNote = ref('')
 const wbSubmitting = ref(false)
+const reviewingIds = ref<Set<string>>(new Set())
 
 const filtered = computed(() => findings.value.filter(f => {
   if (filterPerspective.value && f.perspective !== filterPerspective.value) return false
@@ -133,6 +134,7 @@ onMounted(load)
 
 async function load() {
   if (!baselineId.value) return
+  if (loading.value) return
   loading.value = true; error.value = ''
   try { const d = await fetchBaselineDetail(projectId.value, baselineId.value); findings.value = d.findings }
   catch (e) { error.value = msg(e) }
@@ -140,14 +142,22 @@ async function load() {
 }
 
 async function review(id: string, status: ReviewStatus) {
+  if (reviewingIds.value.has(id)) return
+  reviewingIds.value = new Set(reviewingIds.value).add(id)
   try { await reviewVerificationFinding(projectId.value, id, { status, reason: '工作台审核' }); toast.success('审核已更新'); await load() }
   catch (e) { toast.error(msg(e)) }
+  finally {
+    const next = new Set(reviewingIds.value)
+    next.delete(id)
+    reviewingIds.value = next
+  }
 }
 
 function openWB(f: VerificationFinding) { wbId.value = f.id; wbRole.value = f.perspective; wbUrl.value = f.externalWorkItemUrl || ''; wbNote.value = '' }
 function cancelWB() { wbId.value = ''; wbUrl.value = ''; wbNote.value = '' }
 
 async function submitWB(id: string) {
+  if (wbSubmitting.value) return
   wbSubmitting.value = true
   try {
     await writeBackVerificationFinding(projectId.value, id, { connectorType: 'ai-writeback', externalUrl: wbUrl.value || undefined, message: wbNote.value || undefined, targetRole: wbRole.value })

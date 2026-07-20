@@ -169,6 +169,8 @@ const compareReportsCollapsed = ref(false)
 const commitPage = ref(1)
 const commitPageSize = ref(12)
 let pollTimer: number | undefined
+let loadRequestSeq = 0
+let branchRequestSeq = 0
 
 const repositoryConfigured = computed(() => Boolean(center.value?.app.repoConfigured))
 const currentAppBranch = computed(() => center.value?.app.currentBranch || '')
@@ -242,10 +244,14 @@ watch(reportPageSize, () => {
 
 
 async function load() {
+  if (busy.value) return
+  const requestSeq = ++loadRequestSeq
   busy.value = true
   error.value = ''
   try {
-    center.value = await fetchVersionCenter(projectId.value, appId.value)
+    const nextCenter = await fetchVersionCenter(projectId.value, appId.value)
+    if (requestSeq !== loadRequestSeq) return
+    center.value = nextCenter
     restoreDraft()
     if (repositoryConfigured.value) await loadBranches(false)
     if (initialJobId.value) {
@@ -422,6 +428,7 @@ function clearDraft() {
 }
 
 async function uploadPackageFile(role: PackageRole, event: Event) {
+  if (busy.value) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -443,6 +450,7 @@ async function uploadPackageFile(role: PackageRole, event: Event) {
 }
 
 async function deleteSelectedPackage(role: PackageRole) {
+  if (busy.value) return
   const filePath = role === 'source' ? packageCompare.value.sourceFile : packageCompare.value.targetFile
   if (!filePath) return
   const confirmed = await askConfirm('删除制品文件', `确认删除文件 ${filePath}？删除后本地缓存文件将不可恢复。`)
@@ -464,8 +472,11 @@ async function deleteSelectedPackage(role: PackageRole) {
 
 async function loadBranches(showError = true) {
   if (!repositoryConfigured.value) return
+  const requestSeq = ++branchRequestSeq
   try {
-    branches.value = await fetchRepositoryBranches(projectId.value, appId.value)
+    const nextBranches = await fetchRepositoryBranches(projectId.value, appId.value)
+    if (requestSeq !== branchRequestSeq) return
+    branches.value = nextBranches
     if (!gitCompare.value.branch) {
       gitCompare.value.branch = currentAppBranch.value || branches.value[0] || ''
     }
@@ -489,6 +500,7 @@ function selectBranch(branch: string) {
 }
 
 async function openCommitPicker(target: 'old' | 'new') {
+  if (busy.value) return
   if (!gitCompare.value.branch) {
     error.value = '请先选择 Git 分支'
     return
@@ -518,6 +530,7 @@ function selectCommit(commitId: string) {
 
 async function fillLatestCommit() {
   if (!gitCompare.value.branch) return
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -531,6 +544,7 @@ async function fillLatestCommit() {
 }
 
 async function submitCompare() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   jobPollError.value = ''
@@ -569,13 +583,14 @@ async function submitCompare() {
 }
 
 async function removeCompareReport(reportId: string) {
+  if (busy.value) return
   const confirmed = await askConfirm('删除比对报告', '确认删除该比对报告？删除后历史比对结果和任务日志将不可恢复。')
   if (!confirmed) return
   busy.value = true
   error.value = ''
   try {
     await deleteCompareReport(projectId.value, appId.value, reportId)
-    await load()
+    center.value = await fetchVersionCenter(projectId.value, appId.value)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除比对报告失败'
   } finally {

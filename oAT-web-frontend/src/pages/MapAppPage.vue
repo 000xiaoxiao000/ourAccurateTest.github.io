@@ -78,6 +78,8 @@ const selectedLayers = ref<string[]>(['code'])
 const selectedNode = ref<RelationNodeSelection | null>(null)
 const showHotLabels = ref(false)
 const highlightRelated = ref(true)
+let extensionLayerRequestSeq = 0
+let mapRequestSeq = 0
 
 const layerOptions = [
   { label: '代码层', value: 'code' },
@@ -165,23 +167,28 @@ function handleContextAction(actionId: string, node: RelationNodeSelection | nul
 }
 
 async function loadExtensionLayer(label: string, loader: () => Promise<MapElement[]>, replaceSecondary: boolean) {
+  const requestSeq = ++extensionLayerRequestSeq
   loadingLayer.value = true
   layerError.value = ''
   activeExtensionLabel.value = label
   try {
     const next = await loader()
+    if (requestSeq !== extensionLayerRequestSeq) return
     extensionElements.value = replaceSecondary ? next : mergeElements(extensionElements.value, next)
     if (!next.length) {
       layerError.value = `${label}暂无数据`
     }
   } catch (err) {
-    layerError.value = err instanceof Error ? err.message : `${label}加载失败`
+    if (requestSeq === extensionLayerRequestSeq) {
+      layerError.value = err instanceof Error ? err.message : `${label}加载失败`
+    }
   } finally {
-    loadingLayer.value = false
+    if (requestSeq === extensionLayerRequestSeq) loadingLayer.value = false
   }
 }
 
 function clearExtensionLayers() {
+  extensionLayerRequestSeq += 1
   extensionElements.value = []
   activeExtensionLabel.value = ''
   layerError.value = ''
@@ -197,17 +204,22 @@ function mergeElements(base: MapElement[], incoming: MapElement[]) {
 }
 
 async function load() {
+  const requestSeq = ++mapRequestSeq
   loading.value = true
   error.value = ''
   layerError.value = ''
   activeExtensionLabel.value = ''
   extensionElements.value = []
   try {
-    elements.value = await fetchMapApp(projectId.value, appId.value, selectedLayers.value)
+    const nextElements = await fetchMapApp(projectId.value, appId.value, selectedLayers.value)
+    if (requestSeq !== mapRequestSeq) return
+    elements.value = nextElements
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '加载旧源码关系图失败'
+    if (requestSeq === mapRequestSeq) {
+      error.value = err instanceof Error ? err.message : '加载旧源码关系图失败'
+    }
   } finally {
-    loading.value = false
+    if (requestSeq === mapRequestSeq) loading.value = false
   }
 }
 

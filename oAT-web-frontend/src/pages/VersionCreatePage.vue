@@ -251,6 +251,7 @@ function formatDuration(value?: number) {
 }
 
 async function load() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -267,6 +268,7 @@ async function load() {
 
 async function loadBranches(showError = true) {
   if (!center.value?.app.repoConfigured) return
+  if (branchesLoading.value) return
   branchesLoading.value = true
   if (showError) error.value = ''
   try {
@@ -313,6 +315,7 @@ function findExistingVersionFile(versionNumber: string, branch: string, commitId
 }
 
 async function checkGit() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -351,6 +354,7 @@ async function pollGit(jobId: string) {
 }
 
 async function pullGit() {
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -387,6 +391,7 @@ async function pullGit() {
 
 async function removePulledCode() {
   if (!gitPulledPath.value) return
+  if (busy.value) return
   busy.value = true
   error.value = ''
   try {
@@ -406,6 +411,7 @@ function onFileChange(event: Event) {
 }
 
 async function uploadFile() {
+  if (busy.value) return
   if (!selectedFile.value) {
     error.value = '请先选择文件'
     return
@@ -423,6 +429,7 @@ async function uploadFile() {
 }
 
 async function submit() {
+  if (busy.value) return
   if (!form.value.versionNumber) {
     error.value = '版本号不能为空'
     return

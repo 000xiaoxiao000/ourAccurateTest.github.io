@@ -700,7 +700,13 @@ const writeBackUrl = ref('')
 const writeBackNote = ref('')
 const writeBackTargetRole = ref<'PRODUCT' | 'TEST' | 'DEVELOPMENT' | 'CROSS'>('CROSS')
 const writeBackSubmitting = ref(false)
+const deletingAssetIds = ref<Set<string>>(new Set())
+const deletingBaselineIds = ref<Set<string>>(new Set())
+const reviewingFindingIds = ref<Set<string>>(new Set())
+const markingStale = ref(false)
 let analysisPollTimer: ReturnType<typeof setTimeout> | null = null
+let overviewRequestSeq = 0
+let baselineRequestSeq = 0
 const error = ref('')
 const files = reactive<Partial<Record<AssetType, File>>>({})
 const draggingAssetType = ref<AssetType | ''>('')
@@ -1211,18 +1217,21 @@ onBeforeUnmount(() => {
 
 async function loadOverview() {
   if (!projectId.value) return
+  const requestSeq = ++overviewRequestSeq
   loading.value = true
   error.value = ''
   try {
-    overview.value = await fetchVerificationOverview(projectId.value)
+    const nextOverview = await fetchVerificationOverview(projectId.value)
+    if (requestSeq !== overviewRequestSeq) return
+    overview.value = nextOverview
     if (!selectedBaselineId.value && overview.value.baselines[0]) {
       await selectBaseline(overview.value.baselines[0].id)
       activeWorkspace.value = 'result'
     }
   } catch (err) {
-    error.value = messageOf(err)
+    if (requestSeq === overviewRequestSeq) error.value = messageOf(err)
   } finally {
-    loading.value = false
+    if (requestSeq === overviewRequestSeq) loading.value = false
   }
 }
 
@@ -1326,6 +1335,7 @@ function assetAccept(type: AssetType) {
 }
 
 async function importAsset(type: AssetType) {
+  if (importing.value) return
   if (!hasImportInput(type)) {
     toast.warning('请先选择文件或粘贴内容')
     return
@@ -1349,6 +1359,7 @@ async function importAsset(type: AssetType) {
 }
 
 async function saveBaseline() {
+  if (creatingBaseline.value) return
   creatingBaseline.value = true
   try {
     const updating = !!editingBaselineId.value
@@ -1384,6 +1395,7 @@ function cancelEditAsset() {
 }
 
 async function saveAssetEdit() {
+  if (assetUpdating.value) return
   if (!editingAsset.value) return
   assetUpdating.value = true
   try {
@@ -1403,6 +1415,7 @@ async function saveAssetEdit() {
 }
 
 async function deleteAsset(asset: VerificationAsset) {
+  if (deletingAssetIds.value.has(asset.id)) return
   const confirmed = await dialog.confirm({
     title: '删除资料',
     message: `确认删除“${assetDisplayName(asset)}”？已被分析基线引用的资料不能删除。`,
@@ -1410,6 +1423,7 @@ async function deleteAsset(asset: VerificationAsset) {
     tone: 'danger',
   })
   if (!confirmed) return
+  deletingAssetIds.value = new Set(deletingAssetIds.value).add(asset.id)
   try {
     await deleteVerificationAsset(projectId.value, asset.id)
     if (editingAsset.value?.id === asset.id) cancelEditAsset()
@@ -1417,6 +1431,10 @@ async function deleteAsset(asset: VerificationAsset) {
     await loadOverview()
   } catch (err) {
     toast.error(messageOf(err))
+  } finally {
+    const next = new Set(deletingAssetIds.value)
+    next.delete(asset.id)
+    deletingAssetIds.value = next
   }
 }
 
@@ -1447,6 +1465,7 @@ function cancelEditBaseline() {
 }
 
 async function deleteBaseline(baseline: VerificationBaseline) {
+  if (deletingBaselineIds.value.has(baseline.id)) return
   const confirmed = await dialog.confirm({
     title: '删除分析基线',
     message: `确认删除“${baseline.name}”？相关分析结果、门禁结果和回写记录会一起删除。`,
@@ -1454,6 +1473,7 @@ async function deleteBaseline(baseline: VerificationBaseline) {
     tone: 'danger',
   })
   if (!confirmed) return
+  deletingBaselineIds.value = new Set(deletingBaselineIds.value).add(baseline.id)
   try {
     await deleteVerificationBaseline(projectId.value, baseline.id)
     if (selectedBaselineId.value === baseline.id) {
@@ -1467,10 +1487,15 @@ async function deleteBaseline(baseline: VerificationBaseline) {
     await loadOverview()
   } catch (err) {
     toast.error(messageOf(err))
+  } finally {
+    const next = new Set(deletingBaselineIds.value)
+    next.delete(baseline.id)
+    deletingBaselineIds.value = next
   }
 }
 
 async function importGitSource() {
+  if (gitImporting.value) return
   if (!gitForm.appId) {
     toast.warning('请先选择已配置仓库的源码工程')
     return
@@ -1506,17 +1531,25 @@ async function openBaseline(id: string) {
 }
 
 async function selectBaseline(id: string) {
+  const requestSeq = ++baselineRequestSeq
   clearAnalysisPoll()
   selectedBaselineId.value = id
-  detail.value = await fetchBaselineDetail(projectId.value, id)
-  matrix.value = await fetchTraceMatrix(projectId.value, id)
-  writeBacks.value = await fetchWriteBackActions(projectId.value, id)
+  const [nextDetail, nextMatrix, nextWriteBacks] = await Promise.all([
+    fetchBaselineDetail(projectId.value, id),
+    fetchTraceMatrix(projectId.value, id),
+    fetchWriteBackActions(projectId.value, id),
+  ])
+  if (requestSeq !== baselineRequestSeq || selectedBaselineId.value !== id) return
+  detail.value = nextDetail
+  matrix.value = nextMatrix
+  writeBacks.value = nextWriteBacks
   if (detail.value.baseline.status === 'ANALYZING') {
     await resumeAnalysisPolling(id)
   }
 }
 
 async function runAnalysis() {
+  if (analyzing.value) return
   if (!selectedBaselineId.value) return
   analyzing.value = true
   try {
@@ -1676,17 +1709,31 @@ function findingContextItems(finding: VerificationFinding) {
 }
 
 async function markStale() {
+  if (markingStale.value) return
   if (!selectedBaselineId.value) return
-  await markVerificationBaselineStale(projectId.value, selectedBaselineId.value)
-  toast.warning('基线已标记过期，需重新导入或重新创建基线')
-  await loadOverview()
-  await selectBaseline(selectedBaselineId.value)
+  markingStale.value = true
+  try {
+    await markVerificationBaselineStale(projectId.value, selectedBaselineId.value)
+    toast.warning('基线已标记过期，需重新导入或重新创建基线')
+    await loadOverview()
+    await selectBaseline(selectedBaselineId.value)
+  } finally {
+    markingStale.value = false
+  }
 }
 
 async function reviewFinding(id: string, status: ReviewStatus) {
-  await reviewVerificationFinding(projectId.value, id, { status, reason: '前端工作台审核' })
-  toast.success('审核状态已更新')
-  await selectBaseline(selectedBaselineId.value)
+  if (reviewingFindingIds.value.has(id)) return
+  reviewingFindingIds.value = new Set(reviewingFindingIds.value).add(id)
+  try {
+    await reviewVerificationFinding(projectId.value, id, { status, reason: '前端工作台审核' })
+    toast.success('审核状态已更新')
+    await selectBaseline(selectedBaselineId.value)
+  } finally {
+    const next = new Set(reviewingFindingIds.value)
+    next.delete(id)
+    reviewingFindingIds.value = next
+  }
 }
 
 function startWriteBack(id: string) {
@@ -1704,6 +1751,7 @@ function cancelWriteBack() {
 }
 
 async function writeBackFinding(id: string) {
+  if (writeBackSubmitting.value) return
   writeBackSubmitting.value = true
   try {
     await writeBackVerificationFinding(projectId.value, id, {

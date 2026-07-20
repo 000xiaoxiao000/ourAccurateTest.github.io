@@ -124,6 +124,7 @@ const loading = ref(false)
 const error = ref('')
 const filterVerdict = ref('')
 const filterEvidence = ref('')
+const confirmingLinkIds = ref<Set<string>>(new Set())
 
 const filtered = computed(() => matrix.value.filter(row => {
   if (filterVerdict.value && row.verdict !== filterVerdict.value) return false
@@ -135,6 +136,7 @@ onMounted(load)
 
 async function load() {
   if (!baselineId.value) return
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -147,6 +149,8 @@ async function load() {
 }
 
 async function confirmLink(id: string, currentStatus: ReviewStatus) {
+  if (confirmingLinkIds.value.has(id)) return
+  confirmingLinkIds.value = new Set(confirmingLinkIds.value).add(id)
   const next: ReviewStatus = currentStatus === 'CONFIRMED' ? 'PENDING' : 'CONFIRMED'
   try {
     await reviewTraceLink(projectId.value, id, next)
@@ -154,6 +158,10 @@ async function confirmLink(id: string, currentStatus: ReviewStatus) {
     await load()
   } catch (e) {
     toast.error(msgOf(e))
+  } finally {
+    const nextIds = new Set(confirmingLinkIds.value)
+    nextIds.delete(id)
+    confirmingLinkIds.value = nextIds
   }
 }
 

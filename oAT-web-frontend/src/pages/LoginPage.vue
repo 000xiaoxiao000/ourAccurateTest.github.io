@@ -214,6 +214,7 @@ function normalizeRedirect(redirect: string) {
 }
 
 async function submitLogin() {
+  if (submitting.value) return
   if (!loginForm.nameOrEmail || !loginForm.password) {
     error.value = '请输入用户名和密码'
     return
@@ -232,6 +233,7 @@ async function submitLogin() {
 }
 
 async function submitRegister() {
+  if (submitting.value) return
   if (!registerForm.name || !registerForm.email || !registerForm.password || !registerForm.againPassword) {
     error.value = '请完整填写注册信息'
     return

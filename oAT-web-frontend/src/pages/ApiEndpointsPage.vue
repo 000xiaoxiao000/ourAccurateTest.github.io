@@ -251,6 +251,7 @@ function endpointBase() {
 }
 
 async function refreshAll() {
+  if (loading.value || uploading.value) return
   await Promise.all([loadCachedZips(), loadEndpoints()])
 }
 
@@ -259,6 +260,7 @@ async function loadCachedZips() {
 }
 
 async function loadEndpoints() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -279,6 +281,7 @@ function handleFileChange(event: Event) {
 }
 
 async function uploadArtifact() {
+  if (uploading.value) return
   if (!selectedCachePath.value && !selectedFile.value) {
     notice.value = '请先选择缓存源码包或上传文件'
     return

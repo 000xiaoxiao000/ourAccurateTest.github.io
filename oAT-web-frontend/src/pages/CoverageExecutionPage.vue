@@ -153,6 +153,7 @@ onMounted(load)
 
 async function load() {
   if (!baselineId.value) return
+  if (loading.value) return
   loading.value = true; error.value = ''
   try {
     const d = await fetchBaselineDetail(projectId.value, baselineId.value)
@@ -162,6 +163,7 @@ async function load() {
 }
 
 async function runImpact() {
+  if (impactLoading.value) return
   impactLoading.value = true
   try {
     changeImpact.value = await analyzeChangeImpact(projectId.value, baselineId.value)

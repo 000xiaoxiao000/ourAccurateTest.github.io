@@ -1,6 +1,19 @@
 package com.oAT.web.api.map;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.github.javaparser.JavaParser;
+import com.github.javaparser.ParseResult;
+import com.github.javaparser.ParserConfiguration;
+import com.github.javaparser.ast.CompilationUnit;
+import com.github.javaparser.ast.Node;
+import com.github.javaparser.ast.body.CallableDeclaration;
+import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
+import com.github.javaparser.ast.body.ConstructorDeclaration;
+import com.github.javaparser.ast.body.EnumDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.body.RecordDeclaration;
+import com.github.javaparser.ast.body.TypeDeclaration;
+import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.esDao.ClassCoverageIndexRepository;
 import com.oAT.web.esDao.StaticInfoRepository;
@@ -41,6 +54,7 @@ import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -75,6 +89,7 @@ public class TraceabilityMapService {
     private static final Pattern METHOD_PATTERN = Pattern.compile("(?m)^\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\\s+)*[\\w<>,.?\\[\\]]+(?:\\s*<[^\\n{};()]+>)?\\s+([A-Za-z_$][\\w$]*)\\s*\\([^;{}]*\\)\\s*(?:throws [^{]+)?\\{");
     private static final Set<String> JAVA_CONTROL_KEYWORDS = Set.of(
             "if", "for", "while", "switch", "catch", "return", "throw", "else", "case", "do", "try", "finally", "synchronized");
+    private static final JavaParser JAVA_PARSER = new JavaParser(new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17));
 
     private final VerificationRepository verificationRepository;
     private final StaticInfoRepository staticInfoRepository;
@@ -368,7 +383,7 @@ public class TraceabilityMapService {
                     .forEach(span -> {
                         String methodId = index.resolve(className + "#" + span.methodName());
                         if (methodId != null && index.nodes.containsKey(methodId)) {
-                            index.methodSpans.add(new MethodSpan(methodId, className, span.methodName(), span.body()));
+                            index.methodSpans.add(new MethodSpan(methodId, className, span.methodName(), span.body(), inferredInvocations(span.body())));
                         }
                     });
         }
@@ -398,44 +413,82 @@ public class TraceabilityMapService {
         List<SourceUnit> units = splitSourceUnits(asset.fileName(), content);
         for (SourceUnit unit : units) {
             String path = normalizer.normalizePath(unit.path());
-            String className = extractClassName(path, unit.content());
             String fileId = normalizer.fileId(languageFromPath(path), path);
-            String classId = normalizer.classId(languageFromPath(path), path, className);
             index.putCodeNode(new TraceabilityNode(fileId, NodeKind.CODE_FILE, normalizer.simpleFileName(path), path, path,
                     "CODE", languageFromPath(path), path, null, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
-            index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, className, className, path,
-                    "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
-            index.alias(path, classId);
-            index.alias(className, classId);
             if (collectCodeAnalysis) {
                 Matcher importMatcher = IMPORT_PATTERN.matcher(unit.content());
                 while (importMatcher.find() && index.dependencies.size() < 5000) {
-                    index.dependencies.add(new CodeDependency(className, importMatcher.group(1), "IMPORT"));
+                    index.dependencies.add(new CodeDependency(normalizer.simpleFileName(path), importMatcher.group(1), "IMPORT"));
                 }
             }
-            Matcher matcher = METHOD_PATTERN.matcher(unit.content());
-            while (matcher.find()) {
-                String methodName = matcher.group(1);
-                if (JAVA_CONTROL_KEYWORDS.contains(methodName)) {
-                    continue;
+            List<ParsedSourceClass> parsedClasses = parseJavaSource(path, unit.content());
+            if (parsedClasses.isEmpty()) {
+                addSourceAssetWithRegexFallback(index, asset, collectCodeAnalysis, unit, fileId);
+                continue;
+            }
+            for (ParsedSourceClass parsedClass : parsedClasses) {
+                String classId = normalizer.classId(languageFromPath(path), path, parsedClass.className());
+                index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, simpleClassName(parsedClass.className()), parsedClass.className(), path,
+                        "CODE", languageFromPath(path), parsedClass.className(), fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
+                index.alias(path, classId);
+                index.alias(parsedClass.className(), classId);
+                for (ParsedSourceMethod method : parsedClass.methods()) {
+                    String methodId = normalizer.methodId(languageFromPath(path), path, parsedClass.className(), method.methodName(), method.descriptor());
+                    Map<String, Object> metadata = new LinkedHashMap<>();
+                    metadata.put("line", method.line());
+                    metadata.put("sourceAssetId", asset.id());
+                    metadata.put("visibility", method.visibility());
+                    metadata.put("staticMethod", method.staticMethod());
+                    metadata.put("descriptor", method.descriptor());
+                    index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, method.methodName(), method.signature(), path + ":" + method.line(),
+                            "CODE", languageFromPath(path), parsedClass.className() + "#" + method.methodName(), classId, EvidenceState.STATIC,
+                            null, metadata));
+                    index.alias(method.methodName(), methodId);
+                    index.alias(parsedClass.className() + "#" + method.methodName(), methodId);
+                    index.alias(parsedClass.className() + "." + method.methodName(), methodId);
+                    index.alias(path + "#" + method.methodName(), methodId);
+                    index.alias(parsedClass.className() + "#" + method.methodName() + method.descriptor(), methodId);
+                    index.alias(parsedClass.className() + "." + method.methodName() + method.descriptor(), methodId);
+                    if (collectCodeAnalysis) {
+                        index.methodSpans.add(new MethodSpan(methodId, parsedClass.className(), method.methodName(), method.body(), method.invocations()));
+                        addControlFlowSteps(index, methodId, method.methodName(), method.body());
+                    }
                 }
-                int line = lineNumber(unit.content(), matcher.start());
-                String methodId = normalizer.methodId(languageFromPath(path), path, className, methodName, null);
-                String declaration = unit.content().substring(matcher.start(), matcher.end());
-                index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, "", path + ":" + line,
-                        "CODE", languageFromPath(path), className + "#" + methodName, classId, EvidenceState.STATIC,
-                        null, Map.of("line", line, "sourceAssetId", asset.id(),
-                                "visibility", declaration.contains("private") ? "PRIVATE" : declaration.contains("protected") ? "PROTECTED" : "PUBLIC",
-                                "staticMethod", declaration.contains("static"))));
-                index.alias(methodName, methodId);
-                index.alias(className + "#" + methodName, methodId);
-                index.alias(path + "#" + methodName, methodId);
-                if (collectCodeAnalysis) {
-                    int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
-                    String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
-                    index.methodSpans.add(new MethodSpan(methodId, className, methodName, body));
-                    addControlFlowSteps(index, methodId, methodName, body);
-                }
+            }
+        }
+    }
+
+    private void addSourceAssetWithRegexFallback(CodeIndex index, AssetSnapshot asset, boolean collectCodeAnalysis, SourceUnit unit, String fileId) {
+        String path = normalizer.normalizePath(unit.path());
+        String className = extractClassName(path, unit.content());
+        String classId = normalizer.classId(languageFromPath(path), path, className);
+        index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, className, className, path,
+                "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, Map.of("sourceAssetId", asset.id())));
+        index.alias(path, classId);
+        index.alias(className, classId);
+        Matcher matcher = METHOD_PATTERN.matcher(unit.content());
+        while (matcher.find()) {
+            String methodName = matcher.group(1);
+            if (JAVA_CONTROL_KEYWORDS.contains(methodName)) {
+                continue;
+            }
+            int line = lineNumber(unit.content(), matcher.start());
+            String methodId = normalizer.methodId(languageFromPath(path), path, className, methodName, null);
+            String declaration = unit.content().substring(matcher.start(), matcher.end());
+            index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, "", path + ":" + line,
+                    "CODE", languageFromPath(path), className + "#" + methodName, classId, EvidenceState.STATIC,
+                    null, Map.of("line", line, "sourceAssetId", asset.id(),
+                            "visibility", declaration.contains("private") ? "PRIVATE" : declaration.contains("protected") ? "PROTECTED" : "PUBLIC",
+                            "staticMethod", declaration.contains("static"))));
+            index.alias(methodName, methodId);
+            index.alias(className + "#" + methodName, methodId);
+            index.alias(path + "#" + methodName, methodId);
+            if (collectCodeAnalysis) {
+                int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
+                String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
+                index.methodSpans.add(new MethodSpan(methodId, className, methodName, body, inferredInvocations(body)));
+                addControlFlowSteps(index, methodId, methodName, body);
             }
         }
     }
@@ -935,6 +988,77 @@ public class TraceabilityMapService {
         return normalizer.simpleFileName(path);
     }
 
+    private List<ParsedSourceClass> parseJavaSource(String path, String source) {
+        if (!CodeSymbolNormalizer.DEFAULT_LANGUAGE.equals(languageFromPath(path)) || !StringUtils.hasText(source)) {
+            return List.of();
+        }
+        ParseResult<CompilationUnit> result = JAVA_PARSER.parse(source);
+        if (!result.isSuccessful() || result.getResult().isEmpty()) {
+            return List.of();
+        }
+        String packageName = result.getResult().get().getPackageDeclaration()
+                .map(item -> item.getName().asString())
+                .orElse("");
+        List<ParsedSourceClass> classes = new ArrayList<>();
+        for (TypeDeclaration<?> type : result.getResult().get().findAll(TypeDeclaration.class)) {
+            if (!(type instanceof ClassOrInterfaceDeclaration || type instanceof EnumDeclaration || type instanceof RecordDeclaration)) {
+                continue;
+            }
+            String className = qualifiedTypeName(packageName, type);
+            List<ParsedSourceMethod> methods = new ArrayList<>();
+            for (CallableDeclaration<?> callable : type.getMembers().stream()
+                    .filter(member -> member instanceof MethodDeclaration || member instanceof ConstructorDeclaration)
+                    .map(member -> (CallableDeclaration<?>) member)
+                    .toList()) {
+                callable.getRange().ifPresent(range -> methods.add(parsedMethod(callable, range.begin.line)));
+            }
+            classes.add(new ParsedSourceClass(className, methods));
+        }
+        return classes;
+    }
+
+    private ParsedSourceMethod parsedMethod(CallableDeclaration<?> callable, int line) {
+        String methodName = callable.getNameAsString();
+        String signature = callable.getSignature().asString();
+        String descriptor = "(" + callable.getParameters().stream()
+                .map(parameter -> parameter.getType().asString())
+                .map(value -> value.replaceAll("\\s+", ""))
+                .collect(Collectors.joining(",")) + ")";
+        String body = callable.toString();
+        boolean staticMethod = callable instanceof MethodDeclaration method && method.isStatic();
+        String visibility = callable.isPrivate() ? "PRIVATE" : callable.isProtected() ? "PROTECTED" : "PUBLIC";
+        List<InvocationCandidate> invocations = callable.findAll(MethodCallExpr.class).stream()
+                .map(call -> new InvocationCandidate(call.getNameAsString(), call.getArguments().size()))
+                .toList();
+        return new ParsedSourceMethod(methodName, descriptor, signature, line, visibility, staticMethod, body, invocations);
+    }
+
+    private String qualifiedTypeName(String packageName, TypeDeclaration<?> type) {
+        List<String> names = new ArrayList<>();
+        Node current = type;
+        while (current instanceof TypeDeclaration<?> declaration) {
+            names.add(0, declaration.getNameAsString());
+            current = declaration.getParentNode().orElse(null);
+        }
+        String nested = String.join("$", names);
+        return StringUtils.hasText(packageName) ? packageName + "." + nested : nested;
+    }
+
+    private List<InvocationCandidate> inferredInvocations(String body) {
+        if (!StringUtils.hasText(body)) {
+            return List.of();
+        }
+        List<InvocationCandidate> result = new ArrayList<>();
+        Matcher matcher = Pattern.compile("(?<![A-Za-z0-9_$])([A-Za-z_$][\\w$]*)\\s*\\(").matcher(body);
+        while (matcher.find()) {
+            String name = matcher.group(1);
+            if (!JAVA_CONTROL_KEYWORDS.contains(name)) {
+                result.add(new InvocationCandidate(name, -1));
+            }
+        }
+        return result;
+    }
+
     private List<MethodSpan> collectMethodSpans(String source, String className) {
         if (!StringUtils.hasText(source)) {
             return List.of();
@@ -944,7 +1068,8 @@ public class TraceabilityMapService {
         while (matcher.find()) {
             String methodName = matcher.group(1);
             int end = methodBodyEnd(source, matcher.end() - 1);
-            spans.add(new MethodSpan(null, className, methodName, end > matcher.start() ? source.substring(matcher.start(), end) : ""));
+            String body = end > matcher.start() ? source.substring(matcher.start(), end) : "";
+            spans.add(new MethodSpan(null, className, methodName, body, inferredInvocations(body)));
         }
         return spans;
     }
@@ -1079,6 +1204,10 @@ public class TraceabilityMapService {
     }
 
     private record SourceUnit(String path, String content) {}
+    private record ParsedSourceClass(String className, List<ParsedSourceMethod> methods) {}
+    private record ParsedSourceMethod(String methodName, String descriptor, String signature, int line, String visibility,
+                                      boolean staticMethod, String body, List<InvocationCandidate> invocations) {}
+    private record InvocationCandidate(String name, int argumentCount) {}
     private Map<String, Object> callMetadata(CallPair pair) {
         Integer opcode = pair.opcode();
         if (opcode == null) {
@@ -1094,7 +1223,7 @@ public class TraceabilityMapService {
             this(source, target, assetId, traceId, caseName, null);
         }
     }
-    private record MethodSpan(String methodId, String className, String methodName, String body) {}
+    private record MethodSpan(String methodId, String className, String methodName, String body, List<InvocationCandidate> invocations) {}
     private record NormalizedRelation(String source, String target, Relation relation) {}
     private record DynamicEvidence(Set<String> coveredNodeIds, List<CallPair> callPairs) {
         static DynamicEvidence empty() {
@@ -1169,15 +1298,14 @@ public class TraceabilityMapService {
                 }
             }
             for (MethodSpan caller : methodSpans) {
-                if (!StringUtils.hasText(caller.methodId()) || !StringUtils.hasText(caller.body())) {
+                if (!StringUtils.hasText(caller.methodId()) || caller.invocations() == null || caller.invocations().isEmpty()) {
                     continue;
                 }
-                for (Map.Entry<String, List<MethodSpan>> entry : methodsByName.entrySet()) {
-                    String methodName = entry.getKey();
-                    if (!containsMethodCall(caller.body(), methodName)) {
-                        continue;
-                    }
-                    for (MethodSpan callee : entry.getValue()) {
+                for (InvocationCandidate invocation : caller.invocations()) {
+                    for (MethodSpan callee : methodsByName.getOrDefault(invocation.name(), List.of())) {
+                        if (invocation.argumentCount() >= 0 && !methodArityMatches(callee, invocation.argumentCount())) {
+                            continue;
+                        }
                         String key = caller.methodId() + "->" + callee.methodId();
                         if (existing.add(key)) {
                             pendingStaticCalls.add(new PendingCall(caller.methodId(), callee.methodId(), "SOURCE_CALL_ANALYSIS", null));
@@ -1188,9 +1316,26 @@ public class TraceabilityMapService {
             return pendingStaticCalls.size() - before;
         }
 
-        private boolean containsMethodCall(String body, String methodName) {
-            Pattern pattern = Pattern.compile("(?<![A-Za-z0-9_$])" + Pattern.quote(methodName) + "\\s*\\(");
-            return pattern.matcher(body).find();
+        private boolean methodArityMatches(MethodSpan callee, int argumentCount) {
+            TraceabilityNode node = nodes.get(callee.methodId());
+            if (node == null || node.metadata() == null) {
+                return true;
+            }
+            Object descriptor = node.metadata().get("descriptor");
+            if (descriptor == null) {
+                return true;
+            }
+            String value = String.valueOf(descriptor);
+            int open = value.indexOf('(');
+            int close = value.indexOf(')');
+            if (open < 0 || close < open) {
+                return true;
+            }
+            String args = value.substring(open + 1, close).trim();
+            if (args.isEmpty()) {
+                return argumentCount == 0;
+            }
+            return args.split(",").length == argumentCount;
         }
     }
 

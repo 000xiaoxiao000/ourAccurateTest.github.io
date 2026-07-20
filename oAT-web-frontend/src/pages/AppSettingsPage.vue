@@ -134,6 +134,7 @@ async function load() {
     error.value = '缺少 projectId 或 appId'
     return
   }
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -147,6 +148,7 @@ async function load() {
 }
 
 async function removeApp() {
+  if (loading.value) return
   if (!deletePassword.value) {
     deleteError.value = '请输入密码'
     return
@@ -164,6 +166,7 @@ async function removeApp() {
 }
 
 async function save() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {

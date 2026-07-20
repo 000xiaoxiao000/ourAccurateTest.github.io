@@ -336,6 +336,7 @@ const paginatedCriteria = computed(() => paginate(filteredCriteria.value, pages.
 const paginatedTestcases = computed(() => paginate(filteredTestcases.value, pages.testcases, pageSizes.testcases))
 
 async function loadOverview() {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -349,6 +350,7 @@ async function loadOverview() {
 }
 
 async function analyze() {
+  if (loading.value) return
   if (!canAnalyze.value) return
   loading.value = true
   error.value = ''

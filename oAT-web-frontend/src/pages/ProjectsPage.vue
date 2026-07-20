@@ -325,6 +325,7 @@ function applyRouteIntent() {
 }
 
 async function submitCreate() {
+  if (submittingCreate.value) return
   if (!createForm.name) {
     createError.value = '项目名称不能为空'
     return
@@ -361,6 +362,7 @@ function cancelEdit() {
 }
 
 async function submitEdit(projectId: string) {
+  if (submittingEdit.value) return
   if (!editForm.name) {
     editError.value = '项目名称不能为空'
     return
@@ -391,6 +393,7 @@ function cancelDelete() {
 }
 
 async function submitDelete(projectId: string) {
+  if (submittingDelete.value) return
   if (!deletePassword.value) {
     deleteError.value = '请输入登录密码'
     return

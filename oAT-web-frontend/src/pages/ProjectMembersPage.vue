@@ -122,6 +122,7 @@ async function load() {
     error.value = '缺少 projectId'
     return
   }
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -134,6 +135,7 @@ async function load() {
 }
 
 async function addMember() {
+  if (loading.value) return
   if (!selectedUserId.value) {
     return
   }
@@ -150,6 +152,7 @@ async function addMember() {
 }
 
 async function removeMemberAction(memberId: string) {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
@@ -162,6 +165,7 @@ async function removeMemberAction(memberId: string) {
 }
 
 async function changeRole(memberId: string, role: string) {
+  if (loading.value) return
   loading.value = true
   error.value = ''
   try {
