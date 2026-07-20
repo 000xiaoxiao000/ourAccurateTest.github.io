@@ -112,7 +112,7 @@
       <div v-if="!result.report.directChanges.length" class="empty-state compact">两个 Commit 间未发现可分析的结构化源码变更。</div>
 
       <div v-else class="result-layout">
-        <section class="result-block">
+        <section class="result-block files-block">
           <div class="block-head">
             <h3>文件变更</h3>
             <span>{{ filteredFiles.length }} / {{ result.report.changeSet.files.length }} 个文件</span>
@@ -139,17 +139,17 @@
           />
         </section>
 
-        <section class="result-block">
+        <section class="result-block direct-block">
           <div class="block-head">
             <h3>直接结构变更</h3>
             <span>{{ filteredDirectChanges.length }} / {{ result.report.directChanges.length }} 项</span>
           </div>
           <div v-if="!filteredDirectChanges.length" class="empty-inline">没有匹配的结构变更。</div>
-          <article v-for="change in paginatedDirectChanges" :key="change.symbolKey" class="change-card">
+          <article v-for="change in paginatedDirectChanges" :key="changeKey(change)" class="change-card">
             <div class="change-title">
               <span :class="['badge', badgeClass(change.changeType)]">{{ typeText(change.changeType) }}</span>
               <div>
-                <strong>{{ symbolName(change.symbolKey) }}</strong>
+                <strong>{{ symbolName(changeKey(change)) }}</strong>
                 <span>{{ symbolMeta(change) }}</span>
               </div>
             </div>
@@ -180,7 +180,7 @@
           />
         </section>
 
-        <section class="result-block">
+        <section class="result-block candidates-block">
           <div class="block-head">
             <h3>传播影响路径</h3>
             <span>{{ filteredCandidates.length }} / {{ transitiveCandidates.length }} 条候选</span>
@@ -216,10 +216,20 @@
           />
         </section>
 
-        <section class="result-block">
+        <section class="result-block trace-block">
           <div class="block-head">
             <h3>业务追溯映射</h3>
             <span>{{ result.traceability.affectedSymbols.length }} 个命中符号</span>
+          </div>
+          <div v-if="result.traceability.affectedSymbols.length" class="symbol-hit-strip">
+            <span v-for="symbol in visibleAffectedSymbols" :key="symbol" :title="symbol">{{ symbolName(symbol) }}</span>
+            <b v-if="hiddenAffectedSymbolCount > 0">+{{ hiddenAffectedSymbolCount }}</b>
+          </div>
+          <div
+            v-if="result.traceability.affectedSymbols.length && !result.traceability.affectedCriteria.length && !result.traceability.affectedTestcases.length"
+            class="empty-inline trace-warning"
+          >
+            已识别代码影响符号，但当前基线没有匹配到验收标准或测试用例追溯链接。
           </div>
           <div class="trace-columns">
             <div>
@@ -308,7 +318,7 @@ const jobStatusText = computed(() => {
 const keyword = computed(() => resultFilters.keyword.toLowerCase())
 const filteredFiles = computed(() => (result.value?.report.changeSet.files || []).filter(file => matchesKeyword([filePath(file), file.changeType, file.language])))
 const filteredDirectChanges = computed(() => (result.value?.report.directChanges || []).filter(change => matchesKeyword([
-  change.symbolKey,
+  changeKey(change),
   change.changeType,
   change.facets.join(' '),
   activeSymbol(change)?.path,
@@ -334,6 +344,8 @@ const paginatedDirectChanges = computed(() => paginate(filteredDirectChanges.val
 const paginatedCandidates = computed(() => paginate(filteredCandidates.value, pages.candidates, pageSizes.candidates))
 const paginatedCriteria = computed(() => paginate(filteredCriteria.value, pages.criteria, pageSizes.criteria))
 const paginatedTestcases = computed(() => paginate(filteredTestcases.value, pages.testcases, pageSizes.testcases))
+const visibleAffectedSymbols = computed(() => (result.value?.traceability.affectedSymbols || []).slice(0, 8))
+const hiddenAffectedSymbolCount = computed(() => Math.max(0, (result.value?.traceability.affectedSymbols.length || 0) - visibleAffectedSymbols.value.length))
 
 async function loadOverview() {
   if (loading.value) return
@@ -450,6 +462,10 @@ function resetPages() {
 
 function activeSymbol(change: GitImpactReport['directChanges'][number]) {
   return change.newSymbol || change.oldSymbol
+}
+
+function changeKey(change: GitImpactReport['directChanges'][number]) {
+  return change.symbolKey || change.newKey || change.oldKey || activeSymbol(change)?.key || ''
 }
 
 function badgeClass(value: string) {
@@ -570,7 +586,7 @@ function stageText(value: string) {
 function symbolMeta(change: GitImpactReport['directChanges'][number]) {
   const symbol = activeSymbol(change)
   const parts = [symbol?.kind, symbol?.signature].filter(Boolean)
-  return parts.length ? parts.join(' · ') : change.symbolKey
+  return parts.length ? parts.join(' · ') : changeKey(change)
 }
 
 function symbolName(symbolKey?: string | null) {
@@ -709,8 +725,25 @@ onBeforeUnmount(() => {
 .result-toolbar label { display: grid; gap: 6px; color: #475569; font-size: 12px; font-weight: 800; }
 .result-toolbar input,
 .result-toolbar select { min-height: 38px; border: 1px solid rgba(15, 23, 42, .13); border-radius: 8px; padding: 8px 10px; background: #fff; color: #1e293b; font: inherit; }
-.result-layout { display: grid; gap: 18px; }
-.result-block { display: grid; gap: 10px; }
+.result-layout {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.result-block {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 8px;
+  background: #fff;
+}
+.files-block { grid-column: span 7; }
+.trace-block { grid-column: span 5; }
+.direct-block,
+.candidates-block { grid-column: span 6; }
 .block-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(15, 23, 42, .08); }
 .block-head h3,
 .trace-columns h4 { margin: 0; color: var(--oat-text); font-size: 15px; }
@@ -719,6 +752,18 @@ onBeforeUnmount(() => {
 .change-card,
 .candidate-card,
 .trace-card { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; }
+.result-block > .file-row,
+.result-block > .change-card,
+.result-block > .candidate-card,
+.result-block .trace-card { background: var(--oat-surface-soft); }
+.file-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.file-row .row-main { align-items: center; }
+.file-row .meta-line {
+  padding-left: 62px;
+}
 .row-main,
 .change-title,
 .candidate-top { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
@@ -777,6 +822,35 @@ onBeforeUnmount(() => {
 .path-chain span { overflow-wrap: anywhere; }
 .path-chain b { color: #64748b; font-size: 11px; }
 .llm-note { margin: 0; color: var(--oat-text-muted); font-size: 13px; }
+.symbol-hit-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 9px;
+  border-radius: 8px;
+  background: #ecfeff;
+}
+.symbol-hit-strip span,
+.symbol-hit-strip b {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid rgba(15, 118, 110, .16);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #fff;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trace-warning {
+  padding: 10px 12px;
+  border: 1px solid rgba(217, 119, 6, .18);
+  border-radius: 8px;
+  background: #fffbeb;
+  color: #92400e;
+}
 .trace-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .trace-columns > div { display: grid; align-content: start; gap: 8px; }
 .empty-inline { padding: 10px 0; color: #64748b; font-size: 13px; }
@@ -785,9 +859,15 @@ onBeforeUnmount(() => {
   .summary-grid,
   .commit-strip,
   .result-toolbar,
+  .result-layout,
   .trace-columns { grid-template-columns: 1fr; }
+  .files-block,
+  .trace-block,
+  .direct-block,
+  .candidates-block { grid-column: auto; }
   .analyze-action-row { justify-content: stretch; }
   .analyze-button { width: 100%; }
+  .file-row .meta-line { padding-left: 0; }
   .candidate-top { display: grid; }
   .confidence { margin-left: 0; }
 }

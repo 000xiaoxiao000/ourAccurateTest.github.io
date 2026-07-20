@@ -20,6 +20,7 @@ public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
     private static final Pattern TYPE = Pattern.compile("(?m)(?:^|[;{}])\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:public|protected|private|abstract|final|static|sealed|non-sealed|\\s)*(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
     private static final Pattern METHOD = Pattern.compile("(?m)(?:^|[;{}])\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\\s+)*([\\w$<>?,.\\[\\] ]+)\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*(?:throws[^\\{]+)?\\{");
     private static final Pattern INVOCATION = Pattern.compile("\\b([A-Za-z_$][\\w$]*)\\s*\\(");
+    private static final List<String> JAVA_CONTROL_KEYWORDS = List.of("if", "for", "while", "switch", "catch", "try", "synchronized");
 
     @Override
     public boolean supports(String path) {
@@ -37,6 +38,7 @@ public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
         Matcher matcher = METHOD.matcher(source);
         while (matcher.find()) {
             String name = matcher.group(2);
+            if (JAVA_CONTROL_KEYWORDS.contains(name)) continue;
             String parameters = normalizeParameters(matcher.group(3));
             int begin = lineAt(source, matcher.start());
             int endOffset = closingBraceOffset(source, matcher.end() - 1);
@@ -54,7 +56,7 @@ public class JavaTreeSitterAnalyzer implements LanguageAnalyzer {
     }
     private String match(Pattern pattern, String source, int group) { Matcher matcher = pattern.matcher(source); return matcher.find() ? matcher.group(group) : ""; }
     private String normalizeParameters(String value) { return value == null || value.isBlank() ? "" : value.replaceAll("@[\\w.]+", "").replaceAll("\\s+", " ").trim(); }
-    private List<String> invocations(String body) { Matcher m = INVOCATION.matcher(body); List<String> result = new ArrayList<>(); while (m.find()) { String value = m.group(1); if (!List.of("if", "for", "while", "switch", "catch", "return", "new").contains(value)) result.add(value); } return result.stream().distinct().toList(); }
+    private List<String> invocations(String body) { Matcher m = INVOCATION.matcher(body); List<String> result = new ArrayList<>(); while (m.find()) { String value = m.group(1); if (!JAVA_CONTROL_KEYWORDS.contains(value) && !List.of("return", "new").contains(value)) result.add(value); } return result.stream().distinct().toList(); }
     private int lineAt(String source, int offset) { int line = 1; for (int i = 0; i < offset; i++) if (source.charAt(i) == '\n') line++; return line; }
     private int closingBraceOffset(String source, int start) { int depth = 0; for (int i = start; i < source.length(); i++) { char c = source.charAt(i); if (c == '{') depth++; else if (c == '}' && --depth == 0) return i; } return -1; }
     private int lines(String source) { return lineAt(source, source.length()); }

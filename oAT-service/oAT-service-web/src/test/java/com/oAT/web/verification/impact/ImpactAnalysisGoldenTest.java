@@ -37,4 +37,28 @@ class ImpactAnalysisGoldenTest {
         assertEquals(2, impacts.size());
         assertTrue(impacts.stream().anyMatch(impact -> impact.targetSymbol().equals(caller.key()) && impact.path().symbols().size() == 2));
     }
+
+    @Test
+    void doesNotTreatControlStatementsAsMethods() {
+        String source = """
+                package demo;
+                class Web3Controller {
+                    void web3Branch(User user) {
+                        if (user != null && user.name != null) {
+                            submit(user);
+                        }
+                    }
+                    void submit(User user) { }
+                }
+                class User { String name; }
+                """;
+        List<String> signatures = analyzer.analyze("Web3Controller.java", source).stream()
+                .filter(symbol -> symbol.kind() == SymbolKind.METHOD)
+                .map(SymbolSnapshot::signature)
+                .toList();
+
+        assertTrue(signatures.contains("web3Branch(User user)"));
+        assertTrue(signatures.contains("submit(User user)"));
+        assertTrue(signatures.stream().noneMatch(signature -> signature.startsWith("if(")));
+    }
 }
