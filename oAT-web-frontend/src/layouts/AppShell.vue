@@ -11,9 +11,8 @@
           <RouterLink v-if="projectId" :to="`/p/${projectId}/git-impact`">Git 影响</RouterLink>
           <RouterLink v-if="projectId" :to="`/p/${projectId}/map/home`">链路地图</RouterLink>
           <div v-if="projectId" class="nav-dropdown app-center" :class="{ open: openMenu === 'app' }" @mouseenter="openNavMenu('app')" @mouseleave="closeMenus">
-            <button class="nav-dropdown-trigger" type="button" aria-haspopup="true" :aria-expanded="openMenu === 'app'" @click.stop="toggleMenu('app')">源码工程 <span class="menu-caret" aria-hidden="true">⌄</span></button>
+            <RouterLink class="nav-dropdown-trigger" :to="`/p/${projectId}/apps`" aria-haspopup="true" :aria-expanded="openMenu === 'app'" @click="closeMenus">源码工程 <span class="menu-caret" aria-hidden="true">⌄</span></RouterLink>
             <div class="nav-menu app-menu">
-              <RouterLink class="menu-entry" :to="`/p/${projectId}/apps`" @click="closeMenus">源码工程总览</RouterLink>
               <input v-model.trim="appKeyword" class="menu-search" type="text" placeholder="搜索源码工程..." />
               <div class="menu-divider"></div>
               <div v-for="app in filteredApps" :key="app.id" class="app-menu-item">
@@ -390,7 +389,7 @@ async function handleLogout() {
 }
 
 .app-menu {
-  width: 430px;
+  width: 408px;
   max-width: calc(100vw - 24px);
   max-height: min(480px, calc(100vh - 120px));
   overflow: auto;
@@ -425,8 +424,8 @@ async function handleLogout() {
   display: flex !important;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  padding-right: 120px !important;
+  gap: 8px;
+  border-radius: 12px;
 }
 
 .app-menu-item small {
