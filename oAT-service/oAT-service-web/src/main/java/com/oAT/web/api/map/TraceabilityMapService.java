@@ -753,6 +753,12 @@ public class TraceabilityMapService {
                         && (method.getStartLine() <= 0 || !StringUtils.hasText(method.getClassName()))) {
                     return true;
                 }
+                if (index.getTotalBranchTargets() > 0
+                        && method != null
+                        && !"file".equals(method.getMethodDesc())
+                        && method.getTotalBranchTargetProbeMap() == null) {
+                    return true;
+                }
             }
         }
         return false;
@@ -955,6 +961,7 @@ public class TraceabilityMapService {
         Map<String, Object> metadata = new LinkedHashMap<>();
         Set<Integer> totalLines = new LinkedHashSet<>();
         Set<Integer> coveredLines = new LinkedHashSet<>();
+        Set<Integer> partialBranchLines = new LinkedHashSet<>();
         if (index.getTotalLineNumbers() != null) totalLines.addAll(index.getTotalLineNumbers());
         if (index.getCoveredLineNumbers() != null) coveredLines.addAll(index.getCoveredLineNumbers());
         if (index.getMethods() != null) {
@@ -962,11 +969,34 @@ public class TraceabilityMapService {
                 if (method == null) continue;
                 if (method.getTotalLineNumbers() != null) totalLines.addAll(method.getTotalLineNumbers());
                 if (method.getCoveredLineNumbers() != null) coveredLines.addAll(method.getCoveredLineNumbers());
+                partialBranchLines.addAll(partialBranchLines(method));
             }
         }
         metadata.put("coverageTotalLines", new ArrayList<>(totalLines));
         metadata.put("coverageCoveredLines", new ArrayList<>(coveredLines));
+        metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines));
         return metadata;
+    }
+
+    private Set<Integer> partialBranchLines(ClassCoverageIndex.MethodCoverageDetail method) {
+        Set<Integer> result = new LinkedHashSet<>();
+        if (method == null || method.getTotalBranchTargetProbeMap() == null) return result;
+        Map<String, List<Integer>> covered = method.getCoveredBranchTargetProbeMap();
+        for (Map.Entry<String, List<Integer>> entry : method.getTotalBranchTargetProbeMap().entrySet()) {
+            int separator = entry.getKey().indexOf(':');
+            if (separator <= 0) continue;
+            int total = entry.getValue() == null ? 0 : entry.getValue().size();
+            List<Integer> coveredTargets = covered == null ? null : covered.get(entry.getKey());
+            int coveredCount = coveredTargets == null ? 0 : coveredTargets.size();
+            if (coveredCount > 0 && coveredCount < total) {
+                try {
+                    result.add(Integer.parseInt(entry.getKey().substring(0, separator)));
+                } catch (NumberFormatException ignored) {
+                    // Ignore malformed branch keys from third-party report formats.
+                }
+            }
+        }
+        return result;
     }
 
     private CoverageSummary mergeCoverage(CoverageSummary current, CoverageSummary incoming) {
@@ -1071,18 +1101,34 @@ public class TraceabilityMapService {
         String lastPath = null;
         while (matcher.find()) {
             if (lastPath != null) {
-                units.add(new SourceUnit(lastPath, content.substring(lastStart, matcher.start())));
+                units.add(new SourceUnit(lastPath, sourceUnitContent(content, lastStart, matcher.start())));
             }
             lastPath = matcher.group(1).trim();
-            lastStart = matcher.end();
+            lastStart = skipLineBreak(content, matcher.end());
         }
         if (lastPath != null) {
-            units.add(new SourceUnit(lastPath, content.substring(lastStart)));
+            units.add(new SourceUnit(lastPath, sourceUnitContent(content, lastStart, content.length())));
         }
         if (units.isEmpty()) {
             units.add(new SourceUnit(StringUtils.hasText(defaultName) ? defaultName : "ImportedSource.java", content));
         }
         return units;
+    }
+
+    /**
+     * The marker line owns the line break immediately after it. Do not expose
+     * that separator as a blank first source line.
+     */
+    private String sourceUnitContent(String content, int start, int end) {
+        if (content == null || start >= end) return "";
+        return content.substring(start, end);
+    }
+
+    private int skipLineBreak(String content, int index) {
+        if (content == null || index >= content.length()) return index;
+        if (content.startsWith("\r\n", index)) return index + 2;
+        if (content.charAt(index) == '\n' || content.charAt(index) == '\r') return index + 1;
+        return index;
     }
 
     private String assetContent(AssetSnapshot asset) {
@@ -1404,6 +1450,7 @@ public class TraceabilityMapService {
                 Map<String, Object> metadata = new LinkedHashMap<>();
                 metadata.put("coverageTotalLines", method.getTotalLineNumbers() == null ? List.of() : method.getTotalLineNumbers());
                 metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
+                metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines(method)));
                 applyCoverageSummary(methodId, coverage, metadata);
             }
         }
@@ -1481,7 +1528,7 @@ public class TraceabilityMapService {
 
         String resolveCoverageNode(ClassCoverageIndex index) {
             if (index == null) return null;
-            String direct = resolve(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
+            String direct = resolveCoverageContainer(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
             if (direct != null) return direct;
             String sourcePath = normalizer.normalizePath(firstText(index.getSourcePath(), index.getClassName(), index.getDisplayName()));
             String simpleName = simpleClassName(firstText(index.getClassName(), index.getDisplayName(), sourcePath))
@@ -1499,6 +1546,27 @@ public class TraceabilityMapService {
                     .max(Comparator.comparingInt(node -> value(node.locator()).length()))
                     .map(TraceabilityNode::id)
                     .orElse(null);
+        }
+
+        private String resolveCoverageContainer(String value) {
+            if (!StringUtils.hasText(value)) return null;
+            if (nodes.containsKey(value) && isCoverageContainer(nodes.get(value))) return value;
+            String normalized = normalizer.normalizeLookupKey(value);
+            String direct = aliases.get(normalized);
+            if (direct != null && isCoverageContainer(nodes.get(direct))) return direct;
+            return aliases.entrySet().stream()
+                    .filter(entry -> {
+                        TraceabilityNode node = nodes.get(entry.getValue());
+                        return isCoverageContainer(node)
+                                && (normalized.contains(entry.getKey()) || entry.getKey().contains(normalized));
+                    })
+                    .max(Comparator.comparingInt(entry -> entry.getKey().length()))
+                    .map(Map.Entry::getValue)
+                    .orElse(null);
+        }
+
+        private boolean isCoverageContainer(TraceabilityNode node) {
+            return node != null && (node.kind() == NodeKind.CODE_FILE || node.kind() == NodeKind.CODE_CLASS);
         }
 
         void resolvePendingCalls() {

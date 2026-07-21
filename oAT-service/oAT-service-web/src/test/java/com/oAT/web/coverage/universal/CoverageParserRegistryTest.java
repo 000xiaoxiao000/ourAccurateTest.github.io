@@ -109,4 +109,29 @@ class CoverageParserRegistryTest {
         assertEquals(List.of(27, 29), index.getTotalLineNumbers());
         assertEquals(List.of(27, 29), index.getCoveredLineNumbers());
     }
+
+    @Test
+    void keepsJacocoBranchTargetsOnTheOwningMethod() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                <report><package name="web3Server/controller">
+                  <class name="web3Server/controller/Web302Controller" sourcefilename="Web302Controller.java">
+                    <method name="allHkAmount" desc="()V" line="78">
+                      <counter type="METHOD" missed="0" covered="1"/>
+                    </method>
+                  </class>
+                  <sourcefile name="Web302Controller.java">
+                    <line nr="78" ci="7" mb="1" cb="1"/>
+                    <line nr="79" ci="4" mb="1" cb="1"/>
+                    <line nr="80" ci="4" mb="1" cb="1"/>
+                    <line nr="81" ci="1" mb="0" cb="0"/>
+                  </sourcefile>
+                </package></report>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail method =
+                file.toClassCoverageIndex("app").getMethods().get(0);
+        assertEquals(6, method.getTotalBranchTargets());
+        assertEquals(3, method.getCoveredBranchTargets());
+        assertEquals(50.0, method.getBranchRate() * 100);
+    }
 }

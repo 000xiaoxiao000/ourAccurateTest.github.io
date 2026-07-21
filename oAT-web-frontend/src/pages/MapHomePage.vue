@@ -262,7 +262,7 @@
                       </span>
                       <em :class="['coverage-pill', row.tone]">{{ row.stateText }}</em>
                       <div class="coverage-meter compact">
-                        <span>{{ row.lineText }}</span>
+                        <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
                         <i><b :style="{ width: row.lineWidth }"></b></i>
                       </div>
                     </button>
@@ -290,7 +290,7 @@
                         <small :title="row.locator">{{ row.locator }}</small>
                       </span>
                       <div class="coverage-meter compact">
-                        <span>{{ row.lineText }}</span>
+                        <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
                         <i><b :style="{ width: row.lineWidth }"></b></i>
                       </div>
                     </button>
@@ -704,17 +704,25 @@ const coverageSourceLines = computed(() => {
   const content = stringMetadata(source?.metadata?.sourceContent) || row.sourceContent
   if (!content) return []
   const sourceMetadata = source?.metadata || {}
-  // JaCoCo line numbers belong to the complete source file, never a method snippet.
-  const covered = new Set(numberArrayMetadata(sourceMetadata.coverageCoveredLines).length
-    ? numberArrayMetadata(sourceMetadata.coverageCoveredLines)
-    : row.coveredLineNumbers)
-  const total = new Set(numberArrayMetadata(sourceMetadata.coverageTotalLines).length
-    ? numberArrayMetadata(sourceMetadata.coverageTotalLines)
-    : row.totalLineNumbers)
+  // A method borrows source text from its parent file/class, but its coverage
+  // lines must remain scoped to the selected method.
+  const covered = new Set(row.coveredLineNumbers.length
+    ? row.coveredLineNumbers
+    : numberArrayMetadata(sourceMetadata.coverageCoveredLines))
+  const total = new Set(row.totalLineNumbers.length
+    ? row.totalLineNumbers
+    : numberArrayMetadata(sourceMetadata.coverageTotalLines))
+  const partialBranch = new Set(row.partialBranchLineNumbers.length
+    ? row.partialBranchLineNumbers
+    : numberArrayMetadata(sourceMetadata.coveragePartialBranchLines))
   const start = numberMetadata(sourceMetadata.sourceStartLine) || row.sourceStartLine || 1
-  return content.split(/\r?\n/).map((text, index) => {
+  const sourceLines = content.split(/\r?\n/)
+  alignCoverageLineSets(row.id, source?.id, sourceLines, start, total, covered, partialBranch)
+  return sourceLines.map((text, index) => {
     const number = start + index
-    const state = covered.has(number) ? 'covered' : total.has(number) ? 'missed' : 'neutral'
+    const state = partialBranch.has(number)
+      ? 'partial'
+      : covered.has(number) ? 'covered' : total.has(number) ? 'missed' : 'neutral'
     return { number, text, state }
   })
 })
@@ -1062,6 +1070,7 @@ function toCoverageRow(node: TraceabilityNode) {
     sourceStartLine: source.content ? source.startLine : lineFromLocator(node.locator) || numberMetadata(metadata.line) || 1,
     totalLineNumbers: numberArrayMetadata(metadata.coverageTotalLines),
     coveredLineNumbers: numberArrayMetadata(metadata.coverageCoveredLines),
+    partialBranchLineNumbers: numberArrayMetadata(metadata.coveragePartialBranchLines),
   }
 }
 
@@ -1146,6 +1155,62 @@ function coverageSourceNode(nodeId: string) {
     current = current.parentId ? map.nodeById.value.get(current.parentId) : undefined
   }
   return undefined
+}
+
+function alignCoverageLineSets(
+  selectedNodeId: string,
+  sourceNodeId: string | undefined,
+  sourceLines: string[],
+  sourceStartLine: number,
+  totalLines: Set<number>,
+  coveredLines: Set<number>,
+  partialBranchLines: Set<number>,
+) {
+  const selectedNode = map.nodeById.value.get(selectedNodeId)
+  const methods = selectedNode?.kind === 'CODE_METHOD'
+    ? [selectedNode]
+    : map.nodes.value.filter((node) => node.kind === 'CODE_METHOD' && coverageSourceNode(node.id)?.id === sourceNodeId)
+  for (const method of methods) {
+    const metadata = method.metadata || {}
+    const methodTotalLines = numberArrayMetadata(metadata.coverageTotalLines)
+    if (!methodTotalLines.length) continue
+    const offset = coverageLineOffset(method, sourceLines, sourceStartLine, new Set(methodTotalLines))
+    if (!offset) continue
+    moveCoverageLines(totalLines, methodTotalLines, offset)
+    moveCoverageLines(coveredLines, numberArrayMetadata(metadata.coverageCoveredLines), offset)
+    moveCoverageLines(partialBranchLines, numberArrayMetadata(metadata.coveragePartialBranchLines), offset)
+  }
+}
+
+function moveCoverageLines(target: Set<number>, lines: number[], offset: number) {
+  for (const line of lines) target.delete(line)
+  for (const line of lines) target.add(line + offset)
+}
+
+function coverageLineOffset(
+  node: TraceabilityNode,
+  sourceLines: string[],
+  sourceStartLine: number,
+  totalLines: Set<number>,
+) {
+  if (node.kind !== 'CODE_METHOD') return 0
+
+  const declarationLine = lineFromLocator(node.locator) || numberMetadata(node.metadata?.line)
+  if (!declarationLine || !totalLines.has(declarationLine)) return 0
+
+  const declarationIndex = declarationLine - sourceStartLine
+  if (declarationIndex < 0 || declarationIndex >= sourceLines.length) return 0
+  let headerEnd = declarationIndex
+  while (headerEnd < sourceLines.length && !sourceLines[headerEnd].includes('{')) headerEnd += 1
+  if (headerEnd >= sourceLines.length) return 0
+
+  for (let index = headerEnd + 1; index < sourceLines.length; index += 1) {
+    const text = sourceLines[index].trim()
+    if (!text || text.startsWith('//') || text.startsWith('/*') || text.startsWith('*')) continue
+    if (text.startsWith('}')) return 0
+    return sourceStartLine + index - declarationLine
+  }
+  return 0
 }
 
 function hasCoverageSummary(node: TraceabilityNode) {
@@ -2257,12 +2322,12 @@ onBeforeUnmount(() => {
 .call-map-svg { display:block; min-width:760px; min-height:300px; }
 .call-map-scroll.large.fullscreen .call-graph-viewport { height:calc(100vh - 58px); }
 :global(body.trace-call-graph-fullscreen) { overflow:hidden; }
-.coverage-data-panel { flex:1; min-width:0; overflow:auto; background:#fff; }
+.coverage-data-panel { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:auto; background:#fff; }
 .coverage-overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-overview-grid article { display:grid; gap:3px; min-width:0; padding:9px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-overview-grid strong { color:#172033; font-size:18px; line-height:1.1; }
 .coverage-overview-grid span { color:#64748b; font-size:11px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.coverage-workbench { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; padding:10px 12px; align-items:stretch; min-height:0; }
+.coverage-workbench { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; padding:10px 12px; align-items:stretch; flex:1; min-height:0; }
 .coverage-unselected-state { display:flex; min-height:540px; align-items:center; justify-content:center; flex-direction:column; gap:7px; padding:24px; box-sizing:border-box; color:#94a3b8; text-align:center; }
 .coverage-unselected-state strong { color:#475569; font-size:14px; }
 .coverage-unselected-state span { max-width:520px; font-size:12px; line-height:1.6; }
@@ -2282,14 +2347,15 @@ onBeforeUnmount(() => {
 .mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
-.coverage-source-view { min-width:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-source-view { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }
 .coverage-source-head span { flex:0 0 auto; color:#64748b; font-size:12px; font-weight:800; }
-.source-code-scroll { height:clamp(480px,calc(100vh - 340px),680px); overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
+.source-code-scroll { flex:1; min-height:0; overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
 .source-line { display:grid; grid-template-columns:52px minmax(0,1fr); min-width:760px; }
 .source-line.covered { background:#dcfce7; }
 .source-line.missed { background:#fee2e2; }
+.source-line.partial { background:#fef3c7; }
 .source-line.neutral { background:#fff; }
 .source-line.located { box-shadow:inset 3px 0 #2563eb; }
 .source-line.located .source-line-no { color:#1d4ed8; font-weight:900; }
@@ -2314,7 +2380,7 @@ onBeforeUnmount(() => {
 .coverage-meter b { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,#22c55e,#16a34a); }
 .coverage-meter.compact { min-width:0; }
 .coverage-meter.compact span { font-size:11px; }
-.coverage-node-panel { display:grid; grid-template-rows:auto minmax(130px,1fr) auto auto minmax(180px,1.25fr); height:clamp(526px,calc(100vh - 340px),726px); min-width:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
+.coverage-node-panel { display:grid; grid-template-rows:auto minmax(130px,1fr) auto auto minmax(180px,1.25fr); height:auto; min-height:0; min-width:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-list-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-list-head strong { color:#172033; font-size:13px; }
 .coverage-list-head span { color:#64748b; font-size:11px; font-weight:900; }
@@ -2360,6 +2426,6 @@ onBeforeUnmount(() => {
 .call-svg-node .call-node-subtitle { fill:#64748b; font-size:10px; font-weight:800; }
 .code-tree-head { border-top:1px solid #eef2f5; }
 .tree-scroll { flex:1; min-height:160px; overflow-y:auto; padding:8px 6px 12px; }
-@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
+@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { min-height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
 @media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
 </style>
