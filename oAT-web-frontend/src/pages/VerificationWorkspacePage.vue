@@ -288,16 +288,16 @@
       </section>
       <template v-else>
         <section class="result-toolbar">
-          <div>
-            <strong>{{ detail.baseline.name }}</strong>
-            <span>{{ baselineStatusText(detail.baseline.status) }} · {{ freshnessText(detail.baseline.freshness) }} · {{ formatTime(detail.baseline.updateTime) }}</span>
+          <div class="result-baseline">
+            <strong class="result-baseline-title">{{ detail.baseline.name }}</strong>
+            <span class="result-baseline-meta">{{ baselineStatusText(detail.baseline.status) }} · {{ freshnessText(detail.baseline.freshness) }} · {{ formatTime(detail.baseline.updateTime) }}</span>
             <small v-if="analysisJob">{{ analysisJobStatusText(analysisJob.status) }} · {{ analysisJob.message || '-' }}</small>
             <div v-if="analysisJob && (analysisJob.status === 'QUEUED' || analysisJob.status === 'RUNNING')" class="analysis-progress" aria-live="polite">
               <div class="analysis-progress-track"><span :style="{ width: `${analysisProgress(analysisJob)}%` }"></span></div>
               <small>{{ analysisProgress(analysisJob) }}% · {{ analysisPhase(analysisJob) }}</small>
             </div>
           </div>
-          <div class="header-actions">
+          <div class="header-actions result-actions">
             <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
                         :to="`/p/${projectId}/verification/orchestration?baselineId=${selectedBaselineId}`">分析编排</RouterLink>
             <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
@@ -2087,6 +2087,36 @@ function messageOf(err: unknown) {
   flex-wrap: wrap;
 }
 
+.result-toolbar {
+  flex-wrap: wrap;
+}
+
+.result-baseline {
+  display: grid;
+  gap: 5px;
+  min-width: 240px;
+  max-width: 100%;
+}
+
+.result-baseline-title,
+.result-baseline-meta,
+.result-baseline small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-baseline-title {
+  display: block;
+  line-height: 1.35;
+}
+
+.result-actions {
+  align-items: center;
+  gap: 8px;
+}
+
 .workspace-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2431,7 +2461,11 @@ label span {
 
 button,
 .primary-button,
-.secondary-button {
+.secondary-button,
+.secondary-button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 36px;
   border: 1px solid var(--oat-border);
   border-radius: 8px;
@@ -2449,6 +2483,11 @@ button,
 
 .secondary-button {
   background: var(--oat-surface-soft);
+}
+
+.secondary-button-link {
+  background: var(--oat-surface-soft);
+  text-decoration: none;
 }
 
 .ghost-button {
