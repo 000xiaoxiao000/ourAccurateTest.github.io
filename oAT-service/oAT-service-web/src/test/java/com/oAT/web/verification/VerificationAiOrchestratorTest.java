@@ -177,6 +177,34 @@ class VerificationAiOrchestratorTest {
         verify(llmService, never()).chat(anyString(), anyString());
     }
 
+    @Test
+    void nested_requirement_acceptance_criteria_are_parsed() {
+        String nestedJson = """
+                {"requirements":[
+                  {"requirementKey":"REQ-9","title":"登录",
+                   "acceptanceCriteria":["用户必须可以使用正确账号密码登录系统"]}
+                ],"testcases":[],"traceLinks":[],"findings":[]}
+                """;
+        when(llmService.chat(anyString(), anyString())).thenReturn(nestedJson);
+
+        AiVerificationResult result = orchestrator.analyze(inputWithRequirement("bl-1", "登录需求"));
+
+        assertEquals(1, result.criteria().size());
+        assertEquals("REQ-9", result.criteria().get(0).requirementKey());
+        assertEquals("用户必须可以使用正确账号密码登录系统", result.criteria().get(0).content());
+    }
+
+    @Test
+    void fallback_extracts_plain_text_requirement_when_ai_has_no_criteria() {
+        when(llmService.chat(anyString(), anyString())).thenReturn("{}", "{}");
+
+        AiVerificationResult result = orchestrator.analyze(inputWithRequirement("bl-1",
+                "用户登录验收：系统必须支持用户使用正确账号密码登录，登录成功后进入首页。"));
+
+        assertEquals(1, result.criteria().size());
+        assertTrue(result.criteria().get(0).content().contains("系统必须支持用户使用正确账号密码登录"));
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private AiVerificationInput simpleInput(String baselineId) {

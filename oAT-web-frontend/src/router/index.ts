@@ -62,8 +62,10 @@ const router = createRouter({
         },
         {
           path: 'p/:projectId/verification/orchestration',
-          name: 'analysis-orchestration',
-          component: () => import('@/pages/AnalysisOrchestrationPage.vue'),
+          redirect: (to) => ({
+            path: `/p/${String(to.params.projectId)}/verification`,
+            query: { ...to.query, workspace: 'orchestration' },
+          }),
         },
         {
           path: 'p/:projectId/git-impact',

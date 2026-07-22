@@ -281,6 +281,10 @@
       </section>
     </section>
 
+    <section v-else-if="activeWorkspace === 'orchestration'" class="workspace-section">
+      <AnalysisOrchestrationPanel :project-id="projectId" :initial-baseline-id="selectedBaselineId" />
+    </section>
+
     <section v-else class="workspace-section">
       <section v-if="!detail" class="panel-section empty-state">
         <strong>还没有选择分析基线</strong>
@@ -297,15 +301,22 @@
               <small>{{ analysisProgress(analysisJob) }}% · {{ analysisPhase(analysisJob) }}</small>
             </div>
           </div>
-          <div class="header-actions result-actions">
-            <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
-                        :to="`/p/${projectId}/verification/orchestration?baselineId=${selectedBaselineId}`">分析编排</RouterLink>
-            <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
-                        :to="`/p/${projectId}/verification/baselines/${selectedBaselineId}/graph`">事实图谱</RouterLink>
-            <button type="button" class="secondary-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
-            <button type="button" class="primary-button" :disabled="!selectedBaselineId || analyzing" @click="runAnalysis">
-              {{ analyzing ? '分析中...' : '运行 AI 分析' }}
-            </button>
+          <div class="result-actions">
+            <div class="result-action-group">
+              <RouterLink
+                v-if="selectedBaselineId"
+                class="secondary-button-link nav-button-link"
+                :to="`/p/${projectId}/verification/baselines/${selectedBaselineId}/graph`"
+              >
+                事实图谱
+              </RouterLink>
+            </div>
+            <div class="result-action-group">
+              <button type="button" class="danger-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
+              <button type="button" class="secondary-button" :disabled="!selectedBaselineId || analyzing" @click="runAnalysis">
+                {{ analyzing ? 'AI 分析中...' : '仅重跑 AI 分析' }}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -596,6 +607,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import AnalysisOrchestrationPanel from '@/components/AnalysisOrchestrationPanel.vue'
 import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useRoute } from 'vue-router'
@@ -639,7 +651,7 @@ import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
 import type { RelationEdge, RelationNode } from '@/features/map/types'
 
-type WorkspaceKey = 'library' | 'baseline' | 'result'
+type WorkspaceKey = 'library' | 'baseline' | 'orchestration' | 'result'
 type EvidenceRecord = {
   id: string
   source: 'TRACE' | 'FINDING' | 'WRITEBACK'
@@ -668,8 +680,8 @@ const detail = ref<BaselineDetail | null>(null)
 const matrix = ref<MatrixRow[]>([])
 const writeBacks = ref<WriteBackAction[]>([])
 const analysisJob = ref<AnalysisJob | null>(null)
-const activeWorkspace = ref<WorkspaceKey>('library')
-const selectedBaselineId = ref('')
+const activeWorkspace = ref<WorkspaceKey>(route.query.workspace === 'orchestration' ? 'orchestration' : 'library')
+const selectedBaselineId = ref(String(route.query.baselineId || ''))
 const activeTab = ref<'matrix' | 'findings' | 'evidence'>('matrix')
 const findingPerspective = ref('')
 const findingSeverity = ref('')
@@ -756,6 +768,7 @@ let activeHelpElement: HTMLElement | null = null
 const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: string }> = [
   { key: 'library', label: '资料库', description: '导入 / 查看资料' },
   { key: 'baseline', label: '分析基线', description: '选择资料并创建基线' },
+  { key: 'orchestration', label: '分析编排', description: '全量 / 增量 / 任务' },
   { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 依据' },
 ]
 
@@ -1233,7 +1246,7 @@ async function loadOverview() {
     overview.value = nextOverview
     if (!selectedBaselineId.value && overview.value.baselines[0]) {
       await selectBaseline(overview.value.baselines[0].id)
-      activeWorkspace.value = 'result'
+      if (route.query.workspace !== 'orchestration') activeWorkspace.value = 'result'
     }
   } catch (err) {
     if (requestSeq === overviewRequestSeq) error.value = messageOf(err)
@@ -2113,17 +2126,36 @@ function messageOf(err: unknown) {
 }
 
 .result-actions {
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
   gap: 8px;
+  white-space: nowrap;
+}
+
+.result-action-group {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.result-actions .secondary-button,
+.result-actions .danger-button,
+.result-actions .nav-button-link {
+  white-space: nowrap;
 }
 
 .workspace-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
-.workspace-tabs button {
+.workspace-tabs button,
+.orchestration-tab {
   display: grid;
   gap: 4px;
   min-height: 64px;
@@ -2134,10 +2166,25 @@ function messageOf(err: unknown) {
   background: rgba(255, 255, 255, .92);
 }
 
-.workspace-tabs button.active {
+.workspace-tabs button.active,
+.orchestration-tab:hover,
+.orchestration-tab:focus-visible {
   border-color: rgba(var(--oat-primary-rgb), .55);
   background: rgba(var(--oat-primary-rgb), .09);
   color: var(--oat-primary-dark);
+}
+
+.orchestration-tab {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  text-align: left;
+  text-decoration: none;
+  color: var(--oat-text);
+  border: 1px solid var(--oat-border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, .92);
 }
 
 .workspace-tabs span,
@@ -2488,6 +2535,12 @@ button,
 .secondary-button-link {
   background: var(--oat-surface-soft);
   text-decoration: none;
+}
+
+.nav-button-link {
+  border-color: rgba(var(--oat-accent-rgb), .18);
+  background: rgba(var(--oat-accent-rgb), .06);
+  color: var(--oat-accent);
 }
 
 .ghost-button {
@@ -2892,6 +2945,13 @@ button,
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;
+  }
+
+  .result-actions,
+  .result-action-group {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    white-space: normal;
   }
 
   .metrics-strip,

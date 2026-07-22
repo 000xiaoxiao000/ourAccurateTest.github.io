@@ -313,7 +313,11 @@ public class VerificationAiOrchestrator {
     private AiVerificationResult buildResult(AiVerificationInput input, JsonNode root) {
         try {
             String baselineId = input.baselineId();
-            List<AcceptanceCriterion> criteria = parseCriteria(baselineId, firstArray(root, "criteria", "acceptanceCriteria", "acceptance_criteria", "acs"));
+            List<AcceptanceCriterion> criteria = parseCriteria(baselineId,
+                    firstArray(root, "criteria", "acceptanceCriteria", "acceptance_criteria", "acs"));
+            if (criteria.isEmpty()) {
+                criteria = parseNestedCriteria(baselineId, root);
+            }
             criteria = mergeCriteria(criteria, parseMarkdownCriteria(baselineId, input.requirementContent()));
             if (criteria.isEmpty()) {
                 throw new IllegalArgumentException("AI分析结果缺少验收标准");
@@ -383,6 +387,7 @@ public class VerificationAiOrchestrator {
                     true, false, 0.75));
         }
         result.addAll(parseNumberedAcceptanceCriteria(baselineId, content));
+        result.addAll(parsePlainTextCriteria(baselineId, content));
         return result;
     }
 
@@ -392,12 +397,12 @@ public class VerificationAiOrchestrator {
         boolean inAcceptanceSection = false;
         for (String line : content.split("\\R")) {
             String trimmed = line.trim();
-            if (trimmed.startsWith("## ")) {
+            if (trimmed.matches("^#{1,6}\\s+.*")) {
                 inAcceptanceSection = trimmed.contains("验收标准");
                 continue;
             }
             if (!inAcceptanceSection) continue;
-            Matcher matcher = Pattern.compile("^(\\d+)\\.\\s*(.+)$").matcher(trimmed);
+            Matcher matcher = Pattern.compile("^(\\d+)[.、)]\\s*(.+)$").matcher(trimmed);
             if (!matcher.matches()) continue;
             String key = "G-" + String.format("%03d", Integer.parseInt(matcher.group(1)));
             String description = matcher.group(2).trim();
@@ -407,6 +412,55 @@ public class VerificationAiOrchestrator {
                     "需求文档: 验收标准", "MEDIUM", true, false, 0.70));
         }
         return result;
+    }
+
+    private List<AcceptanceCriterion> parsePlainTextCriteria(String baselineId, String content) {
+        List<AcceptanceCriterion> result = new ArrayList<>();
+        if (!StringUtils.hasText(content)) return result;
+        int index = 1;
+        for (String line : content.split("\\R")) {
+            String trimmed = line.trim();
+            if (!looksLikeRequirementLine(trimmed)) continue;
+            Matcher matcher = Pattern.compile("^(?:[-*]\\s*)?(?:(REQ|AC)[-\\s:]*)?(\\d+|[A-Za-z]+-\\d+)?[.、):：\\s-]*(.+)$",
+                    Pattern.CASE_INSENSITIVE).matcher(trimmed);
+            if (!matcher.matches()) continue;
+            String description = matcher.group(3).trim();
+            if (!StringUtils.hasText(description) || description.length() < 6 || isMarkdownNoise(description)) continue;
+            String key = StringUtils.hasText(matcher.group(2))
+                    ? matcher.group(2).toUpperCase(Locale.ROOT).replaceAll("\\s+", "")
+                    : String.format("%03d", index);
+            if (!key.startsWith("REQ-") && !key.startsWith("AC-") && key.matches("\\d+")) {
+                key = "REQ-" + key;
+            }
+            result.add(new AcceptanceCriterion(UUID.randomUUID().toString(), baselineId,
+                    key.startsWith("AC-") ? "REQ-" + index : key,
+                    key.startsWith("AC-") ? key : "AC-" + key,
+                    truncate(firstSentence(description), 512), truncate(description, 4000),
+                    "需求文档: 文本行", "MEDIUM", true, false, 0.62));
+            index++;
+        }
+        return result;
+    }
+
+    private boolean looksLikeRequirementLine(String line) {
+        if (!StringUtils.hasText(line) || line.length() < 8 || line.startsWith("|") || line.startsWith("#")) return false;
+        String lower = line.toLowerCase(Locale.ROOT);
+        return lower.matches("^(?:[-*]\\s*)?(?:req|ac)[-\\s:]*(?:\\d+|[a-z]+-\\d+).+")
+                || line.matches("^(?:\\d+|[一二三四五六七八九十]+)[.、)]\\s*.+")
+                || line.contains("应当") || line.contains("必须") || line.contains("需要")
+                || line.contains("可以") || line.contains("支持") || line.contains("验收");
+    }
+
+    private boolean isMarkdownNoise(String value) {
+        String trimmed = value.trim();
+        return trimmed.matches("^-+$") || trimmed.matches("^:?-{3,}:?$")
+                || trimmed.equalsIgnoreCase("content") || trimmed.equals("说明");
+    }
+
+    private String firstSentence(String value) {
+        String safe = value(value).trim();
+        Matcher matcher = Pattern.compile("^(.{1,80}?)[。；;.!！?？]").matcher(safe);
+        return matcher.find() ? matcher.group(1) : safe;
     }
 
     private List<TestcaseProjection> parseMarkdownTestcases(String baselineId, String content) {
@@ -735,7 +789,10 @@ public class VerificationAiOrchestrator {
         List<AcceptanceCriterion> result = new ArrayList<>();
         int index = 1;
         for (JsonNode item : node) {
-            String content = text(item, "content", "description", "text", "acceptanceCriterion");
+            String content = item.isTextual()
+                    ? item.asText().trim()
+                    : text(item, "content", "description", "text", "acceptanceCriterion",
+                    "acceptance_criterion", "criterion", "expected", "acceptance");
             if (!StringUtils.hasText(content)) continue;
             String acKey = textOrDefault(item, "AC-" + index, "acKey", "acId", "key", "id");
             result.add(new AcceptanceCriterion(UUID.randomUUID().toString(), baselineId,
@@ -751,6 +808,69 @@ public class VerificationAiOrchestrator {
             index++;
         }
         return result;
+    }
+
+    private List<AcceptanceCriterion> parseNestedCriteria(String baselineId, JsonNode root) {
+        List<AcceptanceCriterion> result = new ArrayList<>();
+        collectNestedCriteria(baselineId, root, result, "", "", 0);
+        return result;
+    }
+
+    private void collectNestedCriteria(String baselineId, JsonNode node, List<AcceptanceCriterion> result,
+                                       String inheritedRequirementKey, String inheritedTitle, int depth) {
+        if (node == null || node.isMissingNode() || node.isNull() || depth > 6) return;
+        if (node.isObject()) {
+            String requirementKey = textOrDefault(node, inheritedRequirementKey,
+                    "requirementKey", "requirementId", "requirementRef", "reqKey", "key", "id");
+            String title = textOrDefault(node, inheritedTitle, "title", "name", "summary");
+            JsonNode nested = firstArray(node, "criteria", "acceptanceCriteria", "acceptance_criteria", "acs",
+                    "acceptance", "conditions");
+            if (nested.isArray()) {
+                int start = result.size() + 1;
+                for (JsonNode item : nested) {
+                    AcceptanceCriterion criterion = criterionFromNode(baselineId, item, result.size() + 1,
+                            requirementKey, title, start++);
+                    if (criterion != null) result.add(criterion);
+                }
+            }
+            node.fields().forEachRemaining(entry -> {
+                if (!Set.of("criteria", "acceptanceCriteria", "acceptance_criteria", "acs",
+                        "acceptance", "conditions").contains(entry.getKey())) {
+                    collectNestedCriteria(baselineId, entry.getValue(), result, requirementKey, title, depth + 1);
+                }
+            });
+            return;
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                collectNestedCriteria(baselineId, item, result, inheritedRequirementKey, inheritedTitle, depth + 1);
+            }
+        }
+    }
+
+    private AcceptanceCriterion criterionFromNode(String baselineId, JsonNode item, int index,
+                                                  String inheritedRequirementKey, String inheritedTitle,
+                                                  int nestedIndex) {
+        String content = item.isTextual()
+                ? item.asText().trim()
+                : text(item, "content", "description", "text", "acceptanceCriterion",
+                "acceptance_criterion", "criterion", "expected", "acceptance");
+        if (!StringUtils.hasText(content)) return null;
+        String requirementKey = textOrDefault(item,
+                StringUtils.hasText(inheritedRequirementKey) ? inheritedRequirementKey : "REQ-" + index,
+                "requirementKey", "requirementId", "requirementRef", "reqKey");
+        String acKey = textOrDefault(item,
+                StringUtils.hasText(requirementKey) ? requirementKey + "-AC-" + nestedIndex : "AC-" + index,
+                "acKey", "acId", "key", "id");
+        String title = textOrDefault(item,
+                StringUtils.hasText(inheritedTitle) ? inheritedTitle : acKey, "title", "name");
+        return new AcceptanceCriterion(UUID.randomUUID().toString(), baselineId,
+                truncate(requirementKey, 128), truncate(acKey, 128), truncate(title, 512),
+                truncate(content, 4000), truncate(text(item, "sourceLocator", "locator", "source"), 512),
+                normalizePriority(textOrDefault(item, "MEDIUM", "priority")),
+                !item.has("testable") || item.path("testable").asBoolean(true),
+                item.path("ambiguity").asBoolean(false),
+                confidence(item.path("confidence").asDouble(0.70)));
     }
 
     private List<TestcaseProjection> parseTestcases(String baselineId, JsonNode node) {
