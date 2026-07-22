@@ -320,12 +320,19 @@
               :key="node.id"
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
+              @pointerenter="showMiniGraphTooltip($event, node)"
+              @pointermove="showMiniGraphTooltip($event, node)"
+              @pointerleave="hideMiniGraphTooltip"
             >
-              <title>{{ miniNodeTitle(node) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text>
             </g>
           </svg>
+          <div
+            v-if="miniGraphTooltip.visible"
+            class="mini-graph-tooltip"
+            :style="{ left: `${miniGraphTooltip.left}px`, top: `${miniGraphTooltip.top}px` }"
+          >{{ miniGraphTooltip.text }}</div>
         </div>
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
           <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
@@ -343,13 +350,20 @@
               :key="node.id"
               :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
+              @pointerenter="showMiniGraphTooltip($event, node)"
+              @pointermove="showMiniGraphTooltip($event, node)"
+              @pointerleave="hideMiniGraphTooltip"
             >
-              <title>{{ miniNodeTitle(node) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
               <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
             </g>
           </svg>
+          <div
+            v-if="miniGraphTooltip.visible"
+            class="mini-graph-tooltip"
+            :style="{ left: `${miniGraphTooltip.left}px`, top: `${miniGraphTooltip.top}px` }"
+          >{{ miniGraphTooltip.text }}</div>
         </div>
         <div v-else-if="callViewMode === 'graph' && !callGraphReady" class="empty-card call-graph-start">
           <strong>请选择代码节点或查看全局调用图</strong>
@@ -488,7 +502,7 @@ interface SvgEdge {
   labelWidth: number
   raw: TraceabilityEdge
 }
-interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; tone: string; nodeId?: string }
+interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string }
 interface MiniGraphEdge { id: string; source: string; target: string; path: string }
 
 const route = useRoute()
@@ -505,6 +519,7 @@ const selectedTraceId = ref('')
 const selectedCallGraphId = ref('')
 const selectedMiniGraphId = ref('')
 const miniGraphFocusHighlightDisabled = ref(false)
+const miniGraphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 const callGraphGlobalEnabled = ref(false)
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
@@ -521,6 +536,7 @@ watch([activeTab, callViewMode], () => {
   exitCallGraphFullscreen()
   selectedMiniGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = false
+  hideMiniGraphTooltip()
   if (activeTab.value === 'calls') {
     void ensureCodeDataLoaded()
   }
@@ -884,10 +900,27 @@ function selectMiniGraphNode(node: MiniGraphNode) {
   }
 }
 
+function showMiniGraphTooltip(event: PointerEvent, node: MiniGraphNode) {
+  const panel = (event.currentTarget as Element | null)?.closest('.code-analysis-panel') as HTMLElement | null
+  if (!panel) return
+  const bounds = panel.getBoundingClientRect()
+  const maxWidth = Math.min(460, Math.max(240, bounds.width - 32))
+  const maxHeight = Math.min(320, Math.max(160, bounds.height - 32))
+  const offset = 14
+  const left = Math.max(16, Math.min(event.clientX - bounds.left + offset, bounds.width - maxWidth - 16)) + panel.scrollLeft
+  const top = Math.max(16, Math.min(event.clientY - bounds.top + offset, bounds.height - maxHeight - 16)) + panel.scrollTop
+  miniGraphTooltip.value = { visible: true, text: miniNodeTitle(node), left, top }
+}
+
+function hideMiniGraphTooltip() {
+  miniGraphTooltip.value.visible = false
+}
+
 function clearMiniGraphSelection() {
   selectedMiniGraphId.value = ''
   selectedCallGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = true
+  hideMiniGraphTooltip()
 }
 
 function clearCallGraphSelection() {
@@ -1479,6 +1512,8 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     height: 50,
     label: `${step.kind} · ${shorten(step.methodLabel, 22)}`,
     subtitle: shorten(step.expression || '代码块', 38),
+    fullLabel: `${step.kind} · ${step.methodLabel}`,
+    fullSubtitle: step.expression || '代码块',
     tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
     nodeId: step.methodId,
   }))
@@ -1978,8 +2013,8 @@ function callEdgeTitle(edge: TraceabilityEdge) {
 function miniNodeTitle(node: MiniGraphNode) {
   const source = node.nodeId ? map.nodeById.value.get(node.nodeId) : undefined
   return [
-    node.label,
-    node.subtitle,
+    node.fullLabel || node.label,
+    node.fullSubtitle || node.subtitle,
     source?.locator ? `位置：${source.locator}` : '',
     source?.symbol ? `符号：${source.symbol}` : '',
   ].filter(Boolean).join('\n')
@@ -2331,8 +2366,9 @@ onBeforeUnmount(() => {
 .coverage-unselected-state { display:flex; min-height:540px; align-items:center; justify-content:center; flex-direction:column; gap:7px; padding:24px; box-sizing:border-box; color:#94a3b8; text-align:center; }
 .coverage-unselected-state strong { color:#475569; font-size:14px; }
 .coverage-unselected-state span { max-width:520px; font-size:12px; line-height:1.6; }
-.code-analysis-panel { flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
+.code-analysis-panel { position:relative; flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
+.mini-graph-tooltip { position:absolute; z-index:4; box-sizing:border-box; width:min(460px,calc(100% - 32px)); max-height:min(320px,calc(100% - 32px)); overflow:auto; border:1px solid #cbd5e1; border-radius:6px; padding:9px 10px; background:rgba(255,255,255,.98); box-shadow:0 10px 22px rgba(15,23,42,.18); color:#334155; font-size:12px; font-weight:700; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; pointer-events:none; }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
 .mini-graph-edge.active path { stroke:#0f766e; stroke-width:3; opacity:1; }
 .mini-graph-edge.dimmed { opacity:.14; }

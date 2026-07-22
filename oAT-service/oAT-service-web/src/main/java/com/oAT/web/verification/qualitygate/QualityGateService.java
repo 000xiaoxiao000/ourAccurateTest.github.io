@@ -13,6 +13,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.*;
 
 /**
@@ -137,6 +138,28 @@ public class QualityGateService {
             }
         }
 
+        // §7 plan: requireChangeImpactVerified — two sub-checks:
+        //   a) any runtime execution was captured against a different source commit (stale evidence)
+        //   b) baseline still has open change-impact findings that haven't been reviewed
+        if (pol.requireChangeImpactVerified() && !exemptedRules.contains("CHANGE_IMPACT_VERIFIED")) {
+            List<VerificationRepository.StaleRuntimeExecution> staleExecutions =
+                    verificationRepository.findStaleRuntimeExecutions(baselineId);
+            if (!staleExecutions.isEmpty()) {
+                failures.add(new GateFailure("CHANGE_IMPACT_VERIFIED",
+                        "运行证据与基线代码版本不一致（commit 不匹配）",
+                        staleExecutions.size() + " 条执行记录 commit 与基线不符",
+                        "所有执行记录 commit 必须与基线 sourceCommit 一致"));
+            }
+            long unverifiedImpact = findings.stream()
+                    .filter(f -> "CHANGE_IMPACT".equals(f.findingType())
+                            && f.reviewStatus() == ReviewStatus.PENDING).count();
+            if (unverifiedImpact > 0) {
+                failures.add(new GateFailure("CHANGE_IMPACT_VERIFIED",
+                        "存在未审核的变更影响发现",
+                        unverifiedImpact + " 条变更影响待处理", "0 条"));
+            }
+        }
+
         GateVerdict verdict = failures.isEmpty() ? GateVerdict.PASSED : GateVerdict.FAILED;
         if (!activeExemptions.isEmpty() && !failures.isEmpty()) verdict = GateVerdict.EXEMPTED;
 
@@ -146,6 +169,58 @@ public class QualityGateService {
         saveResult(result);
         return result;
     }
+
+    /**
+     * Gate enforcement mode evolution (plan section 7): SHADOW observes and records only (never blocks);
+     * SOFT reports failures as a warning (does not block delivery); HARD blocks on any failure. The underlying
+     * deterministic rules are identical across modes — only the resulting decision (blocking) differs, so teams
+     * can roll a gate out as shadow, then soft, then hard without changing the rules.
+     */
+    public enum EnforcementMode { SHADOW, SOFT, HARD }
+
+    public GateDecision evaluateWithMode(String projectId, String baselineId, String policyId,
+                                         String userId, EnforcementMode mode) {
+        EnforcementMode effective = mode == null ? EnforcementMode.HARD : mode;
+        QualityGateResult result = evaluate(projectId, baselineId, policyId, userId);
+        boolean hasBlockingFailures = result.verdict() == GateVerdict.FAILED;
+        boolean blocked = effective == EnforcementMode.HARD && hasBlockingFailures;
+        GateVerdict effectiveVerdict;
+        String rationale;
+        switch (effective) {
+            case SHADOW -> {
+                effectiveVerdict = GateVerdict.WARNING;
+                rationale = hasBlockingFailures
+                        ? "影子模式：记录到 " + result.failures().size() + " 项未达标，仅观测不阻断"
+                        : "影子模式：全部达标，仅观测";
+            }
+            case SOFT -> {
+                effectiveVerdict = hasBlockingFailures ? GateVerdict.WARNING : GateVerdict.PASSED;
+                rationale = hasBlockingFailures
+                        ? "软门禁：存在 " + result.failures().size() + " 项未达标，告警但不阻断交付"
+                        : "软门禁：全部达标";
+            }
+            default -> {
+                effectiveVerdict = result.verdict();
+                rationale = blocked
+                        ? "硬门禁：存在 " + result.failures().size() + " 项未达标，阻断交付"
+                        : result.verdict() == GateVerdict.EXEMPTED ? "硬门禁：存在未达标项但已豁免" : "硬门禁：全部达标";
+            }
+        }
+        // Persist enforcement mode, blocked flag and rationale back to the gate result row.
+        persistDecisionMetadata(result.id(), effective, blocked, rationale);
+        return new GateDecision(effective.name(), effectiveVerdict, blocked, result, rationale);
+    }
+
+    private void persistDecisionMetadata(String resultId, EnforcementMode mode, boolean blocked, String rationale) {
+        jdbc.update("""
+                UPDATE oat_quality_gate_result
+                SET enforcement_mode = ?, blocked = ?, rationale = ?
+                WHERE id = ?
+                """, mode.name(), blocked, rationale, resultId);
+    }
+
+    public record GateDecision(String mode, GateVerdict effectiveVerdict, boolean blocked,
+                               QualityGateResult result, String rationale) {}
 
     public List<QualityGateResult> listResults(String projectId, String baselineId) {
         return jdbc.query("""

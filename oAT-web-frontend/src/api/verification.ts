@@ -397,6 +397,22 @@ export function fetchQualityGateResults(projectId: string, baselineId: string) {
   return apiGet<QualityGateResult[]>(`${base(projectId)}/baselines/${baselineId}/quality-gate/results`)
 }
 
+export type GateEnforcementMode = 'SHADOW' | 'SOFT' | 'HARD'
+
+export interface GateDecision {
+  mode: string
+  effectiveVerdict: GateVerdict
+  blocked: boolean
+  result: QualityGateResult
+  rationale: string
+}
+
+export function evaluateQualityGateWithMode(projectId: string, baselineId: string, policyId: string, mode: GateEnforcementMode) {
+  return apiPost<GateDecision>(
+    `${base(projectId)}/baselines/${baselineId}/quality-gate/evaluate-mode`,
+    JSON.stringify({ policyId, mode }), 'application/json')
+}
+
 export function createGateExemption(projectId: string, baselineId: string, payload: {
   ruleId: string; reason: string; expiresAt?: string
 }) {

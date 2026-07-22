@@ -37,7 +37,18 @@ public final class ImpactModels {
 
     public record SymbolSnapshot(String key, SymbolKind kind, String language, String qualifiedName,
                                  String signature, String path, LineRange range, String astHash, String bodyHash,
-                                 String apiHash, String snippet, List<String> invokedNames) {
+                                 String apiHash, String snippet, List<String> invokedNames,
+                                 List<String> superTypes,
+                                 List<String> fieldTypes,
+                                 List<String> injectAnnotatedFields) {
+
+        /** Backward-compatible constructor for callers that do not yet supply the structural fields. */
+        public SymbolSnapshot(String key, SymbolKind kind, String language, String qualifiedName,
+                              String signature, String path, LineRange range, String astHash, String bodyHash,
+                              String apiHash, String snippet, List<String> invokedNames) {
+            this(key, kind, language, qualifiedName, signature, path, range, astHash, bodyHash, apiHash,
+                    snippet, invokedNames, List.of(), List.of(), List.of());
+        }
     }
 
     public record SymbolChange(String oldKey, String newKey, SymbolChangeType changeType,

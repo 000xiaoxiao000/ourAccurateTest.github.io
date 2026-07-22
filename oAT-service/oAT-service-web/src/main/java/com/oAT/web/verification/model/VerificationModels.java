@@ -49,7 +49,30 @@ public final class VerificationModels {
             Freshness freshness,
             String createdBy,
             LocalDateTime createTime,
-            LocalDateTime updateTime) {
+            LocalDateTime updateTime,
+            // §9 graph snapshot version fields (nullable — populated after graph projection)
+            String staticGraphVersion,
+            String runtimeGraphVersion,
+            String cfgHash,
+            String dependencyHash,
+            String coverageReportHash,
+            String executionTraceHash,
+            String symbolHash,
+            String supersededByBaselineId) {
+
+        /** Backward-compatible constructor for callers that don't supply the new graph version fields. */
+        public Baseline(String id, String projectId, String name,
+                        String requirementAssetId, String testcaseAssetId, String sourceAssetId,
+                        String executionAssetId, String coverageAssetId, String sourceAppId,
+                        String repositoryUrl, String sourceBranch, String sourceCommit,
+                        String analyzerVersion, BaselineStatus status, Freshness freshness,
+                        String createdBy, LocalDateTime createTime, LocalDateTime updateTime) {
+            this(id, projectId, name, requirementAssetId, testcaseAssetId, sourceAssetId,
+                    executionAssetId, coverageAssetId, sourceAppId, repositoryUrl,
+                    sourceBranch, sourceCommit, analyzerVersion, status, freshness,
+                    createdBy, createTime, updateTime,
+                    null, null, null, null, null, null, null, null);
+        }
     }
 
     public record AcceptanceCriterion(
@@ -175,12 +198,26 @@ public final class VerificationModels {
             String id,
             String projectId,
             String baselineId,
+            String jobType,
+            String inputHash,
             AnalysisJobStatus status,
             String message,
             String createdBy,
             LocalDateTime createTime,
             LocalDateTime updateTime,
-            LocalDateTime finishTime) {
+            LocalDateTime finishTime,
+            String checkpointStep,
+            Map<String, Object> checkpointPayload,
+            int retryCount,
+            int maxRetries) {
+
+        /** Backward-compatible constructor for callers that don't supply the new fields. */
+        public AnalysisJob(String id, String projectId, String baselineId,
+                           AnalysisJobStatus status, String message, String createdBy,
+                           LocalDateTime createTime, LocalDateTime updateTime, LocalDateTime finishTime) {
+            this(id, projectId, baselineId, null, null, status, message, createdBy,
+                    createTime, updateTime, finishTime, null, Map.of(), 0, 3);
+        }
     }
 
     // ── Connector ────────────────────────────────────────────────────────────

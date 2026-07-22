@@ -10,6 +10,8 @@ import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.verification.model.VerificationModels;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.storage.AssetContentStore;
+import com.oAT.web.verification.graph.GraphService;
+import com.oAT.web.verification.graph.RuntimeTraceAssetImportService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
@@ -44,6 +46,8 @@ public class VerificationService {
     private final AppService appService;
     private final CoverageReportService coverageReportService;
     private final ClassCoverageIndexRepository classCoverageIndexRepository;
+    private final GraphService graphService;
+    private final RuntimeTraceAssetImportService runtimeTraceAssetImportService;
 
     public VerificationService(VerificationRepository repository, StaticInfoRepository staticInfoRepository,
                                VerificationAiOrchestrator aiOrchestrator, VerificationAiWriteBackComposer writeBackComposer,
@@ -51,7 +55,9 @@ public class VerificationService {
                                @Qualifier("verificationAiExecutor") Executor verificationAiExecutor,
                                AppService appService,
                                CoverageReportService coverageReportService,
-                               ClassCoverageIndexRepository classCoverageIndexRepository) {
+                               ClassCoverageIndexRepository classCoverageIndexRepository,
+                               GraphService graphService,
+                               RuntimeTraceAssetImportService runtimeTraceAssetImportService) {
         this.repository = repository;
         this.staticInfoRepository = staticInfoRepository;
         this.aiOrchestrator = aiOrchestrator;
@@ -61,6 +67,8 @@ public class VerificationService {
         this.appService = appService;
         this.coverageReportService = coverageReportService;
         this.classCoverageIndexRepository = classCoverageIndexRepository;
+        this.graphService = graphService;
+        this.runtimeTraceAssetImportService = runtimeTraceAssetImportService;
     }
 
     public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
@@ -105,6 +113,7 @@ public class VerificationService {
                 stored.storageType(), stored.storageKey(), stored.contentSize(), stored.contentPreview(),
                 existing.metadata(), existing.freshness(), userId, LocalDateTime.now());
         Assert.isTrue(repository.updateAsset(updated), "找不到指定资料");
+        invalidateBaselinesReferencingAsset(projectId, updated.id());
         indexCoverageAssetIfPossible(updated, content, appIdFrom(updated));
         return updated;
     }
@@ -164,6 +173,7 @@ public class VerificationService {
                 command.sourceCommit(), existing.analyzerVersion(), BaselineStatus.CREATED, freshness,
                 existing.createdBy(), existing.createTime(), LocalDateTime.now());
         Assert.isTrue(repository.updateBaseline(updated), "找不到指定分析基线");
+        graphService.invalidate(projectId, baselineId);
         indexCoverageForBaseline(projectId, updated);
         repository.deleteAnalysis(baselineId);
         return updated;
@@ -258,6 +268,33 @@ public class VerificationService {
             updateAnalysisProgress(jobId, "AI 分析完成，正在保存验收标准、追溯关系和问题");
             repository.replaceAnalysis(baselineId, result.criteria(), result.testcases(),
                     result.traceLinks(), result.findings());
+            if (StringUtils.hasText(baseline.sourceAppId())) {
+                updateAnalysisProgress(jobId, "正在投影静态代码图");
+                projectStaticGraphByLanguage(projectId, baselineId, sourceApp, sourceAssetContent);
+            }
+            if (StringUtils.hasText(baseline.sourceAppId()) && isJavaApp(sourceApp)) {
+                updateAnalysisProgress(jobId, "正在投影静态控制流图与依赖图");
+                safeProject(() -> graphService.projectControlFlow(projectId, baselineId));
+                safeProject(() -> graphService.projectStaticDependency(projectId, baselineId));
+            }
+            updateAnalysisProgress(jobId, "正在导入结构化运行调用链");
+            importRuntimeTraceForBaseline(projectId, baseline);
+            if (StringUtils.hasText(baseline.coverageAssetId())) {
+                updateAnalysisProgress(jobId, "正在投影动态覆盖率事实图");
+                graphService.projectRuntimeCoverage(projectId, baselineId);
+                updateAnalysisProgress(jobId, "正在投影分支级动态覆盖事实");
+                safeProject(() -> graphService.projectBranchCoverage(projectId, baselineId));
+            }
+            updateAnalysisProgress(jobId, "正在建立测试执行链路");
+            safeProject(() -> graphService.projectTestExecutions(projectId, baselineId));
+            updateAnalysisProgress(jobId, "正在投影需求、用例与代码追溯图");
+            graphService.projectTraceability(projectId, baselineId);
+            updateAnalysisProgress(jobId, "正在计算验收标准融合判定");
+            graphService.rebuildAcceptanceFusion(projectId, baselineId);
+            updateAnalysisProgress(jobId, "正在校验断言与验收标准语义一致性");
+            safeProject(() -> graphService.evaluateAssertionConsistency(projectId, baselineId));
+            updateAnalysisProgress(jobId, "正在重建预聚合读模型");
+            safeProject(() -> graphService.rebuildReadModels(projectId, baselineId));
             repository.updateBaselineStatus(baselineId, BaselineStatus.WAITING_REVIEW);
             return detail(projectId, baselineId);
         } catch (RuntimeException e) {
@@ -358,6 +395,7 @@ public class VerificationService {
     public void markBaselineStale(String projectId, String baselineId) {
         requiredBaseline(projectId, baselineId);
         repository.markBaselineStale(baselineId);
+        graphService.invalidate(projectId, baselineId);
     }
 
     private Map<String, StaticSourceInfo> loadSources(String appId) {
@@ -395,6 +433,44 @@ public class VerificationService {
 
     private String loadSourceAssetContent(AssetSnapshot asset, AppVo sourceApp) {
         return SourceAssetFilter.filterContent(loadAssetContent(asset), SourceAssetFilter.fromApp(sourceApp));
+    }
+
+    private void invalidateBaselinesReferencingAsset(String projectId, String assetId) {
+        for (String baselineId : repository.findBaselineIdsReferencingAsset(projectId, assetId)) {
+            repository.markBaselineStale(baselineId);
+            graphService.invalidate(projectId, baselineId);
+        }
+    }
+
+    private void importRuntimeTraceForBaseline(String projectId, Baseline baseline) {
+        if (baseline == null || !StringUtils.hasText(baseline.executionAssetId())) {
+            return;
+        }
+        AssetSnapshot executionAsset = requiredAsset(projectId, baseline.executionAssetId(), AssetType.EXECUTION);
+        runtimeTraceAssetImportService.importIfStructuredTrace(projectId, baseline.id(), loadAssetContent(executionAsset));
+    }
+
+    private boolean isJavaApp(AppVo sourceApp) {
+        return sourceApp == null || !StringUtils.hasText(sourceApp.getLanguage())
+                || "JAVA".equalsIgnoreCase(sourceApp.getLanguage().trim());
+    }
+
+    private void safeProject(Runnable projection) {
+        try {
+            projection.run();
+        } catch (RuntimeException exception) {
+            logger.warn("图谱可选投影步骤失败，已跳过并继续: {}", exception.getMessage());
+        }
+    }
+
+    private void projectStaticGraphByLanguage(String projectId, String baselineId, AppVo sourceApp, String sourceAssetContent) {
+        String language = sourceApp == null || !StringUtils.hasText(sourceApp.getLanguage())
+                ? "JAVA" : sourceApp.getLanguage().trim().toUpperCase();
+        if ("JAVA".equals(language)) {
+            graphService.projectStatic(projectId, baselineId);
+            return;
+        }
+        graphService.projectPolyglotStatic(projectId, baselineId, language, sourceAssetContent);
     }
 
     private void indexCoverageForBaseline(String projectId, Baseline baseline) {

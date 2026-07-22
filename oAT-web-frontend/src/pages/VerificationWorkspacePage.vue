@@ -298,6 +298,10 @@
             </div>
           </div>
           <div class="header-actions">
+            <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
+                        :to="`/p/${projectId}/verification/orchestration?baselineId=${selectedBaselineId}`">分析编排</RouterLink>
+            <RouterLink v-if="selectedBaselineId" class="secondary-button-link"
+                        :to="`/p/${projectId}/verification/baselines/${selectedBaselineId}/graph`">事实图谱</RouterLink>
             <button type="button" class="secondary-button" :disabled="!selectedBaselineId" @click="markStale">标记过期</button>
             <button type="button" class="primary-button" :disabled="!selectedBaselineId || analyzing" @click="runAnalysis">
               {{ analyzing ? '分析中...' : '运行 AI 分析' }}

@@ -25,12 +25,31 @@
             <option v-for="p in policies" :key="p.id!" :value="p.id">{{ p.name }}</option>
           </select>
         </div>
+        <div class="mode-select-wrap">
+          <label class="toolbar-label">执行模式</label>
+          <select v-model="selectedMode" class="policy-select mode-select">
+            <option value="HARD">硬门禁（未达标阻断）</option>
+            <option value="SOFT">软门禁（告警不阻断）</option>
+            <option value="SHADOW">影子（仅观测记录）</option>
+          </select>
+        </div>
         <button type="button" class="primary-button" :disabled="!selectedPolicyId || evaluating" @click="runEvaluate">
           {{ evaluating ? '评估中...' : '立即评估' }}
         </button>
         <button type="button" class="secondary-button" @click="showPolicyForm = !showPolicyForm">
           {{ showPolicyForm ? '收起' : '+ 新建策略' }}
         </button>
+      </div>
+
+      <!-- Latest mode decision -->
+      <div v-if="lastDecision" class="decision-banner" :class="lastDecision.blocked ? 'blocked' : lastDecision.effectiveVerdict.toLowerCase()">
+        <div class="decision-head">
+          <span class="mode-chip" :class="lastDecision.mode.toLowerCase()">{{ modeText(lastDecision.mode) }}</span>
+          <span class="decision-verdict">{{ verdictText(lastDecision.effectiveVerdict) }}</span>
+          <span v-if="lastDecision.blocked" class="blocked-tag">阻断交付</span>
+          <span v-else class="pass-tag">不阻断</span>
+        </div>
+        <p class="decision-rationale">{{ lastDecision.rationale }}</p>
       </div>
 
       <!-- New policy form -->
@@ -178,9 +197,10 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import {
-  createGateExemption, createQualityGatePolicy, evaluateQualityGate,
+  createGateExemption, createQualityGatePolicy, evaluateQualityGateWithMode,
   fetchQualityGatePolicies, fetchQualityGateResults,
-  type GateVerdict, type QualityGatePolicy, type QualityGateResult,
+  type GateDecision, type GateEnforcementMode, type GateVerdict,
+  type QualityGatePolicy, type QualityGateResult,
 } from '@/api/verification'
 import { useToast } from '@/composables/useToast'
 
@@ -192,6 +212,8 @@ const baselineId = computed(() => String(route.params.baselineId || ''))
 const policies = ref<QualityGatePolicy[]>([])
 const results = ref<QualityGateResult[]>([])
 const selectedPolicyId = ref('')
+const selectedMode = ref<GateEnforcementMode>('HARD')
+const lastDecision = ref<GateDecision | null>(null)
 const loading = ref(false)
 const error = ref('')
 const evaluating = ref(false)
@@ -241,9 +263,10 @@ async function runEvaluate() {
   if (!selectedPolicyId.value) return
   evaluating.value = true
   try {
-    const r = await evaluateQualityGate(projectId.value, baselineId.value, selectedPolicyId.value)
-    results.value = [r, ...results.value]
-    toast.success(`评估完成：${verdictText(r.verdict)}`)
+    const decision = await evaluateQualityGateWithMode(projectId.value, baselineId.value, selectedPolicyId.value, selectedMode.value)
+    lastDecision.value = decision
+    results.value = [decision.result, ...results.value]
+    toast.success(`${modeText(decision.mode)}评估完成：${verdictText(decision.effectiveVerdict)}`)
   } catch (e) { toast.error(msg(e)) }
   finally { evaluating.value = false }
 }
@@ -289,6 +312,8 @@ async function submitExemption() {
 
 const VM: Record<GateVerdict, string> = { PASSED: '通过', FAILED: '未通过', WARNING: '警告', EXEMPTED: '已豁免' }
 function verdictText(v: GateVerdict) { return VM[v] || v }
+const MM: Record<GateEnforcementMode, string> = { SHADOW: '影子模式', SOFT: '软门禁', HARD: '硬门禁' }
+function modeText(m: string) { return MM[m as GateEnforcementMode] || m }
 function pct(v: number) { return `${Math.round((v || 0) * 1000) / 10}%` }
 function formatTime(s?: string) { return s ? new Date(s).toLocaleString('zh-CN', { hour12: false }) : '-' }
 function msg(e: unknown) { return e instanceof Error ? e.message : '操作失败' }
@@ -302,8 +327,23 @@ function msg(e: unknown) { return e instanceof Error ? e.message : '操作失败
 .primary-button:disabled, .secondary-button:disabled { opacity:.45;cursor:not-allowed; }
 .toolbar { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
 .toolbar-label { font-size:12px;font-weight:700;color:var(--oat-text-muted); }
-.policy-select-wrap { display:flex;align-items:center;gap:8px; }
+.policy-select-wrap, .mode-select-wrap { display:flex;align-items:center;gap:8px; }
 .policy-select { border:1px solid var(--oat-border);border-radius:8px;padding:7px 10px;font-size:13px;min-width:200px; }
+.mode-select { min-width:180px; }
+.decision-banner { display:grid;gap:6px;padding:12px 16px;border:1px solid var(--oat-border);border-radius:12px;background:#fff;border-left:4px solid var(--oat-border); }
+.decision-banner.blocked { border-left-color:var(--oat-danger);background:rgba(220,38,38,.05); }
+.decision-banner.passed { border-left-color:#16a34a;background:rgba(22,163,74,.05); }
+.decision-banner.warning { border-left-color:#f59e0b;background:rgba(245,158,11,.06); }
+.decision-banner.exempted { border-left-color:#64748b;background:rgba(100,116,139,.05); }
+.decision-head { display:flex;align-items:center;gap:10px;flex-wrap:wrap; }
+.mode-chip { border-radius:999px;padding:3px 10px;font-size:12px;font-weight:900; }
+.mode-chip.hard { background:rgba(220,38,38,.1);color:var(--oat-danger); }
+.mode-chip.soft { background:rgba(245,158,11,.14);color:#92400e; }
+.mode-chip.shadow { background:rgba(100,116,139,.12);color:#475569; }
+.decision-verdict { font-size:15px;font-weight:900; }
+.blocked-tag { border-radius:6px;padding:2px 10px;font-size:12px;font-weight:900;background:var(--oat-danger);color:#fff; }
+.pass-tag { border-radius:6px;padding:2px 10px;font-size:12px;font-weight:800;background:rgba(22,163,74,.12);color:#15803d; }
+.decision-rationale { margin:0;font-size:13px;color:var(--oat-text-secondary); }
 .policy-form { display:grid;gap:14px;padding:16px;border:1px solid var(--oat-border);border-radius:12px;background:var(--oat-surface-soft); }
 .form-title { margin:0;font-size:15px; }
 .form-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px; }

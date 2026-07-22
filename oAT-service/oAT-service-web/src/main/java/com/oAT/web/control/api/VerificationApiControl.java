@@ -22,6 +22,7 @@ import com.oAT.web.verification.connector.ConnectorRegistry;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
+import com.oAT.web.verification.graph.GraphService;
 import com.oAT.web.verification.impact.GitImpactAnalysisService;
 import com.oAT.web.verification.impact.ImpactTraceabilityMapper;
 import org.apache.poi.hwpf.HWPFDocument;
@@ -90,6 +91,7 @@ public class VerificationApiControl {
     private final ChangeImpactService changeImpactService;
     private final GitImpactAnalysisService gitImpactAnalysisService;
     private final ImpactTraceabilityMapper impactTraceabilityMapper;
+    private final GraphService graphService;
     private final ConnectorRegistry connectorRegistry;
     private final JacocoExecToXmlConverter jacocoExecToXmlConverter;
     private final Executor verificationAiExecutor;
@@ -100,6 +102,7 @@ public class VerificationApiControl {
                                   ChangeImpactService changeImpactService,
                                   GitImpactAnalysisService gitImpactAnalysisService,
                                   ImpactTraceabilityMapper impactTraceabilityMapper,
+                                  GraphService graphService,
                                   ConnectorRegistry connectorRegistry,
                                   JacocoExecToXmlConverter jacocoExecToXmlConverter,
                                   @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
@@ -111,6 +114,7 @@ public class VerificationApiControl {
         this.changeImpactService = changeImpactService;
         this.gitImpactAnalysisService = gitImpactAnalysisService;
         this.impactTraceabilityMapper = impactTraceabilityMapper;
+        this.graphService = graphService;
         this.connectorRegistry = connectorRegistry;
         this.jacocoExecToXmlConverter = jacocoExecToXmlConverter;
         this.verificationAiExecutor = verificationAiExecutor;
@@ -367,6 +371,20 @@ public class VerificationApiControl {
                 qualityGateService.evaluate(projectId, baselineId, request.policyId(), user.getId()));
     }
 
+    @PostMapping("/baselines/{baselineId}/quality-gate/evaluate-mode")
+    public ResultNotified<QualityGateService.GateDecision> evaluateGateWithMode(@PathVariable String projectId,
+                                                                                @PathVariable String baselineId,
+                                                                                @SessionAttribute UserVo user,
+                                                                                @RequestBody EvaluateGateModeRequest request) {
+        ensureProjectAccess(projectId, user);
+        Assert.notNull(request, "请求不能为空");
+        Assert.hasText(request.policyId(), "policyId 不能为空");
+        QualityGateService.EnforcementMode mode = request.mode() == null
+                ? QualityGateService.EnforcementMode.HARD : request.mode();
+        return ok("质量门禁（" + mode.name() + " 模式）评估完成",
+                qualityGateService.evaluateWithMode(projectId, baselineId, request.policyId(), user.getId(), mode));
+    }
+
     @GetMapping("/baselines/{baselineId}/quality-gate/results")
     public ResultNotified<List<QualityGateResult>> gateResults(@PathVariable String projectId,
                                                                @PathVariable String baselineId,
@@ -420,7 +438,15 @@ public class VerificationApiControl {
         AppVo app = resolveSourceApp(projectId, request.appId());
         var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit());
         var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
-        return ok("Git 变更影响分析完成", new GitChangeImpactResponse(report, traceability));
+        var invalidation = graphService.applyGitChangeImpact(projectId, baselineId, report, traceability);
+        return ok("Git 变更影响分析完成，当前基线图谱已标记过期", new GitChangeImpactResponse(report, traceability, invalidation));
+    }
+
+    @GetMapping("/baselines/{baselineId}/git-change-impact-history")
+    public ResultNotified<List<com.oAT.web.verification.graph.GraphRepository.GraphAggregate>> gitImpactHistory(
+            @PathVariable String projectId, @PathVariable String baselineId, @SessionAttribute UserVo user) {
+        ensureProjectAccess(projectId, user);
+        return ok("获取 Git 变更影响审计成功", graphService.gitChangeImpactHistory(projectId, baselineId));
     }
 
     @PostMapping("/baselines/{baselineId}/git-change-impact-jobs")
@@ -468,7 +494,8 @@ public class VerificationApiControl {
                     updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, progress.stage(), progress.percent(), progress.message(), null, null)));
             updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "MAPPING_TRACEABILITY", 96, "正在映射验收标准和回归用例", null, null));
             var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
-            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.COMPLETED, "COMPLETED", 100, "Git 影响分析完成", new GitChangeImpactResponse(report, traceability), null));
+            var invalidation = graphService.applyGitChangeImpact(projectId, baselineId, report, traceability);
+            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.COMPLETED, "COMPLETED", 100, "Git 影响分析完成，当前基线图谱已标记过期", new GitChangeImpactResponse(report, traceability, invalidation), null));
         } catch (RuntimeException exception) {
             updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.FAILED, "FAILED", 100, "Git 影响分析失败", null, exception.getMessage()));
         }
@@ -502,11 +529,13 @@ public class VerificationApiControl {
     // ── Request records ───────────────────────────────────────────────────────
 
     public record EvaluateGateRequest(String policyId) {}
+    public record EvaluateGateModeRequest(String policyId, QualityGateService.EnforcementMode mode) {}
     public record ExemptionRequest(String ruleId, String reason, LocalDateTime expiresAt) {}
     public record ChangeImpactRequest(String changeDescription) {}
     public record GitChangeImpactRequest(String appId, String baseCommit, String headCommit) {}
     public record GitChangeImpactResponse(com.oAT.web.verification.impact.ImpactModels.ImpactReport report,
-                                          ImpactTraceabilityMapper.TraceabilityImpact traceability) {}
+                                          ImpactTraceabilityMapper.TraceabilityImpact traceability,
+                                          com.oAT.web.verification.graph.GitChangeGraphInvalidationService.InvalidationResult invalidation) {}
     public enum GitImpactJobStatus { PENDING, RUNNING, COMPLETED, FAILED }
     public record GitImpactAnalysisJob(String jobId, String projectId, String baselineId, GitImpactJobStatus status,
                                        String stage, int percent, String message, GitChangeImpactResponse result,

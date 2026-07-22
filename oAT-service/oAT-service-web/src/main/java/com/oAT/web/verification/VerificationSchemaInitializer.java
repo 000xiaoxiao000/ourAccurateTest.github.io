@@ -18,7 +18,8 @@ public class VerificationSchemaInitializer {
             "db/postgresql/phase5_normalized_core.sql",
             "db/postgresql/phase2_api_endpoint.sql",
             "db/postgresql/phase6_ai_verification.sql",
-            "db/postgresql/phase7_traceability_gate.sql"
+            "db/postgresql/phase7_traceability_gate.sql",
+            "db/postgresql/phase8_graph_facts.sql"
     );
     private final JdbcTemplate jdbcTemplate;
 

@@ -105,7 +105,6 @@
           </div>
           <div class="quick-grid">
             <RouterLink :to="`/p/${projectId}/map/home`">链路地图</RouterLink>
-            <RouterLink :to="`/p/${projectId}/search`">搜索中心</RouterLink>
           </div>
         </section>
       </div>

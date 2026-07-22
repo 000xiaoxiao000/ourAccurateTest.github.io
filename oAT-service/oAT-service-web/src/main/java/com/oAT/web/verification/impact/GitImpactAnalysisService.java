@@ -86,7 +86,7 @@ public class GitImpactAnalysisService {
             List<SymbolSnapshot> oldSymbols = analyzer.analyze(path, oldSource);
             List<SymbolSnapshot> newSymbols = analyzer.analyze(path, newSource);
             changes.addAll(structuralDiffEngine.diff(oldSymbols, newSymbols));
-            edges.addAll(callEdges(newSymbols));
+            edges.addAll(dependencyEdges(newSymbols));
         }
         reporter.accept(new AnalysisProgress("PROPAGATING", 78, "正在基于调用图传播影响范围"));
         ChangeSet changeSet = new ChangeSet(app.getRepoAddress(), baseCommit, headCommit, baseCommit, ImpactModels.ANALYZER_VERSION, LocalDateTime.now(), fileChanges);
@@ -220,7 +220,8 @@ public class GitImpactAnalysisService {
         return source != null && source.length() > MAX_STRUCTURAL_SOURCE_CHARS;
     }
 
-    private List<GraphEdge> callEdges(List<SymbolSnapshot> symbols) {
+    private List<GraphEdge> dependencyEdges(List<SymbolSnapshot> symbols) {
+        // index by simple type name for resolution within the same file / change set
         Map<String, List<SymbolSnapshot>> bySimpleName = new LinkedHashMap<>();
         for (SymbolSnapshot symbol : symbols) {
             String qualifiedName = symbol.qualifiedName();
@@ -230,9 +231,39 @@ public class GitImpactAnalysisService {
         }
         List<GraphEdge> result = new ArrayList<>();
         for (SymbolSnapshot source : symbols) {
+            // CALLS — method invocations
             for (String invoked : source.invokedNames()) {
                 for (SymbolSnapshot target : bySimpleName.getOrDefault(invoked, List.of())) {
-                    result.add(new GraphEdge(source.key(), target.key(), EdgeType.CALLS, .8d, false, "Tree-sitter call-site candidate"));
+                    result.add(new GraphEdge(source.key(), target.key(), EdgeType.CALLS, .8d, false,
+                            "Tree-sitter call-site candidate"));
+                }
+            }
+            // EXTENDS / IMPLEMENTS — supertype declarations on TYPE symbols
+            for (String superType : source.superTypes()) {
+                for (SymbolSnapshot target : bySimpleName.getOrDefault(superType, List.of())) {
+                    EdgeType edgeType = target.kind() == ImpactModels.SymbolKind.TYPE
+                            && source.snippet() != null && source.snippet().contains("interface")
+                            ? EdgeType.EXTENDS : EdgeType.EXTENDS;
+                    // use IMPLEMENTS when the source is a class implementing an interface-like target
+                    edgeType = source.superTypes().contains(superType) ? EdgeType.EXTENDS : EdgeType.IMPLEMENTS;
+                    result.add(new GraphEdge(source.key(), target.key(), edgeType, .9d, false,
+                            "supertype declaration"));
+                }
+            }
+            // INJECTS — fields annotated with @Autowired / @Resource / @Inject
+            for (String fieldType : source.injectAnnotatedFields()) {
+                for (SymbolSnapshot target : bySimpleName.getOrDefault(fieldType, List.of())) {
+                    result.add(new GraphEdge(source.key(), target.key(), EdgeType.INJECTS, .85d, false,
+                            "injection-annotated field"));
+                }
+            }
+            // READS / WRITES — non-injected field type references (conservative: mark as READS,
+            // actual opcode-level WRITES come from bytecode; here we emit READS as a best effort)
+            for (String fieldType : source.fieldTypes()) {
+                if (source.injectAnnotatedFields().contains(fieldType)) continue; // already covered by INJECTS
+                for (SymbolSnapshot target : bySimpleName.getOrDefault(fieldType, List.of())) {
+                    result.add(new GraphEdge(source.key(), target.key(), EdgeType.READS, .55d, false,
+                            "field type reference (static inference)"));
                 }
             }
         }

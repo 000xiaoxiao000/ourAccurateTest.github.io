@@ -25,6 +25,10 @@ public class StaticSourceMethodInfo implements Serializable {
     private Boolean recursiveMap;
     private Boolean asyncMethodMap;
     private List<InvocationInfo> invocations;
+    /** Field accesses (GETFIELD/PUTFIELD/GETSTATIC/PUTSTATIC) made inside this method. */
+    private List<FieldAccessInfo> fieldAccesses;
+    /** Method-level annotation descriptors, e.g. ["Lorg/springframework/web/bind/annotation/GetMapping;"]. */
+    private List<String> methodAnnotations;
 
     public String getMethodName() {
         return methodName;
@@ -122,6 +126,58 @@ public class StaticSourceMethodInfo implements Serializable {
     public void setLegacyInvokers(List<InvocationInfo> invokers) {
         if (this.invocations == null || this.invocations.isEmpty()) {
             this.invocations = invokers;
+        }
+    }
+
+    public List<FieldAccessInfo> getFieldAccesses() {
+        return fieldAccesses;
+    }
+
+    public void setFieldAccesses(List<FieldAccessInfo> fieldAccesses) {
+        this.fieldAccesses = fieldAccesses;
+    }
+
+    public List<String> getMethodAnnotations() {
+        return methodAnnotations;
+    }
+
+    public void setMethodAnnotations(List<String> methodAnnotations) {
+        this.methodAnnotations = methodAnnotations;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class FieldAccessInfo implements Serializable {
+        /** Fully-qualified owner class name of the field being accessed. */
+        private String owner;
+        /** Field name. */
+        private String name;
+        /** ASM type descriptor of the field. */
+        private String descriptor;
+        /**
+         * ASM opcode:
+         *   GETSTATIC=178, PUTSTATIC=179, GETFIELD=180, PUTFIELD=181
+         */
+        private Integer opcode;
+
+        public String getOwner() { return owner; }
+        public void setOwner(String owner) { this.owner = owner == null ? null : owner.replace('/', '.'); }
+
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+
+        public String getDescriptor() { return descriptor; }
+        public void setDescriptor(String descriptor) { this.descriptor = descriptor; }
+
+        public Integer getOpcode() { return opcode; }
+        public void setOpcode(Integer opcode) { this.opcode = opcode; }
+
+        public boolean isWrite() { return opcode != null && (opcode == 179 || opcode == 181); }
+        public boolean isRead()  { return opcode != null && (opcode == 178 || opcode == 180); }
+
+        /** Returns the binary class name of the field type, or null if not a reference type. */
+        public String referenceTypeName() {
+            if (descriptor == null || !descriptor.startsWith("L") || !descriptor.endsWith(";")) return null;
+            return descriptor.substring(1, descriptor.length() - 1).replace('/', '.');
         }
     }
 

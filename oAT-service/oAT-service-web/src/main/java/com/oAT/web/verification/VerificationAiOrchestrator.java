@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
@@ -26,12 +27,14 @@ import java.util.regex.Pattern;
 public class VerificationAiOrchestrator {
     private static final Logger logger = LoggerFactory.getLogger(VerificationAiOrchestrator.class);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
-    private static final int MAX_REQUIREMENT_CHARS = 18_000;
-    private static final int MAX_TESTCASE_CHARS = 18_000;
-    private static final int MAX_ASSET_CHARS = 14_000;
+    private static final int MAX_REQUIREMENT_CHARS  = 18_000;
+    private static final int MAX_TESTCASE_CHARS     = 18_000;
+    private static final int MAX_ASSET_CHARS        = 14_000;
     private static final int MAX_TOTAL_PROMPT_CHARS = 48_000;
-    private static final int MAX_SOURCE_CLASSES = 18;
+    private static final int MAX_SOURCE_CLASSES     = 18;
     private static final int MAX_SOURCE_CLASS_CHARS = 2_400;
+    /** Maximum number of entries kept in the in-process prompt-hash cache. */
+    private static final int PROMPT_CACHE_MAX_SIZE  = 256;
     private static final Pattern HTTP_ENDPOINT = Pattern.compile("\\b(?:GET|POST|PUT|DELETE|PATCH)\\s*[:：]?\\s*(/[A-Za-z0-9_./{}-]+)");
     private static final Pattern IDENTIFIER_TOKEN = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{3,}");
     private static final Pattern SOURCE_FILE_MARKER = Pattern.compile("^\\s*//\\s*FILE:\\s*(.+?)\\s*$");
@@ -124,6 +127,13 @@ public class VerificationAiOrchestrator {
             """;
 
     private final LLMService llmService;
+    /** Bounded LRU cache: promptHash → raw LLM response. Avoids identical re-calls within the same process lifetime. */
+    private final java.util.Map<String, String> promptCache = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(PROMPT_CACHE_MAX_SIZE, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
+                    return size() > PROMPT_CACHE_MAX_SIZE;
+                }
+            });
 
     public VerificationAiOrchestrator(LLMService llmService) {
         this.llmService = llmService;
@@ -137,14 +147,25 @@ public class VerificationAiOrchestrator {
         if (!llmService.isAvailable()) {
             throw new IllegalStateException("AI服务不可用，无法执行需求一致性分析");
         }
-        progress.accept("正在请求 AI 生成需求、用例和依据关系");
-        String response = llmService.chat(SYSTEM_PROMPT, buildUserMessage(input));
-        if (!StringUtils.hasText(response)) {
-            throw new IllegalStateException("AI分析没有返回结果");
+        String userMessage = buildUserMessage(input);
+        String promptHash = com.oAT.web.verification.model.GraphModels.fingerprint(SYSTEM_PROMPT + userMessage);
+        String cachedResponse = promptCache.get(promptHash);
+        if (cachedResponse != null) {
+            progress.accept("命中 Prompt 缓存，跳过 LLM 调用，直接解析已有结果");
+            logger.debug("Prompt cache hit hash={}", promptHash);
+        } else {
+            progress.accept("正在请求 AI 生成需求、用例和依据关系");
+            cachedResponse = llmService.chat(SYSTEM_PROMPT, userMessage);
+            if (!StringUtils.hasText(cachedResponse)) {
+                throw new IllegalStateException("AI分析没有返回结果");
+            }
+            promptCache.put(promptHash, cachedResponse);
         }
+        final String response = cachedResponse;
         try {
             progress.accept("AI 已返回内容，正在校验分析结果");
-            return parse(input, response);
+            AiVerificationResult result = parse(input, response);
+            return validateAndStripHallucinatedRefs(result, input);
         } catch (RuntimeException firstFailure) {
             AiVerificationResult partial = tryParseTruncatedResponse(input, response);
             if (partial != null) {
@@ -994,8 +1015,9 @@ public class VerificationAiOrchestrator {
         } else if (input.staticSources() == null || input.staticSources().isEmpty()) {
             prompt.append("(无静态源码索引)\n");
         } else {
+            List<StaticSourceInfo> ranked = rankSourcesByRelevance(input.staticSources(), input.requirementContent(), input.testcaseContent());
             int count = 0;
-            for (StaticSourceInfo source : input.staticSources()) {
+            for (StaticSourceInfo source : ranked) {
                 if (source == null || source.getClassInfo() == null) continue;
                 if (count++ >= MAX_SOURCE_CLASSES || prompt.length() >= MAX_TOTAL_PROMPT_CHARS) break;
                 String className = source.getClassInfo().getClassName();
@@ -1019,6 +1041,111 @@ public class VerificationAiOrchestrator {
                 - 如果资料不足，请输出 NOT_VERIFIABLE 或 MISSING_EVIDENCE，而不是假设已满足。
                 """);
         return prompt.toString();
+    }
+
+    /**
+     * Rank static sources by how many AC/testcase tokens they match, so the most relevant classes
+     * fill the prompt budget first (minimal subgraph principle, plan §15).
+     * Sources with zero token hits are appended last so they still appear if budget allows.
+     */
+    private List<StaticSourceInfo> rankSourcesByRelevance(List<StaticSourceInfo> sources,
+                                                           String requirementText, String testcaseText) {
+        if (sources == null || sources.isEmpty()) return List.of();
+        String haystack = (value(requirementText) + " " + value(testcaseText)).toLowerCase(Locale.ROOT);
+        List<String> tokens = new ArrayList<>();
+        Matcher m = IDENTIFIER_TOKEN.matcher(haystack);
+        while (m.find()) {
+            String t = m.group().toLowerCase(Locale.ROOT);
+            if (t.length() >= 4 && !tokens.contains(t)) tokens.add(t);
+        }
+        if (tokens.isEmpty()) return sources;
+        return sources.stream()
+                .filter(java.util.Objects::nonNull)
+                .sorted((a, b) -> Integer.compare(relevanceScore(b, tokens), relevanceScore(a, tokens)))
+                .toList();
+    }
+
+    private int relevanceScore(StaticSourceInfo source, List<String> tokens) {
+        if (source.getClassInfo() == null) return 0;
+        String className = value(source.getClassInfo().getClassName()).toLowerCase(Locale.ROOT);
+        String sourceCode = value(source.getClassInfo().getSourceCode()).toLowerCase(Locale.ROOT);
+        int score = 0;
+        for (String token : tokens) {
+            if (className.contains(token)) score += 3;
+            if (sourceCode.contains(token)) score += 1;
+        }
+        if (source.getClassInfo().getMethodMaps() != null) {
+            for (String method : source.getClassInfo().getMethodMaps().keySet()) {
+                String lower = value(method).toLowerCase(Locale.ROOT);
+                for (String token : tokens) {
+                    if (lower.contains(token)) score += 2;
+                }
+            }
+        }
+        return score;
+    }
+
+    /**
+     * Strip TraceLinks and Findings whose SOURCE_SYMBOL targetId references a class or method name
+     * that does not actually appear anywhere in the input (hallucination guard, plan §15).
+     * Links to TESTCASE, EXECUTION, COVERAGE, DEFECT are not stripped — those IDs are opaque keys.
+     */
+    private AiVerificationResult validateAndStripHallucinatedRefs(AiVerificationResult result,
+                                                                    AiVerificationInput input) {
+        Set<String> knownSymbols = buildKnownSymbolSet(input);
+        if (knownSymbols.isEmpty()) return result;
+
+        List<TraceLink> validLinks = result.traceLinks().stream()
+                .filter(link -> {
+                    if (!"SOURCE_SYMBOL".equals(link.targetType())) return true;
+                    boolean valid = isSymbolKnown(link.targetId(), knownSymbols);
+                    if (!valid) logger.debug("Stripped hallucinated SOURCE_SYMBOL ref: {}", link.targetId());
+                    return valid;
+                })
+                .toList();
+
+        int stripped = result.traceLinks().size() - validLinks.size();
+        if (stripped > 0) logger.warn("Stripped {} hallucinated SOURCE_SYMBOL TraceLinks", stripped);
+
+        return new AiVerificationResult(result.criteria(), result.testcases(), validLinks, result.findings());
+    }
+
+    /** Build the set of all class and method names actually present in the input. */
+    private Set<String> buildKnownSymbolSet(AiVerificationInput input) {
+        Set<String> known = new java.util.LinkedHashSet<>();
+        if (input.staticSources() != null) {
+            for (StaticSourceInfo source : input.staticSources()) {
+                if (source == null || source.getClassInfo() == null) continue;
+                String className = value(source.getClassInfo().getClassName());
+                if (StringUtils.hasText(className)) known.add(className.toLowerCase(Locale.ROOT));
+                if (source.getClassInfo().getMethodMaps() != null) {
+                    for (String method : source.getClassInfo().getMethodMaps().keySet()) {
+                        if (StringUtils.hasText(method)) {
+                            known.add((className + "#" + method).toLowerCase(Locale.ROOT));
+                        }
+                    }
+                }
+            }
+        }
+        // Also accept symbols mentioned in the source asset text (free-form source snapshots)
+        if (StringUtils.hasText(input.sourceAssetContent())) {
+            Matcher cm = JAVA_CLASS.matcher(input.sourceAssetContent());
+            while (cm.find()) known.add(cm.group(1).toLowerCase(Locale.ROOT));
+            Matcher mm = JAVA_METHOD.matcher(input.sourceAssetContent());
+            while (mm.find()) known.add(mm.group(1).toLowerCase(Locale.ROOT));
+        }
+        return known;
+    }
+
+    private boolean isSymbolKnown(String targetId, Set<String> knownSymbols) {
+        if (!StringUtils.hasText(targetId)) return false;
+        String lower = targetId.toLowerCase(Locale.ROOT);
+        // Full match or prefix/suffix containment covers "ClassName#method" and bare class names
+        if (knownSymbols.contains(lower)) return true;
+        for (String known : knownSymbols) {
+            if (lower.contains(known) || known.contains(lower)) return true;
+        }
+        return false;
     }
 
     private void appendSection(StringBuilder prompt, String title, String content, int maxChars) {

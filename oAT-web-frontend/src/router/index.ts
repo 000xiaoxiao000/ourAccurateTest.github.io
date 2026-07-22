@@ -61,6 +61,11 @@ const router = createRouter({
           component: () => import('@/pages/VerificationWorkspacePage.vue'),
         },
         {
+          path: 'p/:projectId/verification/orchestration',
+          name: 'analysis-orchestration',
+          component: () => import('@/pages/AnalysisOrchestrationPage.vue'),
+        },
+        {
           path: 'p/:projectId/git-impact',
           name: 'git-impact',
           component: () => import('@/pages/GitImpactPage.vue'),
@@ -89,6 +94,11 @@ const router = createRouter({
           path: 'p/:projectId/verification/baselines/:baselineId/gate',
           name: 'quality-gate',
           component: () => import('@/pages/QualityGatePage.vue'),
+        },
+        {
+          path: 'p/:projectId/verification/baselines/:baselineId/graph',
+          name: 'graph-explorer',
+          component: () => import('@/pages/GraphExplorerPage.vue'),
         },
         {
           path: 'p/:projectId/apps',

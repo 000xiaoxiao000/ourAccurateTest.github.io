@@ -64,6 +64,14 @@ public class VerificationRepository {
         return updated == 1;
     }
 
+    public List<String> findBaselineIdsReferencingAsset(String projectId, String assetId) {
+        return jdbc.query("""
+                SELECT id FROM oat_verification_baseline WHERE project_id = ?
+                AND (requirement_asset_id = ? OR testcase_asset_id = ? OR source_asset_id = ?
+                     OR execution_asset_id = ? OR coverage_asset_id = ?)
+                """, (rs, row) -> rs.getString("id"), projectId, assetId, assetId, assetId, assetId, assetId);
+    }
+
     public boolean isAssetReferenced(String projectId, String assetId) {
         Integer count = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM oat_verification_baseline
@@ -242,10 +250,71 @@ public class VerificationRepository {
     public void saveAnalysisJob(AnalysisJob job) {
         jdbc.update("""
                 INSERT INTO oat_verification_analysis_job
-                (id, project_id, baseline_id, status, message, created_by, create_time, update_time, finish_time)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, job.id(), job.projectId(), job.baselineId(), job.status().name(), job.message(),
-                job.createdBy(), ts(job.createTime()), ts(job.updateTime()), ts(job.finishTime()));
+                (id, project_id, baseline_id, job_type, input_hash, status, message, created_by,
+                 create_time, update_time, finish_time, checkpoint_step, checkpoint_payload, retry_count, max_retries)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                """, job.id(), job.projectId(), job.baselineId(), job.jobType(), job.inputHash(),
+                job.status().name(), job.message(), job.createdBy(),
+                ts(job.createTime()), ts(job.updateTime()), ts(job.finishTime()),
+                job.checkpointStep(), json(job.checkpointPayload()), job.retryCount(), job.maxRetries());
+    }
+
+    /** Atomically claim the next QUEUED job of the given type. Returns empty if none available. */
+    public Optional<AnalysisJob> claimNextPendingJob(String jobType) {
+        return jdbc.query("""
+                UPDATE oat_verification_analysis_job
+                SET status = 'RUNNING', update_time = ?
+                WHERE id = (
+                    SELECT id FROM oat_verification_analysis_job
+                    WHERE job_type = ? AND status = 'QUEUED'
+                      AND retry_count < max_retries
+                    ORDER BY create_time
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                RETURNING *
+                """, this::analysisJob, ts(LocalDateTime.now()), jobType).stream().findFirst();
+    }
+
+    /** Persist checkpoint so a resumable job can continue from this step after a restart. */
+    public void saveCheckpoint(String jobId, String stepName, Map<String, Object> payload) {
+        jdbc.update("""
+                UPDATE oat_verification_analysis_job
+                SET checkpoint_step = ?, checkpoint_payload = ?::jsonb, update_time = ?
+                WHERE id = ?
+                """, stepName, json(payload), ts(LocalDateTime.now()), jobId);
+    }
+
+    /** Mark a RUNNING job as FAILED and increment retry_count so the scheduler can re-queue it. */
+    public void failAndScheduleRetry(String jobId, String errorMessage) {
+        jdbc.update("""
+                UPDATE oat_verification_analysis_job
+                SET status = CASE WHEN retry_count + 1 < max_retries THEN 'QUEUED' ELSE 'FAILED' END,
+                    message = ?,
+                    retry_count = retry_count + 1,
+                    update_time = ?
+                WHERE id = ? AND status = 'RUNNING'
+                """, errorMessage, ts(LocalDateTime.now()), jobId);
+    }
+
+    /** Find an existing active (non-terminal) job for idempotency check. */
+    public Optional<AnalysisJob> findActiveJobByInputHash(String baselineId, String jobType, String inputHash) {
+        return jdbc.query("""
+                SELECT * FROM oat_verification_analysis_job
+                WHERE baseline_id = ? AND job_type = ? AND input_hash = ?
+                  AND status NOT IN ('SUCCEEDED', 'FAILED')
+                ORDER BY create_time DESC LIMIT 1
+                """, this::analysisJob, baselineId, jobType, inputHash).stream().findFirst();
+    }
+
+    /** Find a successfully completed job — used for cache-hit check to skip re-computation. */
+    public Optional<AnalysisJob> findSucceededJobByInputHash(String baselineId, String jobType, String inputHash) {
+        return jdbc.query("""
+                SELECT * FROM oat_verification_analysis_job
+                WHERE baseline_id = ? AND job_type = ? AND input_hash = ? AND status = 'SUCCEEDED'
+                ORDER BY create_time DESC LIMIT 1
+                """, this::analysisJob, baselineId, jobType, inputHash).stream().findFirst();
     }
 
     public Optional<AnalysisJob> findAnalysisJob(String projectId, String jobId) {
@@ -259,8 +328,7 @@ public class VerificationRepository {
         return jdbc.query("""
                 SELECT * FROM oat_verification_analysis_job
                 WHERE project_id = ? AND baseline_id = ? AND status IN ('QUEUED','RUNNING')
-                ORDER BY create_time DESC
-                LIMIT 1
+                ORDER BY create_time DESC LIMIT 1
                 """, this::analysisJob, projectId, baselineId).stream().findFirst();
     }
 
@@ -268,8 +336,7 @@ public class VerificationRepository {
         return jdbc.query("""
                 SELECT * FROM oat_verification_analysis_job
                 WHERE project_id = ? AND baseline_id = ?
-                ORDER BY create_time DESC
-                LIMIT 1
+                ORDER BY create_time DESC LIMIT 1
                 """, this::analysisJob, projectId, baselineId).stream().findFirst();
     }
 
@@ -342,8 +409,83 @@ public class VerificationRepository {
                 rs.getString("repository_url"), rs.getString("source_branch"), rs.getString("source_commit"),
                 rs.getString("analyzer_version"), BaselineStatus.valueOf(rs.getString("status")),
                 Freshness.valueOf(rs.getString("freshness")), rs.getString("created_by"),
-                time(rs.getTimestamp("create_time")), time(rs.getTimestamp("update_time")));
+                time(rs.getTimestamp("create_time")), time(rs.getTimestamp("update_time")),
+                nullableColumn(rs, "static_graph_version"), nullableColumn(rs, "runtime_graph_version"),
+                nullableColumn(rs, "cfg_hash"), nullableColumn(rs, "dependency_hash"),
+                nullableColumn(rs, "coverage_report_hash"), nullableColumn(rs, "execution_trace_hash"),
+                nullableColumn(rs, "symbol_hash"), nullableColumn(rs, "superseded_by_baseline_id"));
     }
+
+    /** Update graph snapshot version fields on a baseline after projection completes. */
+    public void updateBaselineGraphVersions(String baselineId,
+                                            String staticGraphVersion, String runtimeGraphVersion,
+                                            String cfgHash, String dependencyHash,
+                                            String coverageReportHash, String executionTraceHash,
+                                            String symbolHash) {
+        jdbc.update("""
+                UPDATE oat_verification_baseline
+                SET static_graph_version = ?, runtime_graph_version = ?,
+                    cfg_hash = ?, dependency_hash = ?,
+                    coverage_report_hash = ?, execution_trace_hash = ?,
+                    symbol_hash = ?, update_time = ?
+                WHERE id = ?
+                """, staticGraphVersion, runtimeGraphVersion, cfgHash, dependencyHash,
+                coverageReportHash, executionTraceHash, symbolHash,
+                ts(java.time.LocalDateTime.now()), baselineId);
+    }
+
+    /** Mark a baseline as superseded by a newer one. */
+    public void markBaselineSuperseded(String baselineId, String supersededByBaselineId) {
+        jdbc.update("""
+                UPDATE oat_verification_baseline
+                SET superseded_by_baseline_id = ?, status = 'STALE', update_time = ?
+                WHERE id = ?
+                """, supersededByBaselineId, ts(java.time.LocalDateTime.now()), baselineId);
+    }
+
+    /** Detect runtime executions whose source_commit differs from the baseline's source_commit. */
+    public List<StaleRuntimeExecution> findStaleRuntimeExecutions(String baselineId) {
+        return jdbc.query("""
+                SELECT * FROM v_stale_runtime_evidence WHERE baseline_id = ?
+                """, (rs, row) -> new StaleRuntimeExecution(
+                        rs.getString("baseline_id"), rs.getString("project_id"),
+                        rs.getString("expected_commit"), rs.getString("actual_commit"),
+                        rs.getString("execution_id"),
+                        rs.getTimestamp("captured_at") == null ? null
+                                : rs.getTimestamp("captured_at").toInstant().atOffset(java.time.ZoneOffset.UTC)),
+                baselineId);
+    }
+
+    public record StaleRuntimeExecution(
+            String baselineId, String projectId,
+            String expectedCommit, String actualCommit,
+            String executionId, java.time.OffsetDateTime capturedAt) {}
+
+    /** Persist a runtime test execution audit row. */
+    public void saveRuntimeTestExecution(RuntimeTestExecution e) {
+        jdbc.update("""
+                INSERT INTO oat_runtime_test_execution
+                (id, project_id, baseline_id, source_commit, external_execution_id,
+                 testcase_key, environment, collector_version, trace_hash, input_hash,
+                 started_at, finished_at, captured_at, attributes_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb)
+                ON CONFLICT (baseline_id, external_execution_id) DO UPDATE
+                SET trace_hash = EXCLUDED.trace_hash, attributes_json = EXCLUDED.attributes_json
+                """,
+                e.id(), e.projectId(), e.baselineId(), e.sourceCommit(), e.externalExecutionId(),
+                e.testcaseKey(), e.environment(), e.collectorVersion(), e.traceHash(), e.inputHash(),
+                e.startedAt() == null ? null : java.sql.Timestamp.from(e.startedAt().toInstant()),
+                e.finishedAt() == null ? null : java.sql.Timestamp.from(e.finishedAt().toInstant()),
+                e.capturedAt() == null ? null : java.sql.Timestamp.from(e.capturedAt().toInstant()),
+                json(e.attributes()));
+    }
+
+    public record RuntimeTestExecution(
+            String id, String projectId, String baselineId, String sourceCommit,
+            String externalExecutionId, String testcaseKey, String environment,
+            String collectorVersion, String traceHash, String inputHash,
+            java.time.OffsetDateTime startedAt, java.time.OffsetDateTime finishedAt,
+            java.time.OffsetDateTime capturedAt, java.util.Map<String, Object> attributes) {}
 
     private AcceptanceCriterion criterion(ResultSet rs, int row) throws SQLException {
         return new AcceptanceCriterion(rs.getString("id"), rs.getString("baseline_id"),
@@ -388,9 +530,13 @@ public class VerificationRepository {
 
     private AnalysisJob analysisJob(ResultSet rs, int row) throws SQLException {
         return new AnalysisJob(rs.getString("id"), rs.getString("project_id"), rs.getString("baseline_id"),
+                nullableColumn(rs, "job_type"), nullableColumn(rs, "input_hash"),
                 AnalysisJobStatus.valueOf(rs.getString("status")), rs.getString("message"), rs.getString("created_by"),
                 time(rs.getTimestamp("create_time")), time(rs.getTimestamp("update_time")),
-                time(rs.getTimestamp("finish_time")));
+                time(rs.getTimestamp("finish_time")),
+                nullableColumn(rs, "checkpoint_step"),
+                map(nullableColumn(rs, "checkpoint_payload")),
+                rs.getInt("retry_count"), rs.getInt("max_retries"));
     }
 
     private String json(Object value) { return UtilJson.writeValueAsString(value == null ? Map.of() : value); }
