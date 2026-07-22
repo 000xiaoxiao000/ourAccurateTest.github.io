@@ -2282,6 +2282,7 @@ function messageOf(err: unknown) {
 }
 
 .asset-group {
+  min-width: 0;
   background: #fff;
 }
 
@@ -2315,6 +2316,7 @@ function messageOf(err: unknown) {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+  min-width: 0;
   padding: 8px;
   border-color: rgba(15, 23, 42, .08);
   background: var(--oat-surface-soft);
@@ -2338,9 +2340,28 @@ function messageOf(err: unknown) {
 .record-main {
   display: grid;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
   min-height: auto;
+  overflow: hidden;
   padding: 0;
   text-align: left;
+}
+
+.record-main small {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--oat-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
 }
 
 .record-actions,

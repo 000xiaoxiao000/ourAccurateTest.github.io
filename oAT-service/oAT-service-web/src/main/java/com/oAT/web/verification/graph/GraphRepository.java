@@ -100,8 +100,10 @@ public class GraphRepository {
         jdbc.update("""
                 INSERT INTO oat_graph_aggregate (id, baseline_id, project_id, aggregate_kind, subject_id, source_hash, payload_json)
                 VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)
-                ON CONFLICT (baseline_id, aggregate_kind, subject_id, source_hash) DO UPDATE
-                SET id = EXCLUDED.id, payload_json = EXCLUDED.payload_json, calculated_at = CURRENT_TIMESTAMP, invalidated_at = NULL
+                ON CONFLICT (id) DO UPDATE
+                SET project_id = EXCLUDED.project_id, aggregate_kind = EXCLUDED.aggregate_kind,
+                    subject_id = EXCLUDED.subject_id, source_hash = EXCLUDED.source_hash,
+                    payload_json = EXCLUDED.payload_json, calculated_at = CURRENT_TIMESTAMP, invalidated_at = NULL
                 """, aggregate.id(), aggregate.baselineId(), aggregate.projectId(), aggregate.kind(), aggregate.subjectId(),
                 aggregate.sourceHash(), json(aggregate.payload()));
     }

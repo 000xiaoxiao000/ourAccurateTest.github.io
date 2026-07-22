@@ -1,22 +1,59 @@
 package com.oAT.web.api.map;
 
 import com.oAT.web.esDao.entity.ClassCoverageIndex;
+import com.oAT.web.service.AppService;
+import com.oAT.web.verification.VerificationRepository;
+import com.oAT.web.verification.model.VerificationModels;
+import com.oAT.web.verification.model.VerificationModels.AssetType;
+import com.oAT.web.verification.model.VerificationModels.Baseline;
+import com.oAT.web.verification.model.VerificationModels.BaselineStatus;
+import com.oAT.web.verification.model.VerificationModels.Freshness;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.EvidenceState.STATIC;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.NodeKind.CODE_CLASS;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.NodeKind.CODE_FILE;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.NodeKind.CODE_METHOD;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TraceabilityMapServiceSourceParsingTest {
+
+    @Test
+    void fallsBackToCurrentProjectBaselineWhenRequestedBaselineIsMissing() {
+        VerificationRepository repository = mock(VerificationRepository.class);
+        AppService appService = mock(AppService.class);
+        Baseline fallback = baseline("baseline-current");
+        when(repository.findBaseline("project-1", "baseline-missing")).thenReturn(Optional.empty());
+        when(repository.findBaselines("project-1")).thenReturn(List.of(fallback));
+        when(repository.findCriteria("baseline-current")).thenReturn(List.of());
+        when(repository.findTestcases("baseline-current")).thenReturn(List.of());
+        when(repository.findTraceLinks("baseline-current")).thenReturn(List.of());
+        when(repository.findAssets("project-1", AssetType.SOURCE)).thenReturn(List.of());
+
+        TraceabilityMapService service = new TraceabilityMapService(
+                repository, null, null, new CodeSymbolNormalizer(), appService, null, null);
+
+        TraceabilityMapPayloads.TraceabilityMapResponse response = service.build(
+                "project-1", "baseline-missing", null, "BOTH", 4,
+                false, false, false, "trace");
+
+        assertThat(response.baseline().id()).isEqualTo("baseline-current");
+        assertThat(response.warnings())
+                .anyMatch(item -> item.contains("请求的分析基线已不可用")
+                        && item.contains("baseline-missing")
+                        && item.contains("baseline-current"));
+    }
 
     @Test
     void parsesComplexJavaMethodsWithoutDroppingOverloadsPrivateStaticOrGenerics() throws Exception {
@@ -166,5 +203,28 @@ class TraceabilityMapServiceSourceParsingTest {
         } catch (ReflectiveOperationException ex) {
             throw new AssertionError(ex);
         }
+    }
+
+    private static Baseline baseline(String id) {
+        LocalDateTime now = LocalDateTime.now();
+        return new Baseline(
+                id,
+                "project-1",
+                "Current baseline",
+                null,
+                null,
+                null,
+                null,
+                null,
+                "app-1",
+                null,
+                null,
+                null,
+                VerificationModels.ANALYZER_VERSION,
+                BaselineStatus.COMPLETED,
+                Freshness.LIVE,
+                "tester",
+                now,
+                now);
     }
 }

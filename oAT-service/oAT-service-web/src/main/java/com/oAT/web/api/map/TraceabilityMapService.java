@@ -78,6 +78,7 @@ import static com.oAT.web.api.map.TraceabilityMapPayloads.TraceabilitySummary;
 
 @Service
 public class TraceabilityMapService {
+    private static final String SOURCE_ONLY_BASELINE_PREFIX = "source-only:";
     private static final int DEFAULT_DEPTH = 4;
     private static final int MAX_DEPTH = 8;
     private static final int MAX_NODES = 700;
@@ -135,8 +136,8 @@ public class TraceabilityMapService {
         boolean includeCallEdges = !traceOnlyView;
         boolean includeCodeTree = !traceOnlyView;
         boolean includeCodeGraph = !traceOnlyView;
-        Baseline baseline = resolveBaseline(projectId, baselineId);
         List<String> warnings = new ArrayList<>();
+        Baseline baseline = resolveBaseline(projectId, baselineId, warnings);
         List<AcceptanceCriterion> criteria = verificationRepository.findCriteria(baseline.id());
         List<TestcaseProjection> testcases = verificationRepository.findTestcases(baseline.id());
         List<TraceLink> links = verificationRepository.findTraceLinks(baseline.id());
@@ -201,10 +202,25 @@ public class TraceabilityMapService {
                 warnings);
     }
 
-    private Baseline resolveBaseline(String projectId, String baselineId) {
+    private Baseline resolveBaseline(String projectId, String baselineId, List<String> warnings) {
         if (StringUtils.hasText(baselineId)) {
-            return verificationRepository.findBaseline(projectId, baselineId)
-                    .orElseThrow(() -> new FriendlyException("分析基线不存在或不属于当前项目"));
+            if (baselineId.startsWith(SOURCE_ONLY_BASELINE_PREFIX)) {
+                String assetId = baselineId.substring(SOURCE_ONLY_BASELINE_PREFIX.length());
+                Optional<Baseline> sourceOnlyBaseline = verificationRepository.findAsset(projectId, assetId)
+                        .filter(asset -> asset.assetType() == AssetType.SOURCE)
+                        .map(this::sourceOnlyBaseline);
+                if (sourceOnlyBaseline.isPresent()) {
+                    return sourceOnlyBaseline.get();
+                }
+                return fallbackBaseline(projectId, baselineId, "请求的源码快照已不可用，已切换到当前项目可用基线", warnings)
+                        .orElseThrow(() -> new FriendlyException("源码快照不存在或不属于当前项目，请重新导入源码或切换分析基线"));
+            }
+            Optional<Baseline> requested = verificationRepository.findBaseline(projectId, baselineId);
+            if (requested.isPresent()) {
+                return requested.get();
+            }
+            return fallbackBaseline(projectId, baselineId, "请求的分析基线已不可用，已切换到当前项目可用基线", warnings)
+                    .orElseThrow(() -> new FriendlyException("分析基线不存在或不属于当前项目，请刷新后重新选择基线"));
         }
         Optional<Baseline> baseline = verificationRepository.findBaselines(projectId).stream().findFirst();
         if (baseline.isPresent()) {
@@ -214,28 +230,39 @@ public class TraceabilityMapService {
                 .orElseThrow(() -> new FriendlyException("当前项目暂无分析基线或源码快照"));
     }
 
+    private Optional<Baseline> fallbackBaseline(String projectId, String requestedBaselineId, String message, List<String> warnings) {
+        Optional<Baseline> baseline = verificationRepository.findBaselines(projectId).stream().findFirst();
+        Optional<Baseline> fallback = baseline.isPresent() ? baseline : latestSourceBaseline(projectId);
+        fallback.ifPresent(item -> warnings.add(message + "：" + requestedBaselineId + " → " + item.id()));
+        return fallback;
+    }
+
     private Optional<Baseline> latestSourceBaseline(String projectId) {
         return verificationRepository.findAssets(projectId, AssetType.SOURCE).stream()
                 .findFirst()
-                .map(asset -> new Baseline(
-                        "source-only:" + asset.id(),
-                        projectId,
-                        "源码快照 " + firstText(asset.fileName(), asset.id()),
-                        null,
-                        null,
-                        asset.id(),
-                        null,
-                        null,
-                        metadataText(asset, "appId"),
-                        asset.externalUrl(),
-                        null,
-                        asset.sourceVersion(),
-                        VerificationModels.ANALYZER_VERSION,
-                        VerificationModels.BaselineStatus.CREATED,
-                        asset.freshness(),
-                        asset.importedBy(),
-                        asset.capturedAt(),
-                        LocalDateTime.now()));
+                .map(this::sourceOnlyBaseline);
+    }
+
+    private Baseline sourceOnlyBaseline(AssetSnapshot asset) {
+        return new Baseline(
+                SOURCE_ONLY_BASELINE_PREFIX + asset.id(),
+                asset.projectId(),
+                "源码快照 " + firstText(asset.fileName(), asset.id()),
+                null,
+                null,
+                asset.id(),
+                null,
+                null,
+                metadataText(asset, "appId"),
+                asset.externalUrl(),
+                null,
+                asset.sourceVersion(),
+                VerificationModels.ANALYZER_VERSION,
+                VerificationModels.BaselineStatus.CREATED,
+                asset.freshness(),
+                asset.importedBy(),
+                asset.capturedAt(),
+                LocalDateTime.now());
     }
 
     private int normalizeDepth(Integer requestedDepth) {

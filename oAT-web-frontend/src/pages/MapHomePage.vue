@@ -22,7 +22,11 @@
     <div v-if="!baselines.length && !map.response.value && !map.loading.value && !map.error.value" class="workspace-notice">
       暂无分析基线。三层追溯需在 AI 验证页创建基线；代码调用链路图可基于已导入源码展示。
     </div>
-    <div v-if="map.error.value" class="workspace-notice error">{{ map.error.value }}</div>
+    <div v-if="map.error.value" class="workspace-notice error">
+      <strong>{{ errorMessage.title }}</strong>
+      <span>{{ errorMessage.detail }}</span>
+      <small v-if="errorMessage.reason">原因：{{ errorMessage.reason }}</small>
+    </div>
     <div v-for="warning in map.response.value?.warnings || []" :key="warning" class="workspace-notice warning">
       {{ warning }}
     </div>
@@ -59,14 +63,36 @@
             <strong>三层追溯关系图</strong>
             <span>正向为需求驱动下层，反向为下层溯源上层</span>
           </div>
-          <div class="map-legend compact">
+        </div>
+        <section class="trace-map-info" aria-label="三层追溯关系图说明">
+          <div class="trace-map-legend">
+            <strong>图例</strong>
             <span><i class="legend req"></i>需求层</span>
             <span><i class="legend tc"></i>测试用例层</span>
             <span><i class="legend code"></i>代码层</span>
-            <span><i class="line-sample solid"></i>正向</span>
+            <span><i class="line-sample solid"></i>正向追溯</span>
             <span><i class="line-sample derived"></i>反向/推断</span>
           </div>
-        </div>
+          <div class="trace-relation-quickview">
+            <strong>关系速查</strong>
+            <div class="trace-relation-table-wrap">
+              <table>
+                <thead>
+                  <tr><th>方向</th><th>从 → 到</th><th>箭头</th><th>含义</th><th>示例</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in relationSummaryRows" :key="row.key">
+                    <td>{{ row.direction }}</td>
+                    <td>{{ row.fromTo }}</td>
+                    <td>{{ row.arrow }}</td>
+                    <td>{{ row.meaning }}</td>
+                    <td>{{ row.example }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
         <div v-if="map.loading.value" class="trace-empty"><span class="spin">◌</span><span>加载中…</span></div>
         <div v-else-if="!traceGraph.nodes.length" class="trace-empty">暂无可展示的三层追溯关系。</div>
         <div v-else class="trace-map-scroll">
@@ -118,39 +144,6 @@
         </div>
       </section>
 
-      <div class="trace-reference-grid">
-        <section class="reference-panel">
-          <h2>图例说明</h2>
-          <table>
-            <thead><tr><th>符号</th><th>含义</th></tr></thead>
-            <tbody>
-              <tr><td><span class="line-cell solid"></span>实线箭头</td><td><strong>正向追溯：</strong>上层定义/驱动下层</td></tr>
-              <tr><td><span class="line-cell dashed"></span>虚线箭头</td><td><strong>反向追溯：</strong>下层溯源/服务于上层</td></tr>
-              <tr><td><span class="dot blue"></span>蓝色框</td><td>需求层（业务功能）</td></tr>
-              <tr><td><span class="dot orange"></span>橙色框</td><td>测试用例层（验证场景）</td></tr>
-              <tr><td><span class="dot green"></span>绿色框</td><td>代码层（源码实现）</td></tr>
-            </tbody>
-          </table>
-        </section>
-
-        <section class="reference-panel relation-summary">
-          <h2>追溯关系汇总表</h2>
-          <table>
-            <thead>
-              <tr><th>追溯方向</th><th>从 → 到</th><th>箭头类型</th><th>含义</th><th>示例</th></tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in relationSummaryRows" :key="row.key">
-                <td>{{ row.direction }}</td>
-                <td>{{ row.fromTo }}</td>
-                <td>{{ row.arrow }}</td>
-                <td>{{ row.meaning }}</td>
-                <td>{{ row.example }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </section>
-      </div>
     </section>
 
     <section v-else class="tab-page calls-tab">
@@ -572,6 +565,7 @@ const baselineStatusText = computed(() => {
   const version = [baseline.sourceBranch, baseline.sourceCommit].filter(Boolean).join(' · ')
   return `当前基线：${baseline.name || baseline.id}${version ? ` · ${version}` : ''}`
 })
+const errorMessage = computed(() => friendlyMapError(map.error.value, selectedBaselineId.value || map.activeBaselineId.value))
 
 const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
 const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value).map(toTreeNode))
@@ -784,6 +778,39 @@ function timeValue(value?: string) {
   return Number.isFinite(time) ? time : 0
 }
 
+function friendlyMapError(message: string, baselineId: string) {
+  const reason = message || '加载追溯地图失败'
+  if (reason.includes('源码快照不存在') || reason.includes('分析基线不存在')) {
+    const isSourceOnly = baselineId.startsWith('source-only:')
+    return {
+      title: '当前基线无法读取',
+      detail: isSourceOnly
+        ? '这个视图正在使用源码快照模式，请刷新项目数据；如果源码已被删除，请重新导入源码。'
+        : '请选择一个仍存在的分析基线，或在 AI 验证页重新创建基线。',
+      reason,
+    }
+  }
+  if (reason.includes('暂无分析基线或源码快照')) {
+    return {
+      title: '还没有可展示的数据',
+      detail: '请先导入源码；需要三层追溯时，再到 AI 验证页创建需求、测试和源码基线。',
+      reason,
+    }
+  }
+  if (reason.includes('无法连接后端服务')) {
+    return {
+      title: '后端服务连接失败',
+      detail: '请确认后端服务已启动，或检查前端代理配置。',
+      reason,
+    }
+  }
+  return {
+    title: '追溯地图加载失败',
+    detail: '请刷新当前页；如果仍然失败，切换基线后再试。',
+    reason,
+  }
+}
+
 async function reload() {
   try {
     await loadOverview()
@@ -822,6 +849,7 @@ async function reloadBaseline() {
 async function loadTraceData() {
   map.includeAiCalls.value = false
   await map.load({ baselineId: selectedBaselineId.value, view: 'trace' })
+  syncSelectedBaseline()
 }
 
 async function loadCodeData(focusId = map.focusId.value) {
@@ -831,9 +859,16 @@ async function loadCodeData(focusId = map.focusId.value) {
   map.includeAiCalls.value = aiCallAnalysisEnabled.value
   try {
     await map.load({ baselineId: selectedBaselineId.value, focusId, view: 'calls' })
-    loadedCodeDataKey.value = key
+    syncSelectedBaseline()
+    loadedCodeDataKey.value = codeDataKey(focusId)
   } finally {
     if (loadingCodeDataKey.value === key) loadingCodeDataKey.value = ''
+  }
+}
+
+function syncSelectedBaseline() {
+  if (map.activeBaselineId.value) {
+    selectedBaselineId.value = map.activeBaselineId.value
   }
 }
 
@@ -1300,8 +1335,8 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], s
     edgeIds.add(edge.target)
   })
 
-  const requirements = pickLayerNodes(nodes, 'REQUIREMENT', edgeIds, 18)
-  const testcases = pickLayerNodes(nodes, 'TESTCASE', edgeIds, 24)
+  const requirements = pickLayerNodes(nodes, 'REQUIREMENT', edgeIds)
+  const testcases = pickLayerNodes(nodes, 'TESTCASE', edgeIds)
   const code = pickLayerNodes(nodes.filter((node) => node.kind === 'CODE_FILE'), 'CODE_', edgeIds, 24)
   const rawLayers = [
     { key: 'requirements', title: layerTitle('需求层 (Requirements)', requirements), nodes: requirements.nodes, tone: 'req' },
@@ -1353,7 +1388,6 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], s
   const height = Math.max(560, currentY + 4)
   const graphEdges = traceEdges
     .filter((edge) => positioned.has(edge.source) && positioned.has(edge.target))
-    .slice(0, 96)
     .map((edge): SvgEdge => {
       const source = positioned.get(edge.source)!
       const target = positioned.get(edge.target)!
@@ -1432,10 +1466,11 @@ function traceLayerNodeId(id: string, nodeMap: Map<string, TraceabilityNode>) {
   return node?.kind === 'CODE_FILE' ? node.id : id
 }
 
-function pickLayerNodes(nodes: TraceabilityNode[], kindPrefix: string, edgeIds: Set<string>, limit: number) {
+function pickLayerNodes(nodes: TraceabilityNode[], kindPrefix: string, edgeIds: Set<string>, limit?: number) {
   const matches = nodes.filter((node) => node.kind === kindPrefix || node.kind.startsWith(kindPrefix))
   const linked = matches.filter((node) => edgeIds.has(node.id))
-  return { nodes: linked.slice(0, limit), total: linked.length }
+  const visible = limit === undefined ? matches : linked.slice(0, limit)
+  return { nodes: visible, total: limit === undefined ? matches.length : linked.length }
 }
 
 function layerTitle(title: string, layer: { nodes: TraceabilityNode[]; total: number }) {
@@ -2165,7 +2200,10 @@ onBeforeUnmount(() => {
 .baseline-select { display:flex; align-items:center; gap:7px; padding:5px 10px; border:1px solid #e2e8f0; border-radius:9px; font-weight:800; }
 .baseline-select select { max-width:260px; border:0; background:transparent; outline:0; }
 .workspace-notice { margin-bottom:10px; padding:11px 14px; border-radius:10px; background:#f0fdfa; color:#0f766e; font-weight:700; }
-.workspace-notice.error { background:#fef2f2; color:#b91c1c; }
+.workspace-notice.error { display:grid; gap:4px; border:1px solid #fecaca; background:#fff7f7; color:#b91c1c; }
+.workspace-notice.error strong { font-size:15px; color:#991b1b; }
+.workspace-notice.error span { color:#7f1d1d; }
+.workspace-notice.error small { color:#b45309; font-size:12px; font-weight:700; }
 .workspace-notice.warning { background:#fffbeb; color:#92400e; }
 .summary-strip { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:8px; margin-bottom:12px; }
 .summary-strip div { display:grid; gap:2px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:10px; background:#fff; }
@@ -2247,6 +2285,16 @@ onBeforeUnmount(() => {
 .map-head { align-items:center; }
 .map-legend { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; color:#64748b; font-size:11px; font-weight:800; }
 .map-legend span { display:flex; align-items:center; gap:5px; }
+.trace-map-info { display:grid; gap:8px; padding:10px 14px; border-bottom:1px solid #eef2f5; background:#fcfdf8; }
+.trace-map-legend { display:flex; align-items:center; flex-wrap:wrap; gap:12px; color:#64748b; font-size:11px; font-weight:800; }
+.trace-map-legend strong, .trace-relation-quickview > strong { color:#172033; font-size:12px; }
+.trace-map-legend span { display:flex; align-items:center; gap:5px; }
+.trace-relation-quickview { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:start; gap:12px; min-width:0; }
+.trace-relation-table-wrap { min-width:0; overflow-x:auto; }
+.trace-relation-table-wrap table { width:100%; min-width:760px; border-collapse:collapse; color:#475569; font-size:11px; }
+.trace-relation-table-wrap th, .trace-relation-table-wrap td { padding:5px 8px; border-bottom:1px solid #e5e7eb; text-align:left; white-space:nowrap; }
+.trace-relation-table-wrap th { color:#334155; background:#f1f5f2; font-weight:900; }
+.trace-relation-table-wrap tbody tr:last-child td { border-bottom:0; }
 .empty-card { padding:18px; color:#94a3b8; text-align:center; font-size:13px; }
 .call-graph-start {
   display:flex;
@@ -2322,7 +2370,7 @@ onBeforeUnmount(() => {
 .legend.both { background:#0f766e; }
 .line-sample { display:inline-block; width:18px; height:0; border-top:2px dashed #94a3b8; }
 .line-sample.solid { border-top-style:solid; }
-.trace-map-scroll { flex:1; overflow:auto; background:#fbfce8; }
+.trace-map-scroll { flex:0 1 auto; height:min(760px,calc(100vh - 390px)); min-height:520px; overflow:auto; background:#fbfce8; }
 .trace-map-svg { display:block; width:100%; min-width:920px; height:auto; min-height:560px; cursor:default; }
 .lane-band { fill:rgba(254,252,232,.74); stroke:#c6c453; stroke-width:1; }
 .lane-title { fill:#475569; font-size:13px; font-weight:900; text-anchor:middle; }

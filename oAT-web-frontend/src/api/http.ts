@@ -76,9 +76,17 @@ async function requestRawJson<T>(input: string, init?: RequestInit): Promise<T> 
 
   const rawBody = await response.text()
   let payload: T
+  let errorPayload: { message?: string; errorMessage?: string } | null = null
 
   try {
     payload = JSON.parse(rawBody) as T
+    if (!response.ok) {
+      try {
+        errorPayload = payload as { message?: string; errorMessage?: string }
+      } catch {
+        errorPayload = null
+      }
+    }
   } catch {
     throw new ApiError(
       response.ok ? '服务端返回了非 JSON 响应' : `请求失败，服务端返回了异常响应 (${response.status})`,
@@ -87,7 +95,11 @@ async function requestRawJson<T>(input: string, init?: RequestInit): Promise<T> 
   }
 
   if (!response.ok) {
-    throw new ApiError(`请求失败 (${response.status})`, response.status)
+    throw new ApiError(
+      errorPayload?.message || errorPayload?.errorMessage || `请求失败 (${response.status})`,
+      response.status,
+      errorPayload?.errorMessage,
+    )
   }
   return payload
 }
