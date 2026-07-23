@@ -40,7 +40,11 @@ const EXTERNAL_CODE_PREFIXES = [
   'groovy.',
 ]
 
-const EXTERNAL_PATH_PREFIXES = EXTERNAL_CODE_PREFIXES.map((prefix) => prefix.replace(/\.$/, '').replace(/\./g, '/'))
+// These short names are valid source-directory names (for example
+// src/main/java), so only package-like prefixes should be checked as paths.
+const EXTERNAL_PATH_PREFIXES = EXTERNAL_CODE_PREFIXES
+  .filter((prefix) => prefix.includes('.') && !['java.', 'javax.', 'jakarta.', 'jdk.', 'sun.'].includes(prefix))
+  .map((prefix) => prefix.replace(/\.$/, '').replace(/\./g, '/'))
 
 export function isBusinessCodeItem(item: CodeLikeItem) {
   const values = [
@@ -87,10 +91,12 @@ export function isGraphCodeKind(kind?: string) {
 }
 
 function isExternalCodeText(value: string) {
+  const hasPathSeparators = value.includes('/') || value.includes('\\')
   const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '')
   const dotted = normalized.replace(/\//g, '.')
-  return EXTERNAL_CODE_PREFIXES.some((prefix) => dotted.startsWith(prefix) || dotted.includes(`.${prefix}`))
-    || EXTERNAL_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix) || normalized.includes(`/${prefix}/`) || normalized.includes(`${prefix}/`))
+  const externalSymbol = !hasPathSeparators && EXTERNAL_CODE_PREFIXES.some((prefix) => dotted.startsWith(prefix) || dotted.includes('.' + prefix))
+  const externalPath = EXTERNAL_PATH_PREFIXES.some((prefix) => normalized.startsWith(prefix) || normalized.includes('/' + prefix + '/') || normalized.includes(prefix + '/'))
+  return externalSymbol || externalPath
 }
 
 function normalizeCodeText(value: unknown) {
