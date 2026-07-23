@@ -19,9 +19,11 @@
       <span>将当前基线中的源码、覆盖率、测试执行和追溯资料转换成可查询的节点与关系；不会重新运行 AI 分析。</span>
       <span>建议首次使用按“静态图 → 控制流 / 依赖 → 覆盖率 / 分支 / 测试执行 → 追溯图”构建。</span>
     </div>
-    <div class="toolbar">
-      <button v-for="p in projections" :key="p.key" type="button" class="chip-button"
-              :title="p.hint" :disabled="busyKey === p.key" @click="runProjection(p.key)">
+    <div class="toolbar projection-toolbar">
+      <button v-for="p in projectionControls" :key="p.key" type="button" class="chip-button projection-button"
+              :class="{ ready: p.ready, locked: p.locked, running: busyKey === p.key }"
+              :title="p.title" :aria-disabled="p.locked || !!busyKey" :disabled="busyKey === p.key"
+              @click="runProjection(p.key)">
         {{ busyKey === p.key ? '投影中...' : p.label }}
       </button>
     </div>
@@ -664,6 +666,19 @@ const readModelKindText = computed(() => ({
 
 const graphQueryProfile = { depth: FOCUS_GRAPH_DEPTH, maxNodes: FOCUS_GRAPH_MAX_NODES, maxEdges: FOCUS_GRAPH_MAX_EDGES }
 
+const projectionStats = computed(() => graph.value?.summary.projectionStats || {})
+const projectionControls = computed(() => projections.map((projection) => {
+  const ready = isProjectionReady(projection.key)
+  const requirement = projectionRequirement(projection.key)
+  const locked = !ready && !!requirement && !requirement.ready
+  return {
+    ...projection,
+    ready,
+    locked,
+    title: locked ? `${projection.hint}\n需先完成：${requirement.label}` : projection.hint,
+  }
+}))
+
 const nodeKindCounts = computed(() => {
   const counts: Record<string, number> = {}
   for (const n of visibleGraphNodes.value) counts[n.kind] = (counts[n.kind] ?? 0) + 1
@@ -957,6 +972,11 @@ function updateNodeTooltipPosition(event: MouseEvent) {
 
 async function runProjection(key: ProjectionKey) {
   if (busyKey.value) return
+  const control = projectionControls.value.find((item) => item.key === key)
+  if (control?.locked) {
+    toast.warning(control.title)
+    return
+  }
   busyKey.value = key
   try {
     const pid = projectId.value, bid = baselineId.value
@@ -992,6 +1012,32 @@ function showProjectionResultToast(key: ProjectionKey, result: ProjectionRespons
 
 function shortId(value?: string) {
   return value ? value.slice(0, 8) : '-'
+}
+
+function isProjectionReady(key: ProjectionKey) {
+  if (key === 'static') return hasProjectionData('STATIC')
+  if (key === 'cfg') return hasProjectionData('STATIC_CFG')
+  if (key === 'dependency') return hasProjectionData('STATIC_DEPENDENCY')
+  if (key === 'coverage') return hasProjectionData('RUNTIME')
+  if (key === 'branch') return hasProjectionData('RUNTIME_BRANCH')
+  if (key === 'testExec') return hasProjectionData('RUNTIME_TRACE')
+  return hasProjectionData('TRACEABILITY')
+}
+
+function hasProjectionData(kind: string) {
+  const stats = projectionStats.value[kind]
+  return !!stats && ((stats.nodeCount ?? 0) > 0 || (stats.edgeCount ?? 0) > 0)
+}
+
+function projectionRequirement(key: ProjectionKey) {
+  if (key === 'static') return null
+  if (['cfg', 'dependency', 'coverage', 'traceability'].includes(key)) {
+    return { ready: isProjectionReady('static'), label: '静态图' }
+  }
+  if (['branch', 'testExec'].includes(key)) {
+    return { ready: isProjectionReady('coverage'), label: '覆盖率' }
+  }
+  return null
 }
 
 async function loadFusion() {
@@ -1280,6 +1326,11 @@ function nodeTooltipRows(node: GraphNode) {
 .primary-button { border-color:var(--oat-primary);background:var(--oat-primary);color:#fff; }
 .primary-button:disabled, .secondary-button:disabled, .chip-button:disabled { opacity:.45;cursor:not-allowed; }
 .toolbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
+.projection-toolbar { align-items:stretch; }
+.projection-button.ready { border-color:rgba(var(--oat-primary-rgb),.35);background:rgba(var(--oat-primary-rgb),.10);color:var(--oat-primary-dark); }
+.projection-button.locked { border-color:#e2e8f0;background:#f8fafc;color:#94a3b8;cursor:not-allowed;box-shadow:none;opacity:.62; }
+.projection-button.locked:hover { transform:none;box-shadow:none;border-color:#e2e8f0;background:#f8fafc;color:#94a3b8; }
+.projection-button.running { border-color:rgba(var(--oat-primary-rgb),.42);background:var(--oat-primary-container);color:var(--oat-primary-dark); }
 .toolbar-label { font-size:12px;font-weight:700;color:var(--oat-text-muted); }
 .summary-strip { display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--oat-border);border-radius:10px;background:#fff; }
 .summary-chip { border-radius:999px;padding:3px 10px;font-size:12px;font-weight:800;background:rgba(100,116,139,.1);color:#64748b; }

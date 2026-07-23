@@ -80,6 +80,7 @@ export interface GraphSummary {
   traceabilityReady: boolean
   fusionState: string
   snapshots: GraphSnapshot[]
+  projectionStats?: Record<string, { nodeCount: number; edgeCount: number }>
 }
 
 export interface GraphView {

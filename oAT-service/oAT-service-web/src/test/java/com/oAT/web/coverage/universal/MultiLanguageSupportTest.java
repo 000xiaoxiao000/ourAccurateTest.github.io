@@ -23,6 +23,22 @@ class MultiLanguageSupportTest {
     }
 
     @Test
+    void extractsVueObjectMethods() {
+        List<SymbolSnapshot> symbols = analyzer.analyze("src/views/upload.vue", """
+                export default {
+                  methods: {
+                    async allHkAmount() {
+                      return upload()
+                    }
+                  }
+                }
+                """);
+
+        assertTrue(symbols.stream().anyMatch(symbol ->
+                symbol.kind() == SymbolKind.METHOD && symbol.qualifiedName().equals("allHkAmount")));
+    }
+
+    @Test
     void parsesLcovGoCoverAndPythonJson() {
         byte[] lcov = "SF:src/order.cpp\nDA:3,2\nFN:3,createOrder\nFNDA:2,createOrder\nend_of_record\n".getBytes(StandardCharsets.UTF_8);
         assertEquals(1, new CppCoverageParser().parse(lcov).size());

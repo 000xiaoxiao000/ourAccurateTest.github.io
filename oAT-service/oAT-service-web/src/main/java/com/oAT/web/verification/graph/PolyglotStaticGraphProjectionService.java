@@ -63,12 +63,12 @@ public class PolyglotStaticGraphProjectionService {
         List<PendingMethod> pendingMethods = new ArrayList<>();
         int nodeCount = 0;
         for (SourceFile file : files) {
-            if (!analyzer.supports(file.path())) continue;
             String fileNodeId = "source-file:" + GraphModels.fingerprint(repository + "|" + commit + "|" + file.path());
             graphRepository.saveNode(new GraphRepository.GraphNode(fileNodeId, snapshot.id(), baselineId, projectId, GraphNodeKind.SOURCE_FILE,
                     repository + "@" + commit + ":" + file.path(), file.path(), file.path(), file.path(),
                     GraphModels.fingerprint(value(file.content())), Map.of("appId", appId, "language", value(language))));
             nodeCount++;
+            if (!analyzer.supports(file.path())) continue;
             List<SymbolSnapshot> symbols = safeAnalyze(file.path(), file.content());
             List<SymbolSnapshot> types = symbols.stream().filter(symbol -> symbol.kind() == SymbolKind.TYPE)
                     .sorted((left, right) -> Integer.compare(startLine(left), startLine(right))).toList();
@@ -133,13 +133,20 @@ public class PolyglotStaticGraphProjectionService {
     private List<SourceFile> splitFiles(String content, String fallbackPath, String language) {
         List<SourceFile> files = new ArrayList<>();
         if (!StringUtils.hasText(content)) return files;
+        List<String> manifestPaths = new ArrayList<>();
         String currentPath = null;
         StringBuilder current = new StringBuilder();
         boolean sawMarker = false;
         for (String line : content.split("\\R", -1)) {
             String trimmed = line.trim();
             if (trimmed.equals(SOURCE_TREE_BEGIN) || trimmed.equals(SOURCE_TREE_END)
-                    || trimmed.startsWith(SOURCE_FILE_PREFIX) || trimmed.startsWith(SNAPSHOT_ID_PREFIX)) {
+                    || trimmed.startsWith(SNAPSHOT_ID_PREFIX)) {
+                continue;
+            }
+            if (trimmed.startsWith(SOURCE_FILE_PREFIX)) {
+                sawMarker = true;
+                String path = trimmed.substring(SOURCE_FILE_PREFIX.length()).trim().replace('\\', '/');
+                if (StringUtils.hasText(path)) manifestPaths.add(path);
                 continue;
             }
             if (trimmed.startsWith(FILE_PREFIX)) {
@@ -152,6 +159,9 @@ public class PolyglotStaticGraphProjectionService {
             if (currentPath != null) current.append(line).append('\n');
         }
         if (currentPath != null) files.add(new SourceFile(currentPath, current.toString()));
+        if (files.isEmpty() && !manifestPaths.isEmpty()) {
+            for (String path : manifestPaths) files.add(new SourceFile(path, ""));
+        }
         if (!sawMarker && files.isEmpty()) {
             files.add(new SourceFile(fallbackSourcePath(fallbackPath, language), content));
         }

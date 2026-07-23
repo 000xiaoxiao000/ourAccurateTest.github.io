@@ -19,6 +19,7 @@ public class PolyglotLanguageAnalyzer implements LanguageAnalyzer {
     private static final Pattern JS_TYPE = Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:default\\s+)?(?:class|interface)\\s+([A-Za-z_$][\\w$]*)");
     private static final Pattern JS_FUNCTION = Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\{");
     private static final Pattern JS_ARROW = Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?\\(([^)]*)\\)\\s*=>");
+    private static final Pattern JS_METHOD = Pattern.compile("(?m)^\\s*(?:async\\s+)?(?!if\\b|for\\b|while\\b|switch\\b|catch\\b|function\\b)([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\{");
     private static final Pattern GO_TYPE = Pattern.compile("(?m)^\\s*type\\s+([A-Za-z_][\\w]*)\\s+(?:struct|interface)");
     private static final Pattern GO_FUNCTION = Pattern.compile("(?m)^\\s*func\\s+(?:\\([^)]*\\)\\s*)?([A-Za-z_][\\w]*)\\s*\\(([^)]*)\\)");
     private static final Pattern PY_TYPE = Pattern.compile("(?m)^\\s*class\\s+([A-Za-z_][\\w]*)");
@@ -38,7 +39,7 @@ public class PolyglotLanguageAnalyzer implements LanguageAnalyzer {
         String language = language(path);
         List<SymbolSnapshot> symbols = new ArrayList<>();
         switch (language) {
-            case "frontend" -> { addTypes(symbols, path, source, language, JS_TYPE); addFunctions(symbols, path, source, language, JS_FUNCTION, 1, 2, false); addFunctions(symbols, path, source, language, JS_ARROW, 1, 2, false); }
+            case "frontend" -> { addTypes(symbols, path, source, language, JS_TYPE); addFunctions(symbols, path, source, language, JS_FUNCTION, 1, 2, false); addFunctions(symbols, path, source, language, JS_ARROW, 1, 2, false); addFunctions(symbols, path, source, language, JS_METHOD, 1, 2, false); }
             case "go" -> { addTypes(symbols, path, source, language, GO_TYPE); addFunctions(symbols, path, source, language, GO_FUNCTION, 1, 2, false); }
             case "python" -> { addTypes(symbols, path, source, language, PY_TYPE); addFunctions(symbols, path, source, language, PY_FUNCTION, 2, 3, true); }
             case "cpp" -> { addTypes(symbols, path, source, language, CPP_TYPE); addFunctions(symbols, path, source, language, CPP_FUNCTION, 1, 2, false); }

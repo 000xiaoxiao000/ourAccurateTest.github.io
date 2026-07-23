@@ -48,6 +48,33 @@ public class GraphRepository {
                 """, this::snapshot, baselineId, kind.name()).stream().findFirst();
     }
 
+    public Map<String, ProjectionStats> activeProjectionStats(String baselineId) {
+        Map<String, ProjectionStats> stats = new java.util.LinkedHashMap<>();
+        jdbc.query("""
+                SELECT s.snapshot_kind, COUNT(n.id) AS node_count
+                FROM oat_graph_snapshot s
+                LEFT JOIN oat_graph_node n ON n.snapshot_id = s.id AND n.invalidated_at IS NULL
+                WHERE s.baseline_id = ? AND s.invalidated_at IS NULL
+                GROUP BY s.snapshot_kind
+                """, rs -> {
+            String kind = rs.getString("snapshot_kind");
+            ProjectionStats current = stats.getOrDefault(kind, ProjectionStats.empty());
+            stats.put(kind, new ProjectionStats(rs.getInt("node_count"), current.edgeCount()));
+        }, baselineId);
+        jdbc.query("""
+                SELECT s.snapshot_kind, COUNT(e.id) AS edge_count
+                FROM oat_graph_snapshot s
+                LEFT JOIN oat_graph_edge e ON e.snapshot_id = s.id AND e.invalidated_at IS NULL
+                WHERE s.baseline_id = ? AND s.invalidated_at IS NULL
+                GROUP BY s.snapshot_kind
+                """, rs -> {
+            String kind = rs.getString("snapshot_kind");
+            ProjectionStats current = stats.getOrDefault(kind, ProjectionStats.empty());
+            stats.put(kind, new ProjectionStats(current.nodeCount(), rs.getInt("edge_count")));
+        }, baselineId);
+        return stats;
+    }
+
     public void invalidateSnapshots(String baselineId, SnapshotKind kind) {
         jdbc.update("""
                 UPDATE oat_graph_snapshot SET invalidated_at = CURRENT_TIMESTAMP, status = 'STALE'
@@ -428,6 +455,9 @@ public class GraphRepository {
                                    java.time.OffsetDateTime capturedAt, Map<String, Object> attributes) {}
     public record GraphSnapshot(String id, String projectId, String baselineId, String repositoryUrl, String sourceCommit,
                                 SnapshotKind kind, String analyzerVersion, String inputHash, String status, Map<String, Object> attributes) {}
+    public record ProjectionStats(int nodeCount, int edgeCount) {
+        static ProjectionStats empty() { return new ProjectionStats(0, 0); }
+    }
     public record GraphNode(String id, String snapshotId, String baselineId, String projectId, GraphNodeKind kind,
                             String stableSymbolId, String logicalSymbolId, String locator, String displayName,
                             String contentHash, Map<String, Object> attributes) {}

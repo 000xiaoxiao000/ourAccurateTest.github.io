@@ -106,22 +106,14 @@ public class GraphService {
         }
         AppVo sourceApp = appService.getApp(baseline.sourceAppId());
         if (!isJavaApp(sourceApp)) {
-            if (!StringUtils.hasText(baseline.sourceAssetId())) {
-                throw new IllegalArgumentException("当前基线没有源码资料，无法建立静态图");
-            }
-            AssetSnapshot source = verificationRepository.findAsset(projectId, baseline.sourceAssetId())
-                    .orElseThrow(() -> new IllegalArgumentException("找不到当前基线的源码资料"));
-            if (source.assetType() != AssetType.SOURCE) {
-                throw new IllegalArgumentException("当前基线绑定的不是源码资料，无法建立静态图");
-            }
-            String content = SourceAssetFilter.filterContent(loadAssetContent(source), SourceAssetFilter.fromApp(sourceApp));
-            if (!StringUtils.hasText(content)) {
-                throw new IllegalArgumentException("当前基线的源码资料为空，无法建立静态图");
-            }
-            return polyglotStaticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(),
-                    baseline.repositoryUrl(), baseline.sourceCommit(), sourceApp.getLanguage(), source.fileName(), content);
+            return projectPolyglotStaticFromAsset(projectId, baseline, sourceApp, true);
         }
-        return staticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(), baseline.repositoryUrl(), baseline.sourceCommit());
+        StaticGraphProjectionService.ProjectionResult result = staticProjectionService.project(projectId, baseline.id(),
+                baseline.sourceAppId(), baseline.repositoryUrl(), baseline.sourceCommit());
+        if (result.nodeCount() > 0 || !StringUtils.hasText(baseline.sourceAssetId())) {
+            return result;
+        }
+        return projectPolyglotStaticFromAsset(projectId, baseline, sourceApp, false);
     }
 
     public StaticGraphProjectionService.ProjectionResult projectPolyglotStatic(String projectId, String baselineId,
@@ -149,6 +141,10 @@ public class GraphService {
     public StaticDependencyGraphProjectionService.ProjectionResult projectStaticDependency(String projectId, String baselineId) {
         verificationRepository.findBaseline(projectId, baselineId)
                 .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
+        if (graphRepository.countActiveNodesByKind(baselineId, GraphNodeKind.TYPE) == 0
+                && graphRepository.countActiveNodesByKind(baselineId, GraphNodeKind.SOURCE_FILE) == 0) {
+            projectStatic(projectId, baselineId);
+        }
         return dependencyProjectionService.project(projectId, baselineId);
     }
 
@@ -282,13 +278,19 @@ public class GraphService {
 
     private GraphSummary summary(String baselineId) {
         List<GraphRepository.GraphSnapshot> snapshots = graphRepository.findActiveSnapshots(baselineId);
-        boolean staticReady = snapshots.stream().anyMatch(item -> item.kind() == SnapshotKind.STATIC);
-        boolean runtimeReady = snapshots.stream().anyMatch(item -> item.kind() == SnapshotKind.RUNTIME || item.kind() == SnapshotKind.RUNTIME_TRACE);
-        boolean runtimeTraceReady = snapshots.stream().anyMatch(item -> item.kind() == SnapshotKind.RUNTIME_TRACE);
-        boolean traceabilityReady = snapshots.stream().anyMatch(item -> item.kind() == SnapshotKind.TRACEABILITY);
+        java.util.Map<String, GraphRepository.ProjectionStats> projectionStats = graphRepository.activeProjectionStats(baselineId);
+        boolean staticReady = hasProjectedData(projectionStats, SnapshotKind.STATIC);
+        boolean runtimeReady = hasProjectedData(projectionStats, SnapshotKind.RUNTIME) || hasProjectedData(projectionStats, SnapshotKind.RUNTIME_TRACE);
+        boolean runtimeTraceReady = hasProjectedData(projectionStats, SnapshotKind.RUNTIME_TRACE);
+        boolean traceabilityReady = hasProjectedData(projectionStats, SnapshotKind.TRACEABILITY);
         return new GraphSummary(staticReady, runtimeReady, runtimeTraceReady, traceabilityReady,
                 staticReady && runtimeReady ? "FUSED" : staticReady ? "STATIC_ONLY" : runtimeReady ? "DYNAMIC_ONLY" : "EMPTY",
-                snapshots);
+                snapshots, projectionStats);
+    }
+
+    private boolean hasProjectedData(java.util.Map<String, GraphRepository.ProjectionStats> projectionStats, SnapshotKind kind) {
+        GraphRepository.ProjectionStats stats = projectionStats.get(kind.name());
+        return stats != null && (stats.nodeCount() > 0 || stats.edgeCount() > 0);
     }
 
     private void requireJavaSourceApp(String projectId, String baselineId, String projectionName) {
@@ -306,6 +308,50 @@ public class GraphService {
         return app == null || !StringUtils.hasText(app.getLanguage()) || "JAVA".equalsIgnoreCase(app.getLanguage().trim());
     }
 
+    private StaticGraphProjectionService.ProjectionResult projectPolyglotStaticFromAsset(String projectId, Baseline baseline,
+                                                                                        AppVo sourceApp, boolean filterByAppProfile) {
+        if (!StringUtils.hasText(baseline.sourceAssetId())) {
+            throw new IllegalArgumentException("当前基线没有源码资料，无法建立静态图");
+        }
+        AssetSnapshot source = verificationRepository.findAsset(projectId, baseline.sourceAssetId())
+                .orElseThrow(() -> new IllegalArgumentException("找不到当前基线的源码资料"));
+        if (source.assetType() != AssetType.SOURCE) {
+            throw new IllegalArgumentException("当前基线绑定的不是源码资料，无法建立静态图");
+        }
+        String rawContent = loadAssetContent(source);
+        String content = filterByAppProfile ? SourceAssetFilter.filterContent(rawContent, SourceAssetFilter.fromApp(sourceApp)) : rawContent;
+        if (!StringUtils.hasText(content)) {
+            throw new IllegalArgumentException("当前基线的源码资料为空，无法建立静态图");
+        }
+        String language = filterByAppProfile && sourceApp != null && StringUtils.hasText(sourceApp.getLanguage())
+                ? sourceApp.getLanguage()
+                : inferLanguage(source.fileName(), rawContent);
+        StaticGraphProjectionService.ProjectionResult result = polyglotStaticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(),
+                baseline.repositoryUrl(), baseline.sourceCommit(), language, source.fileName(), content);
+        if (result.nodeCount() == 0 && filterByAppProfile && !rawContent.equals(content)) {
+            result = polyglotStaticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(),
+                    baseline.repositoryUrl(), baseline.sourceCommit(), inferLanguage(source.fileName(), rawContent), source.fileName(), rawContent);
+        }
+        if (result.nodeCount() == 0) {
+            throw new IllegalArgumentException("源码资料中没有可投影的源码文件，请检查源码资产是否包含 .vue/.ts/.js/.py/.go/.cpp 等文件内容或文件清单");
+        }
+        return result;
+    }
+
+    private String inferLanguage(String fileName, String content) {
+        String lower = fileName == null ? "" : fileName.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".py")) return "PYTHON";
+        if (lower.endsWith(".go")) return "GO";
+        if (lower.endsWith(".c") || lower.endsWith(".cc") || lower.endsWith(".cpp") || lower.endsWith(".h") || lower.endsWith(".hpp")) return "CPP";
+        if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".ts") || lower.endsWith(".tsx") || lower.endsWith(".vue")) return "FRONTEND";
+        String text = content == null ? "" : content;
+        if (text.contains(".vue") || text.contains(".tsx") || text.contains(".ts") || text.contains(".jsx")
+                || text.contains("function ") || text.contains("const ") || text.contains("<script")) return "FRONTEND";
+        if (text.contains(".py") || text.contains("def ")) return "PYTHON";
+        if (text.contains(".go") || text.contains("func ")) return "GO";
+        return "FRONTEND";
+    }
+
     private String loadAssetContent(AssetSnapshot asset) {
         if (StringUtils.hasText(asset.storageKey())) {
             String stored = assetContentStore.load(asset.storageKey());
@@ -321,7 +367,8 @@ public class GraphService {
     }
 
     public record GraphSummary(boolean staticReady, boolean runtimeReady, boolean runtimeTraceReady, boolean traceabilityReady,
-                               String fusionState, List<GraphRepository.GraphSnapshot> snapshots) {}
+                               String fusionState, List<GraphRepository.GraphSnapshot> snapshots,
+                               java.util.Map<String, GraphRepository.ProjectionStats> projectionStats) {}
 
     public record GraphView(GraphRepository.GraphSnapshot snapshot, List<GraphRepository.GraphNode> nodes,
                             List<GraphRepository.GraphEdge> edges, boolean nodesClipped, boolean edgesClipped,
