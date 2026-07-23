@@ -680,6 +680,7 @@ const dialog = useDialog()
 const projectStore = useProjectStore()
 const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
+const selectedBaselineApp = computed(() => apps.value.find(app => app.id === baselineForm.sourceAppId))
 
 const emptyOverview: VerificationOverview = { requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] }
 const overview = ref<VerificationOverview>(emptyOverview)
@@ -746,6 +747,7 @@ const baselineForm = reactive({
   executionAssetId: '',
   coverageAssetId: '',
   sourceAppId: '',
+  repositoryUrl: '',
   sourceBranch: '',
   sourceCommit: '',
 })
@@ -778,6 +780,14 @@ const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: stri
   { key: 'orchestration', label: '分析编排', description: '全量 / 增量 / 任务' },
   { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 依据' },
 ]
+
+watch(() => baselineForm.sourceAppId, () => {
+  autofillBaselineGitRevision()
+})
+
+watch(() => baselineForm.sourceAssetId, () => {
+  applySelectedSourceAssetGitInfo()
+})
 
 const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeholder: string }> = [
   { type: 'REQUIREMENT', label: '需求', hint: 'Word / Markdown / Excel / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },
@@ -1393,8 +1403,15 @@ async function importAsset(type: AssetType) {
 
 async function saveBaseline() {
   if (creatingBaseline.value) return
+  applySelectedSourceAssetGitInfo()
+  autofillBaselineGitRevision()
   if (baselineForm.coverageAssetId && !baselineForm.sourceAppId) {
     error.value = '已选择覆盖率依据时，请同时选择应用静态索引；覆盖率数据不需要运行 AI 分析，创建或更新基线后即可在链路地图查看。'
+    toast.error(error.value)
+    return
+  }
+  if (baselineForm.sourceAppId && !baselineForm.sourceCommit) {
+    error.value = '当前源码工程未设置当前 Commit。请先在源码工程版本中设置当前版本，或在基线表单中手动填写 Commit。'
     toast.error(error.value)
     return
   }
@@ -1409,7 +1426,7 @@ async function saveBaseline() {
     toast.success(updating ? '分析基线已更新' : '分析基线已创建')
     await loadOverview()
     await selectBaseline(baseline.id)
-    activeWorkspace.value = 'result'
+    activeWorkspace.value = 'baseline'
   } catch (err) {
     error.value = messageOf(err)
     toast.error(error.value)
@@ -1485,8 +1502,11 @@ function startEditBaseline(baseline: VerificationBaseline) {
   baselineForm.executionAssetId = baseline.executionAssetId || ''
   baselineForm.coverageAssetId = baseline.coverageAssetId || ''
   baselineForm.sourceAppId = baseline.sourceAppId || ''
+  baselineForm.repositoryUrl = baseline.repositoryUrl || ''
   baselineForm.sourceBranch = baseline.sourceBranch || ''
   baselineForm.sourceCommit = baseline.sourceCommit || ''
+  applySelectedSourceAssetGitInfo()
+  autofillBaselineGitRevision()
 }
 
 function cancelEditBaseline() {
@@ -1498,8 +1518,29 @@ function cancelEditBaseline() {
   baselineForm.executionAssetId = ''
   baselineForm.coverageAssetId = ''
   baselineForm.sourceAppId = ''
+  baselineForm.repositoryUrl = ''
   baselineForm.sourceBranch = ''
   baselineForm.sourceCommit = ''
+}
+
+function autofillBaselineGitRevision() {
+  const app = selectedBaselineApp.value
+  if (!app) return
+  if (!baselineForm.sourceBranch && app.currentBranch) baselineForm.sourceBranch = app.currentBranch
+  if (!baselineForm.sourceCommit && app.currentCommitId) baselineForm.sourceCommit = app.currentCommitId
+}
+
+function applySelectedSourceAssetGitInfo() {
+  const sourceAsset = overview.value.sources.find((asset) => asset.id === baselineForm.sourceAssetId)
+  if (!sourceAsset) return
+  const appId = metadataString(sourceAsset, 'appId') || sourceAsset.externalId
+  const repositoryUrl = metadataString(sourceAsset, 'repositoryUrl') || sourceAsset.externalUrl
+  const branch = metadataString(sourceAsset, 'branch')
+  const commit = metadataString(sourceAsset, 'commit') || sourceAsset.sourceVersion
+  if (appId) baselineForm.sourceAppId = appId
+  if (repositoryUrl) baselineForm.repositoryUrl = repositoryUrl
+  if (branch) baselineForm.sourceBranch = branch
+  if (commit) baselineForm.sourceCommit = commit
 }
 
 async function deleteBaseline(baseline: VerificationBaseline) {
@@ -1549,9 +1590,7 @@ async function importGitSource() {
       maxBytes: 20000000,
     })
     baselineForm.sourceAssetId = asset.id
-    if (gitForm.appId) baselineForm.sourceAppId = gitForm.appId
-    baselineForm.sourceBranch = gitForm.branch
-    baselineForm.sourceCommit = asset.sourceVersion || gitForm.commit
+    applySourceAssetGitInfo(asset)
     toast.success('Git 源码已导入，可在资料库查看')
     await loadOverview()
     activeWorkspace.value = 'library'
@@ -1940,7 +1979,10 @@ function assetTypeLabel(type: AssetType) {
 function selectAssetForBaseline(type: AssetType, assetId: string, notify = true) {
   if (type === 'REQUIREMENT') baselineForm.requirementAssetId = assetId
   else if (type === 'TESTCASE') baselineForm.testcaseAssetId = assetId
-  else if (type === 'SOURCE') baselineForm.sourceAssetId = assetId
+  else if (type === 'SOURCE') {
+    baselineForm.sourceAssetId = assetId
+    applySelectedSourceAssetGitInfo()
+  }
   else if (type === 'EXECUTION') baselineForm.executionAssetId = assetId
   else if (type === 'COVERAGE') baselineForm.coverageAssetId = assetId
   else if (type === 'DEFECT') {
@@ -1952,6 +1994,22 @@ function selectAssetForBaseline(type: AssetType, assetId: string, notify = true)
     activeWorkspace.value = 'baseline'
     toast.success(`已选择${assetTypeLabel(type)}用于分析基线`)
   }
+}
+
+function applySourceAssetGitInfo(asset: VerificationAsset) {
+  const appId = metadataString(asset, 'appId') || asset.externalId
+  const repositoryUrl = metadataString(asset, 'repositoryUrl') || asset.externalUrl
+  const branch = metadataString(asset, 'branch')
+  const commit = metadataString(asset, 'commit') || asset.sourceVersion
+  if (appId) baselineForm.sourceAppId = appId
+  if (repositoryUrl) baselineForm.repositoryUrl = repositoryUrl
+  if (branch) baselineForm.sourceBranch = branch
+  if (commit) baselineForm.sourceCommit = commit
+}
+
+function metadataString(asset: VerificationAsset, key: string) {
+  const value = asset.metadata?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
 
 function percent(value: number) {
