@@ -473,7 +473,7 @@ import {
   projectStaticDependencyGraph, projectStaticGraph, projectTestExecutionGraph,
   projectTraceabilityGraph, rebuildReadModels,
   type AssertionConsistencyResult, type BaselineComparisonResult, type FusionStateDelta,
-  type FusionView, type GraphAggregate, type GraphNode, type GraphView, type ReadModelKind,
+  type FusionView, type GraphAggregate, type GraphNode, type GraphView, type ReadModelKind, type SnapshotKind,
   type RuntimeProjectionResponse, type StaticProjectionResponse, type TraceabilityProjectionResponse,
 } from '@/api/graph'
 
@@ -502,6 +502,15 @@ const projections = [
 ] as const
 type ProjectionKey = (typeof projections)[number]['key']
 type ProjectionResponse = StaticProjectionResponse | RuntimeProjectionResponse | TraceabilityProjectionResponse
+const projectionSnapshotKinds: Record<ProjectionKey, SnapshotKind> = {
+  static: 'STATIC',
+  cfg: 'STATIC_CFG',
+  dependency: 'STATIC_DEPENDENCY',
+  coverage: 'RUNTIME',
+  branch: 'RUNTIME_BRANCH',
+  testExec: 'RUNTIME_TRACE',
+  traceability: 'TRACEABILITY',
+}
 const FOCUS_GRAPH_DEPTH = 3
 const FOCUS_GRAPH_MAX_NODES = 300
 const FOCUS_GRAPH_MAX_EDGES = 600
@@ -670,11 +679,12 @@ const projectionStats = computed(() => graph.value?.summary.projectionStats || {
 const projectionControls = computed(() => projections.map((projection) => {
   const ready = isProjectionReady(projection.key)
   const requirement = projectionRequirement(projection.key)
-  const locked = !ready && !!requirement && !requirement.ready
+  const locked = !!requirement && !requirement.ready
   return {
     ...projection,
     ready,
     locked,
+    lockedMessage: requirement ? `需先完成：${requirement.label}` : '',
     title: locked ? `${projection.hint}\n需先完成：${requirement.label}` : projection.hint,
   }
 }))
@@ -974,7 +984,7 @@ async function runProjection(key: ProjectionKey) {
   if (busyKey.value) return
   const control = projectionControls.value.find((item) => item.key === key)
   if (control?.locked) {
-    toast.warning(control.title)
+    toast.warning(control.lockedMessage)
     return
   }
   busyKey.value = key
@@ -1015,16 +1025,16 @@ function shortId(value?: string) {
 }
 
 function isProjectionReady(key: ProjectionKey) {
-  if (key === 'static') return hasProjectionData('STATIC')
-  if (key === 'cfg') return hasProjectionData('STATIC_CFG')
-  if (key === 'dependency') return hasProjectionData('STATIC_DEPENDENCY')
-  if (key === 'coverage') return hasProjectionData('RUNTIME')
-  if (key === 'branch') return hasProjectionData('RUNTIME_BRANCH')
-  if (key === 'testExec') return hasProjectionData('RUNTIME_TRACE')
-  return hasProjectionData('TRACEABILITY')
+  return hasCompletedProjection(projectionSnapshotKinds[key])
 }
 
-function hasProjectionData(kind: string) {
+function hasCompletedProjection(kind: SnapshotKind) {
+  const snapshot = graph.value?.summary.snapshots?.find((item) => item.kind === kind && item.status !== 'FAILED')
+  if (snapshot) return true
+  return hasProjectionData(kind)
+}
+
+function hasProjectionData(kind: SnapshotKind) {
   const stats = projectionStats.value[kind]
   return !!stats && ((stats.nodeCount ?? 0) > 0 || (stats.edgeCount ?? 0) > 0)
 }
@@ -1327,6 +1337,7 @@ function nodeTooltipRows(node: GraphNode) {
 .primary-button:disabled, .secondary-button:disabled, .chip-button:disabled { opacity:.45;cursor:not-allowed; }
 .toolbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
 .projection-toolbar { align-items:stretch; }
+.projection-button { justify-content:center;min-width:78px;white-space:nowrap; }
 .projection-button.ready { border-color:rgba(var(--oat-primary-rgb),.35);background:rgba(var(--oat-primary-rgb),.10);color:var(--oat-primary-dark); }
 .projection-button.locked { border-color:#e2e8f0;background:#f8fafc;color:#94a3b8;cursor:not-allowed;box-shadow:none;opacity:.62; }
 .projection-button.locked:hover { transform:none;box-shadow:none;border-color:#e2e8f0;background:#f8fafc;color:#94a3b8; }
