@@ -169,19 +169,23 @@
             <input v-model.trim="nodeTableKeyword" type="search" placeholder="搜索类型、名称、源码位置、用例或执行环境" @input="nodeTablePage = 1" />
             <span>共 {{ filteredGraphNodes.length }} 个节点</span>
           </div>
-          <table class="data-table graph-node-table">
-            <thead><tr><th>类型</th><th>名称</th><th>说明</th><th>来源 / 执行信息</th><th>关联关系</th><th>操作</th></tr></thead>
-            <tbody>
-              <tr v-for="n in pagedGraphNodes" :key="n.id">
-                <td><span class="kind-tag" :class="`k-${n.kind}`">{{ nodeKindText(n.kind) }}</span></td>
-                <td class="node-name">{{ graphNodeDisplayName(n) }}</td>
-                <td>{{ graphNodeDescription(n) }}</td>
-                <td class="muted">{{ graphNodeSourceInfo(n) }}</td>
-                <td>{{ graphNodeRelationSummary(n) }}</td>
-                <td><button type="button" class="inline-table-button" :disabled="loading" @click="focusGraphNode(n.id)">查看关联</button></td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="result-table-block">
+            <div class="table-scroll">
+              <table class="data-table graph-node-table">
+                <thead><tr><th>类型</th><th>名称</th><th>说明</th><th>来源 / 执行信息</th><th>关联关系</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="n in pagedGraphNodes" :key="n.id">
+                    <td><span class="kind-tag" :class="`k-${n.kind}`">{{ nodeKindText(n.kind) }}</span></td>
+                    <td class="node-name">{{ graphNodeDisplayName(n) }}</td>
+                    <td>{{ graphNodeDescription(n) }}</td>
+                    <td class="muted">{{ graphNodeSourceInfo(n) }}</td>
+                    <td>{{ graphNodeRelationSummary(n) }}</td>
+                    <td><button type="button" class="inline-table-button" :disabled="loading" @click="focusGraphNode(n.id)">查看关联</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           <AppPagination
             v-if="filteredGraphNodes.length"
             v-model:page="nodeTablePage"
@@ -211,16 +215,25 @@
         </div>
         <div v-if="fusion.clipped" class="notice warn">{{ fusion.clipReason }}</div>
         <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；如需区分“已执行确认”和“可达未执行”，还需投影覆盖率或测试执行数据。</span></div>
-        <table v-else class="data-table">
-          <thead><tr><th>状态</th><th>方法</th><th>符号</th></tr></thead>
-          <tbody>
-            <tr v-for="n in fusion.nodes.slice(0, 200)" :key="n.nodeId">
-              <td><span class="fusion-tag" :class="n.fusionState.toLowerCase()">{{ fusionNodeText(n.fusionState) }}</span></td>
-              <td class="mono">{{ n.displayName }}</td>
-              <td class="mono muted">{{ n.stableSymbolId || n.locator || '-' }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="result-table-block">
+          <div class="result-table-head">
+            <strong>方法融合状态</strong>
+            <span>显示 {{ pagedFusionNodes.length }} / {{ fusion.nodes.length }} 条</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table fusion-table">
+              <thead><tr><th>状态</th><th>方法</th><th>符号</th></tr></thead>
+              <tbody>
+                <tr v-for="n in pagedFusionNodes" :key="n.nodeId">
+                  <td><span class="fusion-tag" :class="n.fusionState.toLowerCase()">{{ fusionNodeText(n.fusionState) }}</span></td>
+                  <td class="mono">{{ n.displayName }}</td>
+                  <td class="mono muted">{{ n.stableSymbolId || n.locator || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <AppPagination v-model:page="fusionNodePage" v-model:page-size="fusionNodePageSize" :total="fusion.nodes.length" item-name="个方法" :page-sizes="[10, 20, 50, 100]" />
+        </div>
       </div>
     </div>
 
@@ -231,17 +244,26 @@
         <button type="button" class="secondary-button" :disabled="assertionLoading" @click="loadAssertion">刷新</button>
         <button type="button" class="primary-button" :disabled="assertionLoading" @click="runAssertion">重新校验</button>
       </div>
-      <table v-if="assertions.length" class="data-table">
-        <thead><tr><th>AC</th><th>结论</th><th>断言重合度</th><th>最佳用例</th></tr></thead>
-        <tbody>
-          <tr v-for="a in assertions" :key="a.criterionId">
-            <td class="mono">{{ a.acKey }}</td>
-            <td><span class="verdict-chip" :class="a.verdict === 'SUSPECTED_FALSE_PASS' ? 'failed' : 'passed'">{{ assertionVerdictText(a.verdict) }}</span></td>
-            <td>{{ pct(a.assertionOverlap) }}</td>
-            <td class="mono muted">{{ a.bestTestcaseKey || '-' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="assertions.length" class="result-table-block">
+        <div class="result-table-head">
+          <strong>断言一致性结果</strong>
+          <span>显示 {{ pagedAssertions.length }} / {{ assertions.length }} 条</span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table assertion-table">
+            <thead><tr><th>AC</th><th>结论</th><th>断言重合度</th><th>最佳用例</th></tr></thead>
+            <tbody>
+              <tr v-for="a in pagedAssertions" :key="a.criterionId">
+                <td class="mono">{{ a.acKey }}</td>
+                <td><span class="verdict-chip" :class="a.verdict === 'SUSPECTED_FALSE_PASS' ? 'failed' : 'passed'">{{ assertionVerdictText(a.verdict) }}</span></td>
+                <td>{{ pct(a.assertionOverlap) }}</td>
+                <td class="mono muted">{{ a.bestTestcaseKey || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <AppPagination v-model:page="assertionPage" v-model:page-size="assertionPageSize" :total="assertions.length" item-name="条 AC 结果" :page-sizes="[10, 20, 50, 100]" />
+      </div>
       <div v-else-if="!assertionLoading" class="empty-state"><strong>暂无断言一致性结果</strong><span>需要先运行 AI 分析，生成验收标准、测试用例及其追溯关系；然后点击“重新校验”。</span></div>
     </div>
 
@@ -261,14 +283,23 @@
       </div>
       <div v-if="readModelRows.length" class="read-model-result">
         <p class="read-model-caption">{{ readModelDescription }}</p>
-        <table class="data-table">
-          <thead><tr><th v-for="column in readModelColumns" :key="column.key">{{ column.label }}</th></tr></thead>
-          <tbody>
-            <tr v-for="row in readModelDisplayRows" :key="row.id">
-              <td v-for="cell in row.cells" :key="cell.key" :class="{ mono: cell.mono, muted: cell.muted }">{{ cell.value }}</td>
-            </tr>
-          </tbody>
-        </table>
+        <div class="result-table-block">
+          <div class="result-table-head">
+            <strong>{{ readModelKindText }}</strong>
+            <span>显示 {{ pagedReadModelDisplayRows.length }} / {{ readModelDisplayRows.length }} 条</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table read-model-table">
+              <thead><tr><th v-for="column in readModelColumns" :key="column.key">{{ column.label }}</th></tr></thead>
+              <tbody>
+                <tr v-for="row in pagedReadModelDisplayRows" :key="row.id">
+                  <td v-for="cell in row.cells" :key="cell.key" :class="{ mono: cell.mono, muted: cell.muted }">{{ cell.value }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <AppPagination v-model:page="readModelPage" v-model:page-size="readModelPageSize" :total="readModelDisplayRows.length" item-name="条读模型" :page-sizes="[10, 20, 50, 100]" />
+        </div>
       </div>
       <div v-else-if="!readModelBusy" class="empty-state"><strong>暂无读模型数据</strong><span>请先完成相关事实图投影；如果需要 AC 覆盖或门禁类汇总，还需先运行 AI 分析，然后点击“重建读模型”。</span></div>
     </div>
@@ -439,6 +470,12 @@ const hoverNode = ref('')
 const nodeTableKeyword = ref('')
 const nodeTablePage = ref(1)
 const nodeTablePageSize = ref(10)
+const fusionNodePage = ref(1)
+const fusionNodePageSize = ref(20)
+const assertionPage = ref(1)
+const assertionPageSize = ref(20)
+const readModelPage = ref(1)
+const readModelPageSize = ref(20)
 const graphScrollRef = ref<HTMLElement | null>(null)
 const graphVisualsRef = ref<HTMLElement | null>(null)
 const overviewDragging = ref(false)
@@ -503,6 +540,17 @@ const readModelColumns = computed<ReadModelColumn[]>(() => ({
   RM_QUALITY_GATE_SUMMARY: [{ key: 'criteria', label: '验收标准总数' }, { key: 'testcase', label: '有用例依据' }, { key: 'implementation', label: '有实现依据' }, { key: 'coverage', label: '有覆盖率依据' }, { key: 'execution', label: '有执行依据' }, { key: 'closed', label: '验证闭环' }],
 }[readModelKind.value] || []))
 const readModelDisplayRows = computed(() => readModelRows.value.map((row) => ({ id: row.id, cells: readModelCells(row.payload) })))
+const pagedFusionNodes = computed(() => pageSlice(fusion.value?.nodes || [], fusionNodePage.value, fusionNodePageSize.value))
+const pagedAssertions = computed(() => pageSlice(assertions.value, assertionPage.value, assertionPageSize.value))
+const pagedReadModelDisplayRows = computed(() => pageSlice(readModelDisplayRows.value, readModelPage.value, readModelPageSize.value))
+const readModelKindText = computed(() => ({
+  RM_AC_COVERAGE_SUMMARY: 'AC 覆盖汇总',
+  RM_SYMBOL_TEST_PROTECTION: '符号测试保护',
+  RM_HOT_CALL_CHAIN: '热点调用链',
+  RM_UNCOVERED_UNITS: '未覆盖单元',
+  RM_IMPACT_SUMMARY: '影响面汇总',
+  RM_QUALITY_GATE_SUMMARY: '门禁指标汇总',
+}[readModelKind.value] || '读模型结果'))
 
 const nodeKindCounts = computed(() => {
   const counts: Record<string, number> = {}
@@ -600,6 +648,9 @@ function scrollToComparison(element: HTMLElement | null) {
 }
 watch([acDeltaFilter, acDeltaPageSize], () => { acDeltaPage.value = 1 })
 watch([fusionDeltaFilter, fusionDeltaPageSize], () => { fusionDeltaPage.value = 1 })
+watch(fusionNodePageSize, () => { fusionNodePage.value = 1 })
+watch(assertionPageSize, () => { assertionPage.value = 1 })
+watch([readModelKind, readModelPageSize], () => { readModelPage.value = 1 })
 watch(comparison, () => {
   comparisonTab.value = 'ac'
   selectedAcDeltaId.value = ''
@@ -762,7 +813,10 @@ async function runProjection(key: ProjectionKey) {
 async function loadFusion() {
   if (fusionLoading.value) return
   fusionLoading.value = true
-  try { fusion.value = await fetchFusionView(projectId.value, baselineId.value, 1000) }
+  try {
+    fusion.value = await fetchFusionView(projectId.value, baselineId.value, 1000)
+    fusionNodePage.value = 1
+  }
   catch (e) { toast.error(msg(e)) }
   finally { fusionLoading.value = false }
 }
@@ -773,6 +827,7 @@ async function loadAssertion() {
   try {
     const aggregates = await fetchAssertionConsistency(projectId.value, baselineId.value)
     assertions.value = aggregates.map(aggregateToAssertion)
+    assertionPage.value = 1
   } catch (e) { toast.error(msg(e)) }
   finally { assertionLoading.value = false }
 }
@@ -780,7 +835,10 @@ async function loadAssertion() {
 async function runAssertion() {
   if (assertionLoading.value) return
   assertionLoading.value = true
-  try { assertions.value = await evaluateAssertionConsistency(projectId.value, baselineId.value) }
+  try {
+    assertions.value = await evaluateAssertionConsistency(projectId.value, baselineId.value)
+    assertionPage.value = 1
+  }
   catch (e) { toast.error(msg(e)) }
   finally { assertionLoading.value = false }
 }
@@ -799,7 +857,10 @@ async function doRebuildReadModels() {
 async function loadReadModel() {
   if (readModelBusy.value) return
   readModelBusy.value = true
-  try { readModelRows.value = await fetchReadModel(projectId.value, baselineId.value, readModelKind.value) }
+  try {
+    readModelRows.value = await fetchReadModel(projectId.value, baselineId.value, readModelKind.value)
+    readModelPage.value = 1
+  }
   catch (e) { toast.error(msg(e)) }
   finally { readModelBusy.value = false }
 }
@@ -1083,9 +1144,16 @@ function nodeTooltipRows(node: GraphNode) {
 .kind-tag.k-BRANCH, .kind-chip.k-BRANCH { background:rgba(217,70,239,.12);color:#a21caf; }
 .kind-tag.k-TYPE, .kind-chip.k-TYPE { background:rgba(13,148,136,.12);color:#0f766e; }
 .kind-tag.k-TEST_EXECUTION, .kind-chip.k-TEST_EXECUTION { background:rgba(245,158,11,.14);color:#92400e; }
-.data-table { width:100%;border-collapse:collapse;font-size:13px; }
-.data-table th { padding:8px 10px;border-bottom:2px solid var(--oat-border);text-align:left;font-size:12px;color:var(--oat-text-muted); }
-.data-table td { padding:7px 10px;border-bottom:1px solid var(--oat-border);vertical-align:top; }
+.result-table-block { display:grid;gap:10px;border:1px solid var(--oat-border);border-radius:8px;background:#fff;padding:10px; }
+.result-table-head { display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap; }
+.result-table-head strong { font-size:13px;color:var(--oat-text); }
+.result-table-head span { font-size:12px;font-weight:700;color:var(--oat-text-muted); }
+.table-scroll { max-height:min(520px, calc(100vh - 280px));min-height:160px;overflow:auto;border:1px solid var(--oat-border);border-radius:8px;background:#fff; }
+.data-table { width:100%;border-collapse:separate;border-spacing:0;font-size:13px; }
+.data-table th { position:sticky;top:0;z-index:1;padding:8px 10px;border-bottom:1px solid var(--oat-border);text-align:left;font-size:12px;color:var(--oat-text-muted);background:#f8fafc;white-space:nowrap; }
+.data-table td { padding:8px 10px;border-bottom:1px solid var(--oat-border);vertical-align:top;overflow-wrap:anywhere; }
+.data-table tbody tr:last-child td { border-bottom:0; }
+.data-table tbody tr:hover td { background:rgba(15,118,110,.035); }
 .list-toolbar { display:flex;align-items:center;gap:8px;flex-wrap:wrap; }
 .list-toolbar input {
   flex:1 1 280px;
@@ -1109,6 +1177,9 @@ function nodeTooltipRows(node: GraphNode) {
 .inline-table-button { min-height:28px;padding:3px 9px;white-space:nowrap; }
 .inline-table-button:disabled { opacity:.45;cursor:not-allowed; }
 .graph-node-table { min-width:920px; }
+.fusion-table { min-width:760px; }
+.assertion-table { min-width:720px; }
+.read-model-table { min-width:920px; }
 .graph-node-table th:nth-child(1) { width:84px; }
 .graph-node-table th:nth-child(2) { min-width:180px; }
 .graph-node-table th:nth-child(3) { min-width:110px; }
