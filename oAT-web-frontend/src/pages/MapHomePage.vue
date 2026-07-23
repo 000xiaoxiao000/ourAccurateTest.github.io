@@ -373,7 +373,7 @@
             <g
               v-for="node in dependencyGraph.nodes"
               :key="node.id"
-              :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
+              :class="['mini-graph-node', node.tone, { executed: node.executed, active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
               @pointerenter="showMiniGraphTooltip($event, node)"
               @pointermove="showMiniGraphTooltip($event, node)"
@@ -404,7 +404,7 @@
             <g
               v-for="node in controlFlowGraph.nodes"
               :key="node.id"
-              :class="['mini-graph-node', node.tone, { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
+              :class="['mini-graph-node', node.tone, { executed: node.executed, active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
               @pointerenter="showMiniGraphTooltip($event, node)"
               @pointermove="showMiniGraphTooltip($event, node)"
@@ -462,7 +462,7 @@
             <g
               v-for="node in callGraph.nodes"
               :key="node.id"
-              :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
+              :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { executed: codeNodeHasDynamicCoverage(node.raw), active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
               @click.stop="selectCallGraphNode(node.id)"
               @pointerenter="showGraphTooltip($event, traceNodeTitle(node.raw))"
               @pointermove="showGraphTooltip($event, traceNodeTitle(node.raw))"
@@ -563,7 +563,7 @@ interface SvgEdge {
   labelWidth: number
   raw: TraceabilityEdge
 }
-interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string }
+interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean }
 interface MiniGraphEdge { id: string; source: string; target: string; path: string }
 
 const route = useRoute()
@@ -1759,8 +1759,14 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
   const graphNodes: MiniGraphNode[] = []
   const sourceWidth = 230
   const targetWidth = 300
-  sources.forEach((label, index) => graphNodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source', nodeId: dependencyNodeIds(label) }))
-  targets.forEach((label, index) => graphNodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target', nodeId: dependencyNodeIds(label) }))
+  sources.forEach((label, index) => {
+    const nodeId = dependencyNodeIds(label)
+    graphNodes.push({ id: `source:${label}`, x: 40, y: 40 + index * 76, width: sourceWidth, height: 42, label: shorten(label, 28), tone: 'source', nodeId, executed: codeNodeHasDynamicCoverageById(allNodes, nodeId) })
+  })
+  targets.forEach((label, index) => {
+    const nodeId = dependencyNodeIds(label)
+    graphNodes.push({ id: `target:${label}`, x: 520, y: 40 + index * 58, width: targetWidth, height: 42, label: shorten(label, 38), tone: 'target', nodeId, executed: codeNodeHasDynamicCoverageById(allNodes, nodeId) })
+  })
   const nodeMap = new Map(graphNodes.map((node) => [node.id, node]))
   const edges: MiniGraphEdge[] = items.map((item, index) => {
     const source = nodeMap.get(`source:${item.source}`)!
@@ -1794,6 +1800,7 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     fullSubtitle: step.expression || '代码块',
     tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
     nodeId: step.methodId,
+    executed: codeNodeHasDynamicCoverageById(allNodes, step.methodId),
   }))
   const edges: MiniGraphEdge[] = []
   for (let index = 1; index < graphNodes.length; index++) {
@@ -2233,6 +2240,27 @@ function collectCodeDescendantIds(nodes: TraceabilityNode[], rootId: string, ids
       }
     })
   }
+}
+
+function codeNodeHasDynamicCoverageById(nodes: TraceabilityNode[], nodeId?: string): boolean {
+  if (!nodeId) return false
+  const node = nodes.find((item) => item.id === nodeId)
+  return node ? codeNodeHasDynamicCoverage(node, nodes) : false
+}
+
+function codeNodeHasDynamicCoverage(node: TraceabilityNode, nodes: TraceabilityNode[] = map.nodes.value): boolean {
+  if (!node.kind.startsWith('CODE_')) return false
+  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return true
+  const coverage = node.coverage
+  if (coverage && ((coverage.coveredLines ?? 0) > 0 || (coverage.coveredBranches ?? 0) > 0)) return true
+  const metadata = node.metadata || {}
+  if (numberArrayMetadata(metadata.coverageCoveredLines).length || numberArrayMetadata(metadata.coveragePartialBranchLines).length) return true
+  const dynamicEdges = map.edges.value.filter((edge) =>
+    (edge.source === node.id || edge.target === node.id) &&
+    (edge.evidenceType === 'COVERAGE' || edge.evidenceType === 'EXECUTION_TRACE' || edge.callEvidence === 'DYNAMIC_CONFIRMED'))
+  if (dynamicEdges.length) return true
+  const descendants = nodes.filter((item) => item.parentId === node.id)
+  return descendants.some((child) => codeNodeHasDynamicCoverage(child, nodes))
 }
 
 function nodeTone(node?: TraceabilityNode | null) {
@@ -2750,13 +2778,20 @@ onBeforeUnmount(() => {
 .mini-graph-edge.active path { stroke:#0f766e; stroke-width:3; opacity:1; }
 .mini-graph-edge.dimmed { opacity:.14; }
 .mini-graph-node { cursor:pointer; }
-.mini-graph-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.5; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
-.mini-graph-node.source rect { fill:#dbeafe; stroke:#2563eb; }
-.mini-graph-node.target rect { fill:#fef3c7; stroke:#d97706; }
-.mini-graph-node.branch rect { fill:#fed7aa; stroke:#f97316; }
-.mini-graph-node.exit rect { fill:#fecaca; stroke:#dc2626; }
-.mini-graph-node.active rect { stroke:#7c3aed; stroke-width:2.8; filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
-.mini-graph-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
+.mini-graph-node rect { fill:#e0e7ff; stroke:transparent; stroke-width:0; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
+.mini-graph-node.source rect { fill:#dbeafe; }
+.mini-graph-node.target rect { fill:#fef3c7; }
+.mini-graph-node.branch rect { fill:#fed7aa; }
+.mini-graph-node.exit rect { fill:#fecaca; }
+.mini-graph-node.executed rect { stroke:#6366f1; stroke-width:1.5; }
+.mini-graph-node.executed.source rect { stroke:#2563eb; }
+.mini-graph-node.executed.target rect { stroke:#d97706; }
+.mini-graph-node.executed.branch rect { stroke:#f97316; }
+.mini-graph-node.executed.exit rect { stroke:#dc2626; }
+.mini-graph-node.active rect { filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
+.mini-graph-node.linked:not(.active) rect { filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
+.mini-graph-node.executed.active rect { stroke:#7c3aed; stroke-width:2.8; }
+.mini-graph-node.executed.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; }
 .mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
@@ -2827,13 +2862,20 @@ onBeforeUnmount(() => {
 .call-svg-edge.active text { fill:#0f766e; }
 .call-svg-edge.dimmed { opacity:.16; }
 .call-svg-node { cursor:pointer; }
-.call-svg-node rect { fill:#e0e7ff; stroke:#6366f1; stroke-width:1.8; filter:drop-shadow(0 8px 14px rgba(15,23,42,.08)); }
-.call-svg-node.call-controller rect { fill:#bfdbfe; stroke:#2563eb; }
-.call-svg-node.call-private rect { fill:#bbf7d0; stroke:#16a34a; }
-.call-svg-node.call-static rect { fill:#fed7aa; stroke:#f97316; }
-.call-svg-node.call-recursive rect { fill:#fecaca; stroke:#dc2626; }
-.call-svg-node.active rect { stroke:#7c3aed; stroke-width:2.8; }
-.call-svg-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; }
+.call-svg-node rect { fill:#e0e7ff; stroke:transparent; stroke-width:0; filter:drop-shadow(0 8px 14px rgba(15,23,42,.08)); }
+.call-svg-node.call-controller rect { fill:#bfdbfe; }
+.call-svg-node.call-private rect { fill:#bbf7d0; }
+.call-svg-node.call-static rect { fill:#fed7aa; }
+.call-svg-node.call-recursive rect { fill:#fecaca; }
+.call-svg-node.executed rect { stroke:#6366f1; stroke-width:1.8; }
+.call-svg-node.executed.call-controller rect { stroke:#2563eb; }
+.call-svg-node.executed.call-private rect { stroke:#16a34a; }
+.call-svg-node.executed.call-static rect { stroke:#f97316; }
+.call-svg-node.executed.call-recursive rect { stroke:#dc2626; }
+.call-svg-node.active rect { filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
+.call-svg-node.linked:not(.active) rect { filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
+.call-svg-node.executed.active rect { stroke:#7c3aed; stroke-width:2.8; }
+.call-svg-node.executed.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; }
 .call-svg-node.dimmed { opacity:.28; }
 .call-svg-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; dominant-baseline:middle; }
 .call-svg-node .call-node-subtitle { fill:#64748b; font-size:10px; font-weight:800; }
