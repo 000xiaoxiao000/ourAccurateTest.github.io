@@ -42,9 +42,15 @@ public class PolyglotStaticGraphProjectionService {
     public StaticGraphProjectionService.ProjectionResult project(String projectId, String baselineId, String appId,
                                                                  String repositoryUrl, String sourceCommit, String language,
                                                                  String sourceContent) {
+        return project(projectId, baselineId, appId, repositoryUrl, sourceCommit, language, null, sourceContent);
+    }
+
+    public StaticGraphProjectionService.ProjectionResult project(String projectId, String baselineId, String appId,
+                                                                 String repositoryUrl, String sourceCommit, String language,
+                                                                 String fallbackPath, String sourceContent) {
         String repository = firstText(repositoryUrl, "app:" + appId);
         String commit = firstText(sourceCommit, "unversioned");
-        List<SourceFile> files = splitFiles(sourceContent);
+        List<SourceFile> files = splitFiles(sourceContent, fallbackPath, language);
         String inputHash = GraphModels.fingerprint(files.stream().map(SourceFile::path).sorted().reduce("", (a, b) -> a + "|" + b));
         GraphRepository.GraphSnapshot snapshot = new GraphRepository.GraphSnapshot(
                 UUID.randomUUID().toString(), projectId, baselineId, repositoryUrl, sourceCommit, SnapshotKind.STATIC,
@@ -57,8 +63,13 @@ public class PolyglotStaticGraphProjectionService {
         List<PendingMethod> pendingMethods = new ArrayList<>();
         int nodeCount = 0;
         for (SourceFile file : files) {
+            if (!analyzer.supports(file.path())) continue;
+            String fileNodeId = "source-file:" + GraphModels.fingerprint(repository + "|" + commit + "|" + file.path());
+            graphRepository.saveNode(new GraphRepository.GraphNode(fileNodeId, snapshot.id(), baselineId, projectId, GraphNodeKind.SOURCE_FILE,
+                    repository + "@" + commit + ":" + file.path(), file.path(), file.path(), file.path(),
+                    GraphModels.fingerprint(value(file.content())), Map.of("appId", appId, "language", value(language))));
+            nodeCount++;
             List<SymbolSnapshot> symbols = safeAnalyze(file.path(), file.content());
-            if (symbols.isEmpty()) continue;
             List<SymbolSnapshot> types = symbols.stream().filter(symbol -> symbol.kind() == SymbolKind.TYPE)
                     .sorted((left, right) -> Integer.compare(startLine(left), startLine(right))).toList();
             Map<String, String> typeNodeIdByName = new LinkedHashMap<>();
@@ -93,6 +104,9 @@ public class PolyglotStaticGraphProjectionService {
                 if (typeNodeId != null) {
                     graphRepository.saveEdge(edge(snapshot, projectId, baselineId, typeNodeId, methodNodeId, GraphEdgeType.CONTAINS,
                             EvidenceKind.STATIC_POSSIBLE, "E1", .6d, Map.of()));
+                } else {
+                    graphRepository.saveEdge(edge(snapshot, projectId, baselineId, fileNodeId, methodNodeId, GraphEdgeType.CONTAINS,
+                            EvidenceKind.STATIC_POSSIBLE, "E1", .6d, Map.of()));
                 }
                 pendingMethods.add(new PendingMethod(methodNodeId, method.invokedNames()));
             }
@@ -116,7 +130,7 @@ public class PolyglotStaticGraphProjectionService {
         return analyzer.analyze(path, content);
     }
 
-    private List<SourceFile> splitFiles(String content) {
+    private List<SourceFile> splitFiles(String content, String fallbackPath, String language) {
         List<SourceFile> files = new ArrayList<>();
         if (!StringUtils.hasText(content)) return files;
         String currentPath = null;
@@ -138,8 +152,21 @@ public class PolyglotStaticGraphProjectionService {
             if (currentPath != null) current.append(line).append('\n');
         }
         if (currentPath != null) files.add(new SourceFile(currentPath, current.toString()));
-        if (!sawMarker && !files.isEmpty()) return files;
+        if (!sawMarker && files.isEmpty()) {
+            files.add(new SourceFile(fallbackSourcePath(fallbackPath, language), content));
+        }
         return files;
+    }
+
+    private String fallbackSourcePath(String path, String language) {
+        if (StringUtils.hasText(path) && analyzer.supports(path)) return path.replace('\\', '/');
+        String extension = switch (value(language).trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "PYTHON" -> ".py";
+            case "GO" -> ".go";
+            case "CPP" -> ".cpp";
+            default -> ".ts";
+        };
+        return "source" + extension;
     }
 
     private String enclosingType(List<SymbolSnapshot> types, int methodStart, String fallback) {

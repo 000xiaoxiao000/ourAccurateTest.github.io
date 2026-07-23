@@ -156,7 +156,7 @@ public class MapApiControl {
     public StaticGraphProjectionResponse projectStaticDependencyGraph(@PathVariable String projectId,
                                                                       @RequestParam String baselineId) {
         var result = graphService.projectStaticDependency(projectId, baselineId);
-        return new StaticGraphProjectionResponse(result.snapshotId(), result.edgeCount(), result.edgeCount());
+        return new StaticGraphProjectionResponse(result.snapshotId(), result.typeCount(), result.edgeCount());
     }
 
     @org.springframework.web.bind.annotation.PostMapping("/graph/branch-coverage-project")

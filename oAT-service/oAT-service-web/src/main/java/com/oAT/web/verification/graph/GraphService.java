@@ -1,9 +1,15 @@
 package com.oAT.web.verification.graph;
 
 import com.oAT.web.verification.VerificationRepository;
+import com.oAT.web.verification.SourceAssetFilter;
 import com.oAT.web.verification.model.GraphModels.GraphNodeKind;
 import com.oAT.web.verification.model.GraphModels.SnapshotKind;
+import com.oAT.web.verification.model.VerificationModels.AssetSnapshot;
 import com.oAT.web.verification.model.VerificationModels.Baseline;
+import com.oAT.web.verification.model.VerificationModels.AssetType;
+import com.oAT.web.verification.storage.AssetContentStore;
+import com.oAT.web.service.AppService;
+import com.oAT.web.service.entity.AppVo;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -38,6 +44,8 @@ public class GraphService {
     private final ReadModelService readModelService;
     private final BaselineComparisonService baselineComparisonService;
     private final VerificationRepository verificationRepository;
+    private final AppService appService;
+    private final AssetContentStore assetContentStore;
 
     public GraphService(GraphRepository graphRepository, StaticGraphProjectionService staticProjectionService,
                         PolyglotStaticGraphProjectionService polyglotStaticProjectionService,
@@ -57,7 +65,9 @@ public class GraphService {
                         DiffInvalidationService diffInvalidationService,
                         ReadModelService readModelService,
                         BaselineComparisonService baselineComparisonService,
-                        VerificationRepository verificationRepository) {
+                        VerificationRepository verificationRepository,
+                        AppService appService,
+                        AssetContentStore assetContentStore) {
         this.graphRepository = graphRepository;
         this.staticProjectionService = staticProjectionService;
         this.polyglotStaticProjectionService = polyglotStaticProjectionService;
@@ -78,6 +88,8 @@ public class GraphService {
         this.readModelService = readModelService;
         this.baselineComparisonService = baselineComparisonService;
         this.verificationRepository = verificationRepository;
+        this.appService = appService;
+        this.assetContentStore = assetContentStore;
     }
 
     public void invalidate(String projectId, String baselineId) {
@@ -91,6 +103,23 @@ public class GraphService {
                 .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
         if (!StringUtils.hasText(baseline.sourceAppId())) {
             throw new IllegalArgumentException("当前基线未指定源码工程，无法建立静态图");
+        }
+        AppVo sourceApp = appService.getApp(baseline.sourceAppId());
+        if (!isJavaApp(sourceApp)) {
+            if (!StringUtils.hasText(baseline.sourceAssetId())) {
+                throw new IllegalArgumentException("当前基线没有源码资料，无法建立静态图");
+            }
+            AssetSnapshot source = verificationRepository.findAsset(projectId, baseline.sourceAssetId())
+                    .orElseThrow(() -> new IllegalArgumentException("找不到当前基线的源码资料"));
+            if (source.assetType() != AssetType.SOURCE) {
+                throw new IllegalArgumentException("当前基线绑定的不是源码资料，无法建立静态图");
+            }
+            String content = SourceAssetFilter.filterContent(loadAssetContent(source), SourceAssetFilter.fromApp(sourceApp));
+            if (!StringUtils.hasText(content)) {
+                throw new IllegalArgumentException("当前基线的源码资料为空，无法建立静态图");
+            }
+            return polyglotStaticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(),
+                    baseline.repositoryUrl(), baseline.sourceCommit(), sourceApp.getLanguage(), source.fileName(), content);
         }
         return staticProjectionService.project(projectId, baseline.id(), baseline.sourceAppId(), baseline.repositoryUrl(), baseline.sourceCommit());
     }
@@ -113,14 +142,19 @@ public class GraphService {
     }
 
     public ControlFlowGraphProjectionService.ProjectionResult projectControlFlow(String projectId, String baselineId) {
+        requireJavaSourceApp(projectId, baselineId, "控制流图");
         return cfgProjectionService.project(projectId, baselineId);
     }
 
     public StaticDependencyGraphProjectionService.ProjectionResult projectStaticDependency(String projectId, String baselineId) {
+        verificationRepository.findBaseline(projectId, baselineId)
+                .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
         return dependencyProjectionService.project(projectId, baselineId);
     }
 
     public BranchCoverageProjectionService.ProjectionResult projectBranchCoverage(String projectId, String baselineId) {
+        verificationRepository.findBaseline(projectId, baselineId)
+                .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
         BranchCoverageProjectionService.ProjectionResult result = branchCoverageProjectionService.project(projectId, baselineId);
         fusionService.rebuild(projectId, baselineId);
         return result;
@@ -255,6 +289,29 @@ public class GraphService {
         return new GraphSummary(staticReady, runtimeReady, runtimeTraceReady, traceabilityReady,
                 staticReady && runtimeReady ? "FUSED" : staticReady ? "STATIC_ONLY" : runtimeReady ? "DYNAMIC_ONLY" : "EMPTY",
                 snapshots);
+    }
+
+    private void requireJavaSourceApp(String projectId, String baselineId, String projectionName) {
+        Baseline baseline = verificationRepository.findBaseline(projectId, baselineId)
+                .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
+        if (!StringUtils.hasText(baseline.sourceAppId())) {
+            throw new IllegalArgumentException("当前基线未指定源码工程，无法建立" + projectionName);
+        }
+        if (!isJavaApp(appService.getApp(baseline.sourceAppId()))) {
+            throw new IllegalArgumentException(projectionName + "当前仅支持 Java 源码；该工程已使用多语言静态图投影");
+        }
+    }
+
+    private boolean isJavaApp(AppVo app) {
+        return app == null || !StringUtils.hasText(app.getLanguage()) || "JAVA".equalsIgnoreCase(app.getLanguage().trim());
+    }
+
+    private String loadAssetContent(AssetSnapshot asset) {
+        if (StringUtils.hasText(asset.storageKey())) {
+            String stored = assetContentStore.load(asset.storageKey());
+            if (StringUtils.hasText(stored)) return stored;
+        }
+        return asset.content() == null ? "" : asset.content();
     }
 
     private int bounded(Integer value, int fallback, int maximum) {

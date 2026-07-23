@@ -42,12 +42,8 @@
 
     <!-- GRAPH QUERY TAB -->
     <div v-show="activeTab === 'graph'" class="tab-panel">
-      <p class="feature-intro"><strong>图谱查询：</strong>先选择需求、用例或代码对象，再查看它上下游的关系。需要排查全量数据时，可切换到“全量排查”模式。</p>
+      <p class="feature-intro"><strong>图谱查询：</strong>先选择需求、用例或代码对象，再查看它的上下游关系。</p>
       <div class="query-bar">
-        <span class="graph-mode-toggle">
-          <button type="button" :class="{ active: graphQueryMode === 'focus' }" @click="switchGraphQueryMode('focus')">聚焦关系</button>
-          <button type="button" :class="{ active: graphQueryMode === 'explore' }" @click="switchGraphQueryMode('explore')">全量排查</button>
-        </span>
         <label class="field-inline focus-field">
           <span>当前对象</span>
           <span class="focus-input-wrap">
@@ -55,29 +51,17 @@
             <button v-if="focusId" type="button" aria-label="清空聚焦节点 ID" title="清空" @click="clearGraphFocus">×</button>
           </span>
           <datalist id="graph-focus-node-options">
-            <option v-for="node in focusCandidates" :key="node.id" :value="node.id">
+            <option v-for="node in focusCandidateOptions" :key="node.id" :value="node.id">
               {{ nodeKindText(node.kind) }} · {{ node.displayName }}
             </option>
           </datalist>
         </label>
-        <label class="field-inline">
-          <span>深度</span>
-          <input v-model.number="depth" type="number" min="1" max="6" />
-        </label>
-        <label class="field-inline">
-          <span>节点上限</span>
-          <input v-model.number="maxNodes" type="number" min="1" :max="GRAPH_QUERY_MAX_NODES" />
-        </label>
-        <label class="field-inline">
-          <span>边上限</span>
-          <input v-model.number="maxEdges" type="number" min="1" :max="GRAPH_QUERY_MAX_EDGES" />
-        </label>
-        <button type="button" class="primary-button" :disabled="loading" @click="loadGraph">{{ focusId || graphQueryMode === 'explore' ? '查询' : '刷新列表' }}</button>
+        <button type="button" class="primary-button" :disabled="loading" @click="loadGraph">{{ focusId ? '查询' : '刷新列表' }}</button>
       </div>
 
       <div v-if="graph" class="graph-result">
-        <div v-if="graph.clipReasons.length && (focusId || graphQueryMode === 'explore')" class="clip-banner">
-          <strong>裁剪提示</strong>
+        <div v-if="graph.clipReasons.length && focusId" class="clip-banner">
+          <strong>范围提示</strong>
           <ul><li v-for="(r, i) in graph.clipReasons" :key="i">{{ r }}</li></ul>
           <small v-if="graph.expandHint">{{ graph.expandHint }}</small>
         </div>
@@ -99,26 +83,26 @@
             <input v-model.trim="graphPickerKeyword" class="picker-search" type="search" placeholder="搜索名称、类型或位置" />
             <div class="picker-list">
               <button v-for="node in graphPickerNodes" :key="node.id" type="button" class="picker-node"
-                      :class="{ active: node.id === focusId }" @click="focusGraphNode(node.id)">
+                      :class="{ active: node.id === focusId }" :title="graphNodeTooltipText(node)" @click="focusGraphNode(node.id)">
                 <span class="kind-tag" :class="`k-${node.kind}`">{{ nodeKindText(node.kind) }}</span>
-                <strong>{{ graphNodeDisplayName(node) }}</strong>
-                <small>{{ node.locator || node.stableSymbolId || node.id }}</small>
+                <strong :title="graphNodeDisplayName(node)">{{ graphNodeDisplayName(node) }}</strong>
+                <small :title="node.locator || node.stableSymbolId || node.id">{{ node.locator || node.stableSymbolId || node.id }}</small>
               </button>
               <p v-if="!graphPickerNodes.length" class="table-note">当前列表没有匹配对象。</p>
             </div>
           </aside>
 
           <main class="graph-main">
-            <div v-if="!focusId && graphQueryMode === 'focus'" class="empty-state graph-focus-empty">
+            <div v-if="!focusId" class="empty-state graph-focus-empty">
               <strong>请选择一个对象查看关系</strong>
-              <span>从左侧选择需求、用例、方法、覆盖率或测试执行记录后，会按当前深度展开上下游关系。</span>
+              <span>从左侧选择需求、用例、方法、覆盖率或测试执行记录后，会自动展开主要上下游关系。</span>
             </div>
             <template v-else>
               <div class="graph-stats">
-                <span>{{ graphQueryMode === 'explore' ? '全量排查' : '聚焦关系' }}</span>
+                <span>聚焦关系</span>
                 <span>业务节点 {{ visibleGraphNodes.length }}<template v-if="externalFilteredNodeCount"> / 已过滤框架 {{ externalFilteredNodeCount }}</template></span>
                 <span>业务边 {{ visibleGraphEdges.length }}<template v-if="graph.edgesInScope"> / 范围内 {{ graph.edgesInScope }}</template></span>
-                <span>深度 {{ graph.depth }}</span>
+                <span>自动范围</span>
               </div>
               <div class="node-kind-legend">
                 <span v-for="(count, kind) in nodeKindCounts" :key="kind" class="kind-chip" :class="`k-${kind}`">
@@ -180,7 +164,9 @@
                     <g v-for="n in svgLayout.nodes" :key="n.id" :transform="`translate(${n.x},${n.y})`" class="svg-node-g"
                        @mouseenter="showNodeTooltip(n.id, $event)" @mousemove="moveNodeTooltip" @mouseleave="hideNodeTooltip">
                       <circle :r="hoverNode === n.id ? 10 : 6" class="svg-node" :class="`k-${n.kind}`" />
-                      <text v-if="hoverNode === n.id || svgLayout.nodes.length <= 40" :y="-12" class="svg-label">{{ n.label }}</text>
+                      <text v-if="hoverNode === n.id || svgLayout.nodes.length <= 40" x="12" y="4" class="svg-label">
+                        <title>{{ n.label }}</title>{{ n.label }}
+                      </text>
                     </g>
                   </svg>
                 </div>
@@ -199,7 +185,7 @@
                     </template>
                   </dl>
                 </div>
-                <p v-if="!svgLayout.nodes.length" class="table-note">当前范围没有可绘制的边关系，请调整对象或深度。</p>
+                <p v-if="!svgLayout.nodes.length" class="table-note">当前范围没有可绘制的边关系，请更换对象或切换表格查看。</p>
               </div>
 
               <template v-else>
@@ -514,8 +500,10 @@ const projections = [
 ] as const
 type ProjectionKey = (typeof projections)[number]['key']
 type ProjectionResponse = StaticProjectionResponse | RuntimeProjectionResponse | TraceabilityProjectionResponse
-const GRAPH_QUERY_MAX_NODES = 1000
-const GRAPH_QUERY_MAX_EDGES = 2000
+const FOCUS_GRAPH_DEPTH = 3
+const FOCUS_GRAPH_MAX_NODES = 300
+const FOCUS_GRAPH_MAX_EDGES = 600
+const FOCUS_CANDIDATE_LIMIT = 10_000
 const FUSION_VIEW_MAX_NODES = 5000
 
 const loading = ref(false)
@@ -525,9 +513,6 @@ const busyKey = ref('')
 const graph = ref<GraphView | null>(null)
 const focusCandidates = ref<GraphNode[]>([])
 const focusId = ref('')
-const depth = ref(3)
-const maxNodes = ref(GRAPH_QUERY_MAX_NODES)
-const maxEdges = ref(GRAPH_QUERY_MAX_EDGES)
 
 const fusion = ref<FusionView | null>(null)
 const fusionLoading = ref(false)
@@ -544,7 +529,6 @@ const hoverNode = ref('')
 const nodeTableKeyword = ref('')
 const nodeTablePage = ref(1)
 const nodeTablePageSize = ref(10)
-const graphQueryMode = ref<'focus' | 'explore'>('focus')
 const graphPickerKind = ref<'all' | 'requirements' | 'testcases' | 'methods' | 'runtime'>('all')
 const graphPickerKeyword = ref('')
 const fusionKeyword = ref('')
@@ -678,6 +662,8 @@ const readModelKindText = computed(() => ({
   RM_QUALITY_GATE_SUMMARY: '门禁指标汇总',
 }[readModelKind.value] || '读模型结果'))
 
+const graphQueryProfile = { depth: FOCUS_GRAPH_DEPTH, maxNodes: FOCUS_GRAPH_MAX_NODES, maxEdges: FOCUS_GRAPH_MAX_EDGES }
+
 const nodeKindCounts = computed(() => {
   const counts: Record<string, number> = {}
   for (const n of visibleGraphNodes.value) counts[n.kind] = (counts[n.kind] ?? 0) + 1
@@ -689,7 +675,8 @@ const visibleGraphEdges = computed(() => (graph.value?.edges || []).filter((edge
 const externalFilteredNodeCount = computed(() => Math.max(0, (graph.value?.nodes.length || 0) - visibleGraphNodes.value.length))
 const graphNodeById = computed(() => new Map(visibleGraphNodes.value.map((node) => [node.id, node])))
 const visibleFocusCandidates = computed(() => focusCandidates.value.filter(isVisibleGraphNode))
-const graphPickerSourceNodes = computed(() => visibleFocusCandidates.value.filter((node) => [
+const focusCandidateOptions = computed(() => uniqueGraphNodes(visibleFocusCandidates.value))
+const graphPickerSourceNodes = computed(() => focusCandidateOptions.value.filter((node) => [
   'REQUIREMENT', 'ACCEPTANCE_CRITERION', 'TESTCASE', 'METHOD', 'COVERAGE_UNIT', 'TEST_EXECUTION',
 ].includes(node.kind)))
 const graphPickerGroups = computed(() => {
@@ -778,7 +765,7 @@ const svgLayout = computed<{ nodes: SvgNode[]; edges: SvgEdge[]; width: number; 
       const row = Math.floor(index / columns)
       pos.set(node.id, {
         id: node.id,
-        label: node.displayName.length > 24 ? `${node.displayName.slice(0, 24)}…` : node.displayName,
+        label: graphNodeDisplayName(node).length > 18 ? `${graphNodeDisplayName(node).slice(0, 18)}…` : graphNodeDisplayName(node),
         kind: node.kind,
         x: 56 + column * cellWidth,
         y: y + row * rowHeight,
@@ -832,12 +819,13 @@ async function loadGraph() {
   if (loading.value || !baselineId.value) return
   loading.value = true; error.value = ''
   try {
+    const profile = graphQueryProfile
     graph.value = await fetchGraphView(projectId.value, {
       baselineId: baselineId.value,
       focusId: focusId.value || undefined,
-      depth: depth.value,
-      maxNodes: clamp(maxNodes.value, 1, GRAPH_QUERY_MAX_NODES),
-      maxEdges: clamp(maxEdges.value, 1, GRAPH_QUERY_MAX_EDGES),
+      depth: profile.depth,
+      maxNodes: profile.maxNodes,
+      maxEdges: profile.maxEdges,
     })
     nodeTablePage.value = 1
     await nextTick()
@@ -849,29 +837,21 @@ async function loadGraph() {
 async function loadGraphFocusCandidates() {
   if (!baselineId.value) return
   try {
-    focusCandidates.value = await fetchGraphFocusCandidates(projectId.value, baselineId.value, 10_000)
+    focusCandidates.value = await fetchGraphFocusCandidates(projectId.value, baselineId.value, FOCUS_CANDIDATE_LIMIT)
   } catch (e) {
     toast.error(msg(e))
     focusCandidates.value = []
   }
 }
 
-async function switchGraphQueryMode(mode: 'focus' | 'explore') {
-  graphQueryMode.value = mode
-  graphViewMode.value = 'graph'
-  await loadGraph()
-}
-
 async function focusGraphNode(nodeId: string) {
   focusId.value = nodeId
-  graphQueryMode.value = 'focus'
   graphViewMode.value = 'graph'
   await loadGraph()
 }
 
 async function clearGraphFocus() {
   focusId.value = ''
-  graphQueryMode.value = 'focus'
   await loadGraph()
 }
 
@@ -1205,6 +1185,28 @@ function graphNodeSearchText(node: GraphNode) {
     node.contentHash,
   ].filter(Boolean).join(' ').toLowerCase()
 }
+
+function uniqueGraphNodes(nodes: GraphNode[]) {
+  const seen = new Set<string>()
+  return nodes.filter((node) => {
+    // A projection can retain multiple technical records for the same business object.
+    // The picker represents objects, so expose one selectable entry per stable identity.
+    const key = graphNodePickerIdentity(node)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+function graphNodePickerIdentity(node: GraphNode) {
+  const identity = (() => {
+    if (['TESTCASE', 'ACCEPTANCE_CRITERION', 'REQUIREMENT'].includes(node.kind)) {
+      return node.logicalSymbolId || node.stableSymbolId || node.locator || node.displayName || node.id
+    }
+    if (node.kind === 'COVERAGE_UNIT') return node.locator || node.stableSymbolId || node.logicalSymbolId || node.displayName || node.id
+    return node.stableSymbolId || node.logicalSymbolId || node.locator || node.displayName || node.id
+  })()
+  return `${node.kind}|${String(identity).trim().toLowerCase()}`
+}
 function graphNodeDisplayName(node: GraphNode) {
   if (node.kind === 'TEST_EXECUTION') {
     const testcase = stringAttribute(node, 'testcaseKey') || '未关联用例'
@@ -1233,6 +1235,15 @@ function graphNodeRelationSummary(node: GraphNode) {
   if (!edges.length) return '当前查询范围内暂无关联'
   const labels = [...new Set(edges.map((edge) => edgeTypeText(edge.type)))].slice(0, 2)
   return `${edges.length} 条关联：${labels.join('、')}${labels.length < new Set(edges.map((edge) => edge.type)).size ? '等' : ''}`
+}
+function graphNodeTooltipText(node: GraphNode) {
+  return [
+    graphNodeDisplayName(node),
+    `类型：${nodeKindText(node.kind)}`,
+    `说明：${graphNodeDescription(node)}`,
+    `位置 / 执行信息：${graphNodeSourceInfo(node)}`,
+    `关联关系：${graphNodeRelationSummary(node)}`,
+  ].filter(Boolean).join('\n')
 }
 function stringAttribute(node: GraphNode, key: string) {
   const value = node.attributes?.[key]
@@ -1279,9 +1290,6 @@ function nodeTooltipRows(node: GraphNode) {
 .tab.active { color:var(--oat-primary);border-bottom-color:var(--oat-primary); }
 .tab-panel { display:flex;flex-direction:column;gap:14px; }
 .query-bar { display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap; }
-.graph-mode-toggle { display:inline-flex;border:1px solid var(--oat-border);border-radius:9px;overflow:hidden;background:#fff; }
-.graph-mode-toggle button { min-height:34px;border:0;background:#fff;padding:6px 12px;font-size:13px;font-weight:800;color:var(--oat-text-muted);cursor:pointer; }
-.graph-mode-toggle button.active { background:var(--oat-primary);color:#fff; }
 .field-inline { display:grid;gap:4px; }
 .field-inline span { font-size:12px;font-weight:700;color:var(--oat-text-secondary); }
 .field-inline input { border:1px solid var(--oat-border);border-radius:8px;padding:7px 10px;font-size:13px;min-width:110px; }
@@ -1361,7 +1369,7 @@ function nodeTooltipRows(node: GraphNode) {
 .svg-node.k-TEST_EXECUTION { fill:#f59e0b; }
 .svg-node.k-DECISION { fill:#db2777; }
 .svg-node.k-COVERAGE_UNIT { fill:#16a34a; }
-.svg-label { font-size:10px;fill:var(--oat-text);text-anchor:middle;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px; }
+.svg-label { font-size:10px;fill:var(--oat-text);text-anchor:start;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px;pointer-events:none; }
 .svg-node-tooltip {
   position:fixed;
   z-index:3000;

@@ -47,7 +47,6 @@ withDefaults(defineProps<{
   border-color: rgba(var(--oat-primary-rgb), .42);
   background: var(--oat-primary-container);
   box-shadow: 0 8px 18px rgba(var(--oat-primary-rgb), .14);
-  transform: translateY(-1px);
 }
 .app-refresh-button:active:not(:disabled) {
   box-shadow: none;

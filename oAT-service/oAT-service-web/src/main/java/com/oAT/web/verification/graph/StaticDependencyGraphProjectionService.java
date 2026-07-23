@@ -47,6 +47,9 @@ public class StaticDependencyGraphProjectionService {
             throw new IllegalArgumentException("当前基线未指定源码工程，无法建立依赖图");
         }
         List<GraphRepository.GraphNode> typeNodes = graphRepository.findActiveNodesByKind(baselineId, GraphNodeKind.TYPE);
+        List<GraphRepository.GraphNode> sourceFileNodes = graphRepository.findActiveNodesByKind(baselineId, GraphNodeKind.SOURCE_FILE);
+        List<GraphRepository.GraphNode> dependencyScopeNodes = new java.util.ArrayList<>(typeNodes);
+        dependencyScopeNodes.addAll(sourceFileNodes);
         Map<String, String> typeNodeIdByName = new LinkedHashMap<>();
         for (GraphRepository.GraphNode node : typeNodes) typeNodeIdByName.put(node.displayName(), node.id());
 
@@ -55,10 +58,10 @@ public class StaticDependencyGraphProjectionService {
         graphRepository.invalidateSnapshots(baselineId, SnapshotKind.STATIC_DEPENDENCY);
         GraphRepository.GraphSnapshot snapshot = new GraphRepository.GraphSnapshot(UUID.randomUUID().toString(), projectId, baselineId,
                 baseline.repositoryUrl(), baseline.sourceCommit(), SnapshotKind.STATIC_DEPENDENCY, ANALYZER_VERSION, inputHash, "READY",
-                Map.of("appId", baseline.sourceAppId(), "typeCount", typeNodes.size()));
+                Map.of("appId", baseline.sourceAppId(), "typeCount", typeNodes.size(), "sourceFileCount", sourceFileNodes.size()));
         graphRepository.saveSnapshot(snapshot);
 
-        int edges = 0;
+        int edges = projectFromStaticCallGraph(snapshot, projectId, baselineId, dependencyScopeNodes);
         Set<String> emitted = new LinkedHashSet<>();
         for (StaticSourceInfo source : classes) {
             if (source.getClassInfo() == null || source.getClassInfo().getMethodMaps() == null) continue;
@@ -83,7 +86,41 @@ public class StaticDependencyGraphProjectionService {
                 }
             }
         }
-        return new ProjectionResult(snapshot.id(), typeNodes.size(), edges);
+        return new ProjectionResult(snapshot.id(), dependencyScopeNodes.size(), edges);
+    }
+
+    private int projectFromStaticCallGraph(GraphRepository.GraphSnapshot snapshot, String projectId, String baselineId,
+                                           List<GraphRepository.GraphNode> typeNodes) {
+        if (typeNodes.isEmpty()) return 0;
+        Map<String, String> typeNodeIdByPath = new LinkedHashMap<>();
+        for (GraphRepository.GraphNode typeNode : typeNodes) {
+            String path = normalizePath(typeNode.locator());
+            if (StringUtils.hasText(path)) typeNodeIdByPath.put(path, typeNode.id());
+        }
+        List<GraphRepository.GraphEdge> calls = graphRepository.findActiveEdgesByType(baselineId, GraphEdgeType.CALLS_STATIC);
+        List<String> methodIds = calls.stream()
+                .flatMap(edge -> java.util.stream.Stream.of(edge.sourceNodeId(), edge.targetNodeId()))
+                .distinct()
+                .toList();
+        Map<String, GraphRepository.GraphNode> methodsById = new LinkedHashMap<>();
+        for (GraphRepository.GraphNode node : graphRepository.findActiveNodesByIds(baselineId, methodIds)) {
+            methodsById.put(node.id(), node);
+        }
+        int edges = 0;
+        Set<String> emitted = new LinkedHashSet<>();
+        for (GraphRepository.GraphEdge call : calls) {
+            GraphRepository.GraphNode caller = methodsById.get(call.sourceNodeId());
+            GraphRepository.GraphNode target = methodsById.get(call.targetNodeId());
+            String ownerType = typeNodeIdByPath.get(normalizePath(caller == null ? null : caller.locator()));
+            String targetType = typeNodeIdByPath.get(normalizePath(target == null ? null : target.locator()));
+            if (ownerType == null || targetType == null || ownerType.equals(targetType)) continue;
+            String dedupe = ownerType + "->" + targetType;
+            if (!emitted.add(dedupe)) continue;
+            graphRepository.saveEdge(edge(snapshot, projectId, baselineId, ownerType, targetType, GraphEdgeType.IMPORTS,
+                    EvidenceKind.STATIC_POSSIBLE, "E1", .65d, Map.of("source", "staticCallGraph")));
+            edges++;
+        }
+        return edges;
     }
 
     private GraphRepository.GraphEdge edge(GraphRepository.GraphSnapshot snapshot, String projectId, String baselineId, String source,
@@ -100,6 +137,13 @@ public class StaticDependencyGraphProjectionService {
         String name = dot >= 0 ? normalized.substring(dot + 1) : normalized;
         int dollar = name.indexOf('$');
         return dollar > 0 ? name.substring(0, dollar) : name;
+    }
+
+    private String normalizePath(String value) {
+        if (!StringUtils.hasText(value)) return "";
+        String path = value.replace('\\', '/');
+        int colon = path.lastIndexOf(':');
+        return colon > 0 && path.substring(colon + 1).chars().allMatch(Character::isDigit) ? path.substring(0, colon) : path;
     }
 
     public record ProjectionResult(String snapshotId, int typeCount, int edgeCount) {}

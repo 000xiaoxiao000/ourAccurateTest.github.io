@@ -149,7 +149,7 @@ input[type='radio'] {
   position: fixed;
   left: 0;
   top: 0;
-  z-index: 3000;
+  z-index: 6000;
   display: block;
   min-width: 180px;
   max-width: min(460px, calc(100vw - 32px));
@@ -250,6 +250,7 @@ a:focus-visible {
 }
 
 .shell-main :is(.page-header, .hero).plain-header {
+  overflow: visible;
   padding: 0 0 10px;
   border: 0;
   border-bottom: 1px solid rgba(15, 23, 42, .07);

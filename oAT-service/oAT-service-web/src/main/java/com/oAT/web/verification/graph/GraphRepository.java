@@ -143,6 +143,13 @@ public class GraphRepository {
                 """, this::node, baselineId, kind.name());
     }
 
+    public List<GraphNode> findActiveNodesByIds(String baselineId, List<String> nodeIds) {
+        if (nodeIds == null || nodeIds.isEmpty()) return List.of();
+        return jdbc.query("""
+                SELECT * FROM oat_graph_node WHERE baseline_id = ? AND id = ANY (?) AND invalidated_at IS NULL
+                """, this::node, baselineId, nodeIds.toArray(String[]::new));
+    }
+
     public List<GraphNode> findFocusCandidateNodes(String baselineId, List<GraphNodeKind> kinds, int limit) {
         if (kinds == null || kinds.isEmpty()) return List.of();
         String[] kindNames = kinds.stream().map(GraphNodeKind::name).toArray(String[]::new);
