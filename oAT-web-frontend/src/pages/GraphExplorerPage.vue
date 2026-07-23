@@ -92,7 +92,17 @@
           </span>
         </div>
 
-        <div v-if="graphViewMode === 'graph'" ref="graphScrollRef" class="svg-canvas-wrap" @scroll="updateGraphOverviewViewport">
+        <div
+          v-if="graphViewMode === 'graph'"
+          ref="graphScrollRef"
+          class="svg-canvas-wrap"
+          :class="{ panning: graphPanning }"
+          @scroll="updateGraphOverviewViewport"
+          @pointerdown="startGraphPan"
+          @pointermove="moveGraphPan"
+          @pointerup="endGraphPan"
+          @pointercancel="endGraphPan"
+        >
           <div class="graph-explainer"><strong>阅读方式：</strong>圆点代表事实节点，连线代表它们之间的关系；颜色区分节点类型。图按“需求与测试 → 代码结构 → 控制流与运行证据”分层排列，便于观察证据如何落到代码。左上角概览和主图均绘制本次查询返回的全部节点；可横向、纵向滚动浏览，悬停节点可查看详情。</div>
           <div
             v-if="svgLayout.nodes.length"
@@ -130,7 +140,7 @@
               <line v-for="(e, i) in svgLayout.edges" :key="`e${i}`"
                     :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="svg-edge" :class="`et-${e.type}`" />
               <g v-for="n in svgLayout.nodes" :key="n.id" :transform="`translate(${n.x},${n.y})`" class="svg-node-g"
-                 @mouseenter="hoverNode = n.id" @mouseleave="hoverNode = ''">
+                 @mouseenter="showNodeTooltip(n.id, $event)" @mousemove="moveNodeTooltip" @mouseleave="hideNodeTooltip">
                 <circle :r="hoverNode === n.id ? 10 : 6" class="svg-node" :class="`k-${n.kind}`" />
                 <text v-if="hoverNode === n.id || svgLayout.nodes.length <= 40" :y="-12" class="svg-label">{{ n.label }}</text>
               </g>
@@ -139,8 +149,8 @@
           <div
             v-if="hoverGraphNode && hoverSvgNode"
             class="svg-node-tooltip"
-            :class="{ 'near-right': hoverSvgNode.x > svgLayout.width * 0.62, 'near-bottom': hoverSvgNode.y > svgLayout.height * 0.58 }"
-            :style="{ left: `${(hoverSvgNode.x / svgLayout.width) * 100}%`, top: `${(hoverSvgNode.y / svgLayout.height) * 100}%` }"
+            :class="{ 'near-right': tooltipPosition.nearRight, 'near-bottom': tooltipPosition.nearBottom }"
+            :style="{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }"
             role="tooltip"
           >
             <strong>{{ hoverGraphNode.displayName || hoverGraphNode.id }}</strong>
@@ -432,6 +442,9 @@ const nodeTablePageSize = ref(10)
 const graphScrollRef = ref<HTMLElement | null>(null)
 const graphVisualsRef = ref<HTMLElement | null>(null)
 const overviewDragging = ref(false)
+const graphPanning = ref(false)
+const graphPanStart = ref({ x: 0, y: 0, left: 0, top: 0 })
+const tooltipPosition = ref({ x: 0, y: 0, nearRight: false, nearBottom: false })
 const graphScrollState = ref({
   left: 0,
   top: 0,
@@ -646,6 +659,32 @@ function updateGraphOverviewViewport() {
   }
 }
 
+function startGraphPan(event: PointerEvent) {
+  const target = event.target as HTMLElement | SVGElement | null
+  if (event.button !== 0 || target?.closest?.('.graph-overview')) return
+  const el = graphScrollRef.value
+  if (!el) return
+  graphPanning.value = true
+  graphPanStart.value = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop }
+  el.setPointerCapture?.(event.pointerId)
+}
+
+function moveGraphPan(event: PointerEvent) {
+  if (!graphPanning.value) return
+  const el = graphScrollRef.value
+  if (!el) return
+  const start = graphPanStart.value
+  el.scrollLeft = start.left - (event.clientX - start.x)
+  el.scrollTop = start.top - (event.clientY - start.y)
+  updateGraphOverviewViewport()
+}
+
+function endGraphPan(event: PointerEvent) {
+  if (!graphPanning.value) return
+  graphPanning.value = false
+  graphScrollRef.value?.releasePointerCapture?.(event.pointerId)
+}
+
 function startOverviewPan(event: PointerEvent) {
   overviewDragging.value = true
   ;(event.currentTarget as SVGElement).setPointerCapture?.(event.pointerId)
@@ -675,6 +714,31 @@ function panGraphFromOverview(event: PointerEvent) {
   el.scrollLeft = clamp(targetLeft, 0, Math.max(0, el.scrollWidth - el.clientWidth))
   el.scrollTop = clamp(targetTop, 0, Math.max(0, el.scrollHeight - el.clientHeight))
   updateGraphOverviewViewport()
+}
+
+function showNodeTooltip(nodeId: string, event: MouseEvent) {
+  hoverNode.value = nodeId
+  updateNodeTooltipPosition(event)
+}
+
+function moveNodeTooltip(event: MouseEvent) {
+  updateNodeTooltipPosition(event)
+}
+
+function hideNodeTooltip() {
+  hoverNode.value = ''
+}
+
+function updateNodeTooltipPosition(event: MouseEvent) {
+  const margin = 18
+  const preferredWidth = 520
+  const preferredHeight = 360
+  tooltipPosition.value = {
+    x: event.clientX,
+    y: event.clientY,
+    nearRight: event.clientX + preferredWidth + margin > window.innerWidth,
+    nearBottom: event.clientY + preferredHeight + margin > window.innerHeight,
+  }
 }
 
 async function runProjection(key: ProjectionKey) {
@@ -967,7 +1031,8 @@ function nodeTooltipRows(node: GraphNode) {
 .projection-guide strong { color:var(--oat-primary-dark);font-size:13px; }
 .feature-intro { margin:0;padding:10px 13px;border-left:3px solid var(--oat-primary);border-radius:0 8px 8px 0;background:var(--oat-surface-soft);color:var(--oat-text-secondary);font-size:13px;line-height:1.6; }
 .feature-intro strong { color:var(--oat-text); }
-.svg-canvas-wrap { position:relative;height:min(680px, calc(100vh - 210px));min-height:420px;border:1px solid var(--oat-border);border-radius:12px;background:#fff;padding:8px;overflow:auto;overscroll-behavior:contain; }
+.svg-canvas-wrap { position:relative;height:min(680px, calc(100vh - 210px));min-height:420px;border:1px solid var(--oat-border);border-radius:12px;background:#fff;padding:8px;overflow:auto;overscroll-behavior:contain;cursor:grab; }
+.svg-canvas-wrap.panning { cursor:grabbing;user-select:none; }
 .graph-explainer { margin:2px 2px 10px;padding:8px 10px;border-radius:8px;background:var(--oat-surface-soft);color:var(--oat-text-secondary);font-size:12px;line-height:1.5; }
 .graph-visuals { position:relative;min-width:max-content; }
 .graph-overview { position:sticky;top:8px;left:8px;z-index:4;display:block;width:180px;height:108px;padding:4px;border:1px solid var(--oat-border);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 5px 16px rgba(15,23,42,.12);cursor:grab;touch-action:none; }
@@ -989,12 +1054,12 @@ function nodeTooltipRows(node: GraphNode) {
 .svg-node.k-COVERAGE_UNIT { fill:#16a34a; }
 .svg-label { font-size:10px;fill:var(--oat-text);text-anchor:middle;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px; }
 .svg-node-tooltip {
-  position:absolute;
-  z-index:5;
-  width:min(520px, calc(100% - 32px));
-  max-height:min(360px, calc(100% - 32px));
+  position:fixed;
+  z-index:80;
+  width:min(520px, calc(100vw - 36px));
+  max-height:min(420px, calc(100vh - 36px));
   overflow:auto;
-  transform:translate(12px, 12px);
+  transform:translate(14px, 14px);
   display:grid;
   gap:8px;
   padding:10px 12px;
