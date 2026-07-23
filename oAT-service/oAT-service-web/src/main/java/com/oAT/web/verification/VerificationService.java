@@ -36,6 +36,7 @@ import java.util.stream.Collectors;
 @Service
 public class VerificationService {
     private static final Logger logger = LoggerFactory.getLogger(VerificationService.class);
+    private static final int ANALYSIS_HEARTBEAT_TIMEOUT_MINUTES = 30;
 
     private final VerificationRepository repository;
     private final StaticInfoRepository staticInfoRepository;
@@ -185,6 +186,7 @@ public class VerificationService {
     }
 
     public BaselineDetail detail(String projectId, String baselineId) {
+        recoverTimedOutAnalysis(projectId, baselineId);
         Baseline baseline = requiredBaseline(projectId, baselineId);
         List<AcceptanceCriterion> criteria = repository.findCriteria(baselineId);
         List<TestcaseProjection> testcases = repository.findTestcases(baselineId);
@@ -196,6 +198,7 @@ public class VerificationService {
     }
 
     public AnalysisJob startAnalysis(String projectId, String baselineId, String userId) {
+        recoverTimedOutAnalysis(projectId, baselineId);
         Baseline baseline = requiredBaseline(projectId, baselineId);
         if (baseline.status() == BaselineStatus.ANALYZING) {
             return repository.findRunningAnalysisJob(projectId, baselineId)
@@ -225,6 +228,7 @@ public class VerificationService {
     }
 
     public AnalysisJob latestAnalysisJob(String projectId, String baselineId) {
+        recoverTimedOutAnalysis(projectId, baselineId);
         requiredBaseline(projectId, baselineId);
         return repository.findLatestAnalysisJob(projectId, baselineId)
                 .orElseThrow(() -> new IllegalArgumentException("该分析基线还没有AI分析任务"));
@@ -235,11 +239,15 @@ public class VerificationService {
         try {
             executeAnalysis(projectId, baselineId, jobId);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "分析完成，结果已生成", LocalDateTime.now());
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             logger.error("AI分析任务失败, baselineId={}, jobId={}", baselineId, jobId, e);
             String message = readableAnalysisFailure(e);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.FAILED,
                     message, LocalDateTime.now());
+            repository.updateBaselineStatus(baselineId, BaselineStatus.FAILED);
+            if (e instanceof Error error) {
+                throw error;
+            }
         }
     }
 
@@ -307,7 +315,17 @@ public class VerificationService {
         repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.RUNNING, message, null);
     }
 
-    private String readableAnalysisFailure(RuntimeException error) {
+    private void recoverTimedOutAnalysis(String projectId, String baselineId) {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(ANALYSIS_HEARTBEAT_TIMEOUT_MINUTES);
+        int recovered = repository.failStaleAnalysisJobs(projectId, baselineId, cutoff,
+                "AI分析任务超过 " + ANALYSIS_HEARTBEAT_TIMEOUT_MINUTES + " 分钟没有进度更新，已自动终止。请检查服务日志后重试。");
+        if (recovered > 0) {
+            repository.updateBaselineStatus(baselineId, BaselineStatus.FAILED);
+            logger.warn("已自动终止超时AI分析任务, projectId={}, baselineId={}, count={}", projectId, baselineId, recovered);
+        }
+    }
+
+    private String readableAnalysisFailure(Throwable error) {
         String detail = error.getMessage();
         if (detail != null && detail.contains("AI分析返回格式不合法")) {
             return "AI 已返回分析内容，但格式校验失败；系统已自动修复重试仍未成功。请检查模型是否支持 JSON 输出，或减少导入资料长度后重试。";
@@ -394,6 +412,7 @@ public class VerificationService {
 
     public void markBaselineStale(String projectId, String baselineId) {
         requiredBaseline(projectId, baselineId);
+        repository.failActiveAnalysisJobs(projectId, baselineId, "分析基线已被手动标记过期，当前AI分析任务已终止。");
         repository.markBaselineStale(baselineId);
         graphService.invalidate(projectId, baselineId);
     }

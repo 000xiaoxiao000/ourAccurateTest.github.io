@@ -340,6 +340,22 @@ public class VerificationRepository {
                 """, this::analysisJob, projectId, baselineId).stream().findFirst();
     }
 
+    public int failStaleAnalysisJobs(String projectId, String baselineId, LocalDateTime cutoffTime, String message) {
+        return jdbc.update("""
+                UPDATE oat_verification_analysis_job
+                SET status = 'FAILED', message = ?, update_time = ?, finish_time = ?
+                WHERE project_id = ? AND baseline_id = ? AND status IN ('QUEUED','RUNNING') AND update_time < ?
+                """, message, ts(LocalDateTime.now()), ts(LocalDateTime.now()), projectId, baselineId, ts(cutoffTime));
+    }
+
+    public int failActiveAnalysisJobs(String projectId, String baselineId, String message) {
+        return jdbc.update("""
+                UPDATE oat_verification_analysis_job
+                SET status = 'FAILED', message = ?, update_time = ?, finish_time = ?
+                WHERE project_id = ? AND baseline_id = ? AND status IN ('QUEUED','RUNNING')
+                """, message, ts(LocalDateTime.now()), ts(LocalDateTime.now()), projectId, baselineId);
+    }
+
     public void updateAnalysisJobStatus(String jobId, AnalysisJobStatus status, String message, LocalDateTime finishTime) {
         jdbc.update("""
                 UPDATE oat_verification_analysis_job

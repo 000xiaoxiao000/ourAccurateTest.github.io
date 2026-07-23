@@ -11,7 +11,7 @@
           <span>分析基线</span>
           <select v-model="selectedBaselineId" :disabled="map.loading.value" @change="reloadBaseline">
             <option v-for="baseline in baselines" :key="baseline.id" :value="baseline.id">
-              {{ baseline.name || baseline.id }} · {{ baseline.status }}
+              {{ baseline.name || baseline.id }} · {{ verificationBaselineStatusText(baseline.status) }}
             </option>
           </select>
         </label>
@@ -649,8 +649,20 @@ const baselineStatusText = computed(() => {
   const baseline = map.response.value?.baseline
   if (!baseline) return '尚未加载分析基线'
   const version = [baseline.sourceBranch, baseline.sourceCommit].filter(Boolean).join(' · ')
-  return `当前基线：${baseline.name || baseline.id}${version ? ` · ${version}` : ''}`
+  const status = baselines.value.find((item) => item.id === baseline.id)?.status
+  return `当前基线：${baseline.name || baseline.id}${status ? ` · ${verificationBaselineStatusText(status)}` : ''}${version ? ` · ${version}` : ''}`
 })
+
+function verificationBaselineStatusText(value?: string) {
+  return ({
+    CREATED: '待分析',
+    ANALYZING: '分析中',
+    WAITING_REVIEW: '待人工确认',
+    COMPLETED: '已完成',
+    FAILED: '分析失败',
+    STALE: '已过期',
+  } as Record<string, string>)[value || ''] || value || '-'
+}
 const errorMessage = computed(() => friendlyMapError(map.error.value, selectedBaselineId.value || map.activeBaselineId.value))
 const codeSummaryTitle = computed(() => {
   const summary = map.response.value?.summary

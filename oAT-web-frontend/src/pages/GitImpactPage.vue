@@ -19,7 +19,7 @@
         <span>分析基线</span>
         <select v-model="form.baselineId">
           <option value="">请选择已完成的 AI 验证基线</option>
-          <option v-for="baseline in overview.baselines" :key="baseline.id" :value="baseline.id">{{ baseline.name }} · {{ baseline.status }}</option>
+          <option v-for="baseline in overview.baselines" :key="baseline.id" :value="baseline.id">{{ baseline.name }} · {{ baselineStatusText(baseline.status) }}</option>
         </select>
       </label>
       <div class="inline-grid">
@@ -345,6 +345,18 @@ const jobStatusText = computed(() => {
   if (!analysisJob.value) return '未开始'
   return ({ PENDING: '排队中', RUNNING: '分析中', COMPLETED: '已完成', FAILED: '失败' } as Record<string, string>)[analysisJob.value.status] || analysisJob.value.status
 })
+
+function baselineStatusText(value?: string) {
+  return ({
+    CREATED: '待分析',
+    ANALYZING: '分析中',
+    WAITING_REVIEW: '待人工确认',
+    COMPLETED: '已完成',
+    FAILED: '分析失败',
+    STALE: '已过期',
+  } as Record<string, string>)[value || ''] || value || '-'
+}
+
 const keyword = computed(() => resultFilters.keyword.toLowerCase())
 const filteredFiles = computed(() => (result.value?.report.changeSet.files || []).filter(file => matchesKeyword([filePath(file), file.changeType, file.language])))
 const filteredDirectChanges = computed(() => (result.value?.report.directChanges || []).filter(change => matchesKeyword([

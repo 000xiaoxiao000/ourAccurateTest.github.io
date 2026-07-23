@@ -1571,6 +1571,8 @@ async function openBaseline(id: string) {
 async function selectBaseline(id: string) {
   const requestSeq = ++baselineRequestSeq
   clearAnalysisPoll()
+  analysisJob.value = null
+  analyzing.value = false
   selectedBaselineId.value = id
   const [nextDetail, nextMatrix, nextWriteBacks] = await Promise.all([
     fetchBaselineDetail(projectId.value, id),
@@ -1581,9 +1583,7 @@ async function selectBaseline(id: string) {
   detail.value = nextDetail
   matrix.value = nextMatrix
   writeBacks.value = nextWriteBacks
-  if (detail.value.baseline.status === 'ANALYZING') {
-    await resumeAnalysisPolling(id)
-  }
+  await resumeAnalysisPolling(id)
 }
 
 async function runAnalysis() {
@@ -1638,9 +1638,12 @@ async function resumeAnalysisPolling(baselineId: string) {
     if (job.status === 'QUEUED' || job.status === 'RUNNING') {
       analyzing.value = true
       pollAnalysisJob(job.id)
+    } else {
+      analyzing.value = false
     }
   } catch {
     analysisJob.value = null
+    analyzing.value = false
   }
 }
 
@@ -1963,7 +1966,7 @@ function baselineStatusText(value?: string) {
   const map: Record<string, string> = {
     CREATED: '待分析',
     ANALYZING: '分析中',
-    WAITING_REVIEW: '待审核',
+    WAITING_REVIEW: '待人工确认',
     COMPLETED: '已完成',
     FAILED: '分析失败',
     STALE: '已过期',
