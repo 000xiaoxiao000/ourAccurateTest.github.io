@@ -1298,13 +1298,14 @@ function nodeTooltipRows(node: GraphNode) {
 .mono.muted, .muted { color:var(--oat-text-muted); }
 .mono.payload { word-break:break-all; }
 .table-note { font-size:12px;color:var(--oat-text-muted); }
-.fusion-summary { display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px; }
-.fusion-card { display:grid;gap:2px;padding:14px;border:1px solid var(--oat-border);border-radius:10px;text-align:center;background:#fff; }
-.fusion-card .num { font-size:26px;font-weight:900; }
-.fusion-card.confirmed { border-color:rgba(22,163,74,.3);color:#15803d; }
-.fusion-card.reachable { border-color:rgba(245,158,11,.3);color:#92400e; }
-.fusion-card.observable { border-color:rgba(100,116,139,.3);color:#475569; }
-.fusion-card.total { border-color:rgba(37,99,235,.3);color:#1d4ed8; }
+.fusion-result { display:grid;gap:14px; }
+.fusion-summary { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px; }
+.fusion-card { display:grid;gap:4px;min-height:92px;padding:15px;border:1px solid var(--oat-border);border-radius:var(--oat-radius-md);text-align:center;background:linear-gradient(135deg,#fff,var(--oat-surface-soft));box-shadow:var(--oat-shadow-xs); }
+.fusion-card .num { font-size:28px;font-weight:900;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em; }
+.fusion-card.confirmed { border-color:rgba(22,163,74,.3);color:#15803d;background:linear-gradient(135deg,rgba(240,253,244,.96),#fff); }
+.fusion-card.reachable { border-color:rgba(245,158,11,.3);color:#92400e;background:linear-gradient(135deg,rgba(255,251,235,.96),#fff); }
+.fusion-card.observable { border-color:rgba(100,116,139,.3);color:#475569;background:linear-gradient(135deg,rgba(248,250,252,.96),#fff); }
+.fusion-card.total { border-color:rgba(37,99,235,.3);color:#1d4ed8;background:linear-gradient(135deg,rgba(239,246,255,.96),#fff); }
 .fusion-tag, .verdict-chip { border-radius:999px;padding:2px 8px;font-size:11px;font-weight:800; }
 .fusion-tag.executed_confirmed { background:rgba(22,163,74,.12);color:#15803d; }
 .fusion-tag.reachable_not_executed { background:rgba(245,158,11,.14);color:#92400e; }

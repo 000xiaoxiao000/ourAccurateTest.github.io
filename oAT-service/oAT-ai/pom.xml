@@ -30,7 +30,7 @@
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-context</artifactId>
-            <version>6.1.14</version>
+            <version>6.2.5</version>
             <scope>provided</scope>
         </dependency>
 
@@ -38,7 +38,7 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-autoconfigure</artifactId>
-            <version>3.3.6</version>
+            <version>3.4.4</version>
             <scope>provided</scope>
         </dependency>
 

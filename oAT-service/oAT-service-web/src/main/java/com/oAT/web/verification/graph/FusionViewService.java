@@ -10,7 +10,6 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -38,8 +37,9 @@ public class FusionViewService {
                 .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
         List<GraphRepository.GraphNode> methods = graphRepository.findActiveNodesByKind(baselineId, GraphNodeKind.METHOD);
         Set<String> executed = new HashSet<>(graphRepository.findDynamicallyEvidencedNodeIds(baselineId));
-        Set<String> coveredMethodKeys = findCoveredMethodKeys(projectId, baselineId);
-        Set<String> reachable = graphRepository.findStaticallyReachableNodeIds(baselineId);
+        List<CoveredMethod> coveredMethods = findCoveredMethods(projectId, baselineId);
+        Set<String> reachable = new HashSet<>(graphRepository.findStaticallyReachableNodeIds(baselineId));
+        methods.forEach(method -> reachable.add(method.id()));
 
         List<FusionNode> nodes = new ArrayList<>();
         int executedConfirmed = 0;
@@ -48,7 +48,7 @@ public class FusionViewService {
         int limit = maxNodes <= 0 ? 1_000 : Math.min(maxNodes, 5_000);
         for (GraphRepository.GraphNode method : methods) {
             FusionState state;
-            if (executed.contains(method.id()) || coveredByAsset(method, coveredMethodKeys)) {
+            if (executed.contains(method.id()) || coveredByAsset(method, coveredMethods)) {
                 state = FusionState.EXECUTED_CONFIRMED;
                 executedConfirmed++;
             } else if (reachable.contains(method.id())) {
@@ -71,51 +71,71 @@ public class FusionViewService {
      * The coverage tab reads the baseline coverage asset directly. Include the
      * same covered methods here even when the graph projection has not been run.
      */
-    private Set<String> findCoveredMethodKeys(String projectId, String baselineId) {
-        if (coverageRepository == null) return Set.of();
+    private List<CoveredMethod> findCoveredMethods(String projectId, String baselineId) {
+        if (coverageRepository == null) return List.of();
         var baseline = verificationRepository.findBaseline(projectId, baselineId).orElse(null);
         if (baseline == null || baseline.coverageAssetId() == null || baseline.coverageAssetId().isBlank()) {
-            return Set.of();
+            return List.of();
         }
-        Set<String> keys = new HashSet<>();
+        List<CoveredMethod> methods = new ArrayList<>();
         for (ClassCoverageIndex file : coverageRepository.findByReportId(baseline.coverageAssetId())) {
             if (file.getMethods() == null) continue;
             for (ClassCoverageIndex.MethodCoverageDetail method : file.getMethods()) {
-                if ((!method.isCovered() && method.getCoveredLines() <= 0)
+                if (method == null || (!method.isCovered() && method.getCoveredLines() <= 0)
                         || method.getMethodName() == null || method.getMethodName().isBlank()) continue;
-                String className = value(method.getClassName(), file.getClassName());
-                keys.add(methodKey(className + "#" + method.getMethodName()));
+                methods.add(new CoveredMethod(value(method.getClassName(), file.getClassName()),
+                        method.getMethodName()));
             }
         }
-        return keys;
+        return methods;
     }
 
-    private boolean coveredByAsset(GraphRepository.GraphNode method, Set<String> coveredKeys) {
-        return coveredKeys.contains(methodKey(method.stableSymbolId()))
-                || coveredKeys.contains(methodKey(method.logicalSymbolId()));
+    private boolean coveredByAsset(GraphRepository.GraphNode method, List<CoveredMethod> coveredMethods) {
+        MethodIdentity identity = methodIdentity(method);
+        return identity != null && coveredMethods.stream().anyMatch(covered -> covered.matches(identity));
+    }
+
+    private MethodIdentity methodIdentity(GraphRepository.GraphNode method) {
+        String symbol = value(method.stableSymbolId(), method.logicalSymbolId());
+        int hash = symbol.lastIndexOf('#');
+        if (hash < 0) return null;
+        int memberEnd = symbol.indexOf('(', hash);
+        if (memberEnd < 0) memberEnd = symbol.indexOf(':', hash);
+        if (memberEnd < 0) memberEnd = symbol.length();
+        String owner = symbol.substring(0, hash);
+        int symbolSeparator = owner.lastIndexOf(':');
+        if (symbolSeparator >= 0) owner = owner.substring(symbolSeparator + 1);
+        return new MethodIdentity(owner, symbol.substring(hash + 1, memberEnd));
     }
 
     /**
-     * Coverage reports identify methods as {@code owner#method}, while graph symbol IDs additionally
-     * include repository, revision, source path and signature. Joining on this canonical key keeps
-     * the fusion view aligned with the coverage tab across source revisions and symbol formats.
+     * Coverage reports use a binary class name while the graph stores a repository-qualified
+     * symbol. Owner and method name are the stable cross-source join.
      */
-    private String methodKey(String value) {
-        String normalized = normalize(value);
-        int hash = normalized.lastIndexOf('#');
-        if (hash < 0) return normalized;
-        int methodEnd = normalized.indexOf('(', hash);
-        if (methodEnd < 0) methodEnd = normalized.indexOf(':', hash);
-        if (methodEnd < 0) methodEnd = normalized.length();
-        String owner = normalized.substring(0, hash);
-        int symbolSeparator = owner.lastIndexOf(':');
-        if (symbolSeparator >= 0) owner = owner.substring(symbolSeparator + 1);
-        return owner + normalized.substring(hash, methodEnd);
+    private record CoveredMethod(String className, String methodName) {
+        boolean matches(MethodIdentity method) {
+            return methodName.equalsIgnoreCase(method.name()) && sameOwner(className, method.owner());
+        }
     }
 
-    private String normalize(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT)
-                .replace(" ", "");
+    private record MethodIdentity(String owner, String name) {}
+
+    private static boolean sameOwner(String left, String right) {
+        Set<String> leftVariants = ownerVariants(left);
+        Set<String> rightVariants = ownerVariants(right);
+        return leftVariants.stream().anyMatch(rightVariants::contains);
+    }
+
+    private static Set<String> ownerVariants(String owner) {
+        String normalized = owner == null ? "" : owner.trim().toLowerCase(java.util.Locale.ROOT)
+                .replace(" ", "").replace('/', '.').replace('$', '.');
+        int classSuffix = normalized.indexOf(".class");
+        if (classSuffix >= 0) normalized = normalized.substring(0, classSuffix);
+        Set<String> variants = new HashSet<>();
+        variants.add(normalized);
+        int packageSeparator = normalized.lastIndexOf('.');
+        if (packageSeparator >= 0) variants.add(normalized.substring(packageSeparator + 1));
+        return variants;
     }
 
     private String value(String first, String fallback) {

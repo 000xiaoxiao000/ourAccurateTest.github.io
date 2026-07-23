@@ -2781,6 +2781,42 @@ button,
   font-size: 12px;
 }
 
+.metrics-strip article {
+  min-height: 76px;
+  align-content: center;
+  border-color: rgba(15, 23, 42, .09);
+  border-radius: var(--oat-radius-md);
+  background: linear-gradient(135deg, rgba(255, 255, 255, .98), rgba(var(--oat-primary-rgb), .035));
+  box-shadow: var(--oat-shadow-xs);
+}
+
+.metrics-strip strong {
+  color: var(--oat-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+}
+
+.tabs {
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: var(--oat-radius-md);
+  background: rgba(248, 250, 252, .88);
+}
+
+.tabs button {
+  min-height: 36px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.tabs button.active {
+  border-color: rgba(var(--oat-primary-rgb), .22);
+  background: #fff;
+  box-shadow: var(--oat-shadow-xs);
+}
+
 .matrix-table {
   display: grid;
   gap: 0;

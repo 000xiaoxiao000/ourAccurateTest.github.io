@@ -326,10 +326,10 @@ public class GraphRepository {
     public Optional<GraphNode> findActiveMethod(String baselineId, String className, String methodName,
                                                 String descriptor, int startLine) {
         if (className == null || className.isBlank() || methodName == null || methodName.isBlank()) return Optional.empty();
-        String stablePattern = "%" + className + "#" + methodName + "%";
+        String stablePattern = "%" + className.replace('/', '.') + "#" + methodName + "%";
         return jdbc.query("""
                 SELECT * FROM oat_graph_node WHERE baseline_id = ? AND node_kind = 'METHOD' AND invalidated_at IS NULL
-                AND stable_symbol_id ILIKE ?
+                AND REPLACE(stable_symbol_id, '/', '.') ILIKE ?
                 AND (? = '' OR attributes_json ->> 'descriptor' = ?)
                 ORDER BY CASE WHEN ? > 0 AND locator LIKE ? THEN 0 ELSE 1 END, display_name
                 LIMIT 1

@@ -1,0 +1,87 @@
+package com.oAT.web.verification.graph;
+
+import com.oAT.web.esDao.ClassCoverageIndexRepository;
+import com.oAT.web.esDao.entity.ClassCoverageIndex;
+import com.oAT.web.verification.VerificationRepository;
+import com.oAT.web.verification.model.GraphModels.GraphNodeKind;
+import com.oAT.web.verification.model.VerificationModels;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+class FusionViewServiceTest {
+    private static final String PROJECT = "project";
+    private static final String BASELINE = "baseline";
+    private static final String COVERAGE = "coverage";
+
+    private GraphRepository graphRepository;
+    private ClassCoverageIndexRepository coverageRepository;
+    private FusionViewService service;
+
+    @BeforeEach
+    void setUp() {
+        graphRepository = mock(GraphRepository.class);
+        VerificationRepository verificationRepository = mock(VerificationRepository.class);
+        coverageRepository = mock(ClassCoverageIndexRepository.class);
+        service = new FusionViewService(graphRepository, verificationRepository, coverageRepository);
+        when(verificationRepository.findBaseline(PROJECT, BASELINE)).thenReturn(Optional.of(baseline()));
+        when(graphRepository.findDynamicallyEvidencedNodeIds(BASELINE)).thenReturn(Set.of());
+        when(graphRepository.findStaticallyReachableNodeIds(BASELINE)).thenReturn(Set.of());
+    }
+
+    @Test
+    void classifies_covered_method_from_coverage_tab_as_executed_when_symbol_has_repository_prefix() {
+        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method("allHkAmount", 77)));
+        when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of(coverage("com/example/DetailController", "allHkAmount")));
+
+        FusionViewService.FusionView view = service.build(PROJECT, BASELINE, 100);
+
+        assertEquals(1, view.executedConfirmed());
+        assertEquals("EXECUTED_CONFIRMED", view.nodes().get(0).fusionState());
+    }
+
+    @Test
+    void classifies_static_entrypoint_without_call_edge_as_reachable_not_executed() {
+        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method("entrypoint", 12)));
+        when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of());
+
+        FusionViewService.FusionView view = service.build(PROJECT, BASELINE, 100);
+
+        assertEquals(1, view.reachableNotExecuted());
+        assertEquals(0, view.notObservable());
+        assertEquals("REACHABLE_NOT_EXECUTED", view.nodes().get(0).fusionState());
+    }
+
+    private GraphRepository.GraphNode method(String name, int line) {
+        return new GraphRepository.GraphNode("method-" + name, "snapshot", BASELINE, PROJECT, GraphNodeKind.METHOD,
+                "repo@commit:com/example/DetailController.java:com.example.DetailController#" + name + "(java.lang.String):java.lang.Object",
+                "repo:com/example/DetailController.java:com.example.DetailController#" + name + "(java.lang.String):java.lang.Object",
+                "com/example/DetailController.java:" + line, name, null, Map.of("line", line));
+    }
+
+    private ClassCoverageIndex coverage(String className, String methodName) {
+        ClassCoverageIndex index = new ClassCoverageIndex();
+        index.setClassName(className);
+        ClassCoverageIndex.MethodCoverageDetail method = new ClassCoverageIndex.MethodCoverageDetail();
+        method.setClassName(className);
+        method.setMethodName(methodName);
+        method.setCovered(true);
+        index.setMethods(List.of(method));
+        return index;
+    }
+
+    private VerificationModels.Baseline baseline() {
+        return new VerificationModels.Baseline(BASELINE, PROJECT, "baseline", null, null, null, null, COVERAGE, null,
+                null, null, null, "v1", VerificationModels.BaselineStatus.COMPLETED,
+                VerificationModels.Freshness.LIVE, "test", LocalDateTime.now(), LocalDateTime.now());
+    }
+}
