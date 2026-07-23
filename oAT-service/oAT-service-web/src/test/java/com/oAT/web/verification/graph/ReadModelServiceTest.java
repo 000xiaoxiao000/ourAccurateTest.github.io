@@ -91,12 +91,14 @@ class ReadModelServiceTest {
                 criterion("ac-3", "REQ-1", "AC-3"),
                 criterion("ac-4", "REQ-1", "AC-4"));
         when(verificationRepository.findCriteria(BASELINE)).thenReturn(criteria);
-        // ac-1, ac-2 have testcase; ac-1 has implementation; ac-3 has coverage
+        // ac-1, ac-2 have testcase; ac-1 has implementation, coverage and execution; ac-3 has coverage only
         when(verificationRepository.findTraceLinks(BASELINE)).thenReturn(List.of(
                 link("l1", "AC", "ac-1", "TESTCASE",      "tc-1"),
                 link("l2", "AC", "ac-2", "TESTCASE",      "tc-2"),
                 link("l3", "AC", "ac-1", "SOURCE_SYMBOL", "sym-A"),
-                link("l4", "AC", "ac-3", "COVERAGE",      "cov-1")));
+                link("l4", "AC", "ac-1", "COVERAGE",      "cov-1"),
+                link("l5", "AC", "ac-1", "EXECUTION",     "exec-1"),
+                link("l6", "AC", "ac-3", "COVERAGE",      "cov-2")));
         when(graphRepository.findActiveEdgesByType(eq(BASELINE), any())).thenReturn(List.of());
 
         service.rebuildAll(PROJECT, BASELINE);
@@ -107,8 +109,9 @@ class ReadModelServiceTest {
         assertEquals(4, p.get("totalCriteria"));
         assertEquals(2, p.get("testcaseCoveredCount"));
         assertEquals(1, p.get("implementationCoveredCount"));
-        assertEquals(1, p.get("coverageCoveredCount"));
-        // closed loop = ACs with both testcase AND implementation = ac-1 only
+        assertEquals(2, p.get("coverageCoveredCount"));
+        assertEquals(1, p.get("executionCoveredCount"));
+        // closed loop = ACs with testcase + implementation + coverage + execution = ac-1 only
         assertEquals(1, p.get("closedLoopCount"));
         assertEquals(0.5, (double) p.get("testcaseCoverageRate"), 0.0001);
         assertEquals(0.25, (double) p.get("implementationCoverageRate"), 0.0001);

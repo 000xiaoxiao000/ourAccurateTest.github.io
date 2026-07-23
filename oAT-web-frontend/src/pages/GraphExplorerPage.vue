@@ -42,7 +42,7 @@
 
     <!-- GRAPH QUERY TAB -->
     <div v-show="activeTab === 'graph'" class="tab-panel">
-      <p class="feature-intro"><strong>图谱查询：</strong>查看当前范围内的事实节点与关系。表格中的“测试执行”表示测试报告或流水线中的一次测试运行记录，不是源码方法；它用于把测试用例与实际运行证据连接起来。</p>
+      <p class="feature-intro"><strong>图谱查询：</strong>查看当前范围内的事实节点与关系。数据来自当前基线的活跃图谱节点和边；未聚焦时按节点类型和名称取前 {{ GRAPH_QUERY_MAX_NODES }} 个节点，聚焦时按节点 ID 做深度遍历。表格中的“测试执行”表示测试报告或流水线中的一次测试运行记录，不是源码方法。</p>
       <div class="query-bar">
         <label class="field-inline focus-field">
           <span>聚焦节点 ID</span>
@@ -62,11 +62,11 @@
         </label>
         <label class="field-inline">
           <span>节点上限</span>
-          <input v-model.number="maxNodes" type="number" min="1" max="2000" />
+          <input v-model.number="maxNodes" type="number" min="1" :max="GRAPH_QUERY_MAX_NODES" />
         </label>
         <label class="field-inline">
           <span>边上限</span>
-          <input v-model.number="maxEdges" type="number" min="1" max="4000" />
+          <input v-model.number="maxEdges" type="number" min="1" :max="GRAPH_QUERY_MAX_EDGES" />
         </label>
         <button type="button" class="primary-button" :disabled="loading" @click="loadGraph">查询</button>
       </div>
@@ -78,8 +78,8 @@
           <small v-if="graph.expandHint">{{ graph.expandHint }}</small>
         </div>
         <div class="graph-stats">
-          <span>节点 {{ graph.nodes.length }}<template v-if="graph.totalActiveNodes"> / 活跃 {{ graph.totalActiveNodes }}</template></span>
-          <span>边 {{ graph.edges.length }}<template v-if="graph.edgesInScope"> / 范围内 {{ graph.edgesInScope }}</template></span>
+          <span>业务节点 {{ visibleGraphNodes.length }}<template v-if="externalFilteredNodeCount"> / 已过滤框架 {{ externalFilteredNodeCount }}</template></span>
+          <span>业务边 {{ visibleGraphEdges.length }}<template v-if="graph.edgesInScope"> / 范围内 {{ graph.edgesInScope }}</template></span>
           <span>深度 {{ graph.depth }}</span>
         </div>
         <div class="node-kind-legend">
@@ -202,7 +202,7 @@
 
     <!-- FUSION TAB -->
     <div v-show="activeTab === 'fusion'" class="tab-panel">
-      <p class="feature-intro"><strong>融合三态：</strong>将静态可达关系与真实运行证据按稳定符号关联。已执行确认表示有运行证据；可达未执行表示静态上可到达但尚未观察到执行；不可观测表示缺少可关联的动态证据。</p>
+      <p class="feature-intro"><strong>融合三态：</strong>数据来自当前基线的活跃 METHOD 节点。后端把方法节点与动态证据和静态调用关系关联：有覆盖/运行调用/触达证据为“已执行确认”，只有静态调用关系为“可达未执行”，两者都没有为“不可观测”。</p>
       <button type="button" class="secondary-button" :disabled="fusionLoading" @click="loadFusion">
         {{ fusionLoading ? '加载中...' : '加载融合三态' }}
       </button>
@@ -216,9 +216,18 @@
         <div v-if="fusion.clipped" class="notice warn">{{ fusion.clipReason }}</div>
         <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；如需区分“已执行确认”和“可达未执行”，还需投影覆盖率或测试执行数据。</span></div>
         <div v-else class="result-table-block">
+          <div class="list-toolbar">
+            <input v-model.trim="fusionKeyword" type="search" placeholder="搜索方法、符号或源码位置" @input="fusionNodePage = 1" />
+            <select v-model="fusionStateFilter" class="policy-select compact-select">
+              <option value="">全部状态</option>
+              <option value="EXECUTED_CONFIRMED">已执行确认</option>
+              <option value="REACHABLE_NOT_EXECUTED">可达未执行</option>
+              <option value="NOT_OBSERVABLE">不可观测</option>
+            </select>
+          </div>
           <div class="result-table-head">
             <strong>方法融合状态</strong>
-            <span>显示 {{ pagedFusionNodes.length }} / {{ fusion.nodes.length }} 条</span>
+            <span>显示 {{ pagedFusionNodes.length }} / {{ filteredFusionNodes.length }} 条</span>
           </div>
           <div class="table-scroll">
             <table class="data-table fusion-table">
@@ -232,7 +241,8 @@
               </tbody>
             </table>
           </div>
-          <AppPagination v-model:page="fusionNodePage" v-model:page-size="fusionNodePageSize" :total="fusion.nodes.length" item-name="个方法" :page-sizes="[10, 20, 50, 100]" />
+          <AppPagination v-model:page="fusionNodePage" v-model:page-size="fusionNodePageSize" :total="filteredFusionNodes.length" item-name="个方法" :page-sizes="[10, 20, 50, 100]" />
+          <p v-if="!filteredFusionNodes.length" class="table-note">没有匹配的方法。</p>
         </div>
       </div>
     </div>
@@ -245,9 +255,17 @@
         <button type="button" class="primary-button" :disabled="assertionLoading" @click="runAssertion">重新校验</button>
       </div>
       <div v-if="assertions.length" class="result-table-block">
+        <div class="list-toolbar">
+          <input v-model.trim="assertionKeyword" type="search" placeholder="搜索 AC、最佳用例或结论" @input="assertionPage = 1" />
+          <select v-model="assertionVerdictFilter" class="policy-select compact-select">
+            <option value="">全部结论</option>
+            <option value="ASSERTION_ALIGNED">断言对齐</option>
+            <option value="SUSPECTED_FALSE_PASS">疑似假通过</option>
+          </select>
+        </div>
         <div class="result-table-head">
           <strong>断言一致性结果</strong>
-          <span>显示 {{ pagedAssertions.length }} / {{ assertions.length }} 条</span>
+          <span>显示 {{ pagedAssertions.length }} / {{ filteredAssertions.length }} 条</span>
         </div>
         <div class="table-scroll">
           <table class="data-table assertion-table">
@@ -262,14 +280,15 @@
             </tbody>
           </table>
         </div>
-        <AppPagination v-model:page="assertionPage" v-model:page-size="assertionPageSize" :total="assertions.length" item-name="条 AC 结果" :page-sizes="[10, 20, 50, 100]" />
+        <AppPagination v-model:page="assertionPage" v-model:page-size="assertionPageSize" :total="filteredAssertions.length" item-name="条 AC 结果" :page-sizes="[10, 20, 50, 100]" />
+        <p v-if="!filteredAssertions.length" class="table-note">没有匹配的断言一致性结果。</p>
       </div>
       <div v-else-if="!assertionLoading" class="empty-state"><strong>暂无断言一致性结果</strong><span>需要先运行 AI 分析，生成验收标准、测试用例及其追溯关系；然后点击“重新校验”。</span></div>
     </div>
 
     <!-- READ MODEL TAB -->
     <div v-show="activeTab === 'readModel'" class="tab-panel">
-      <p class="feature-intro"><strong>读模型：</strong>将图谱事实预先汇总成面向查询的结果，例如 AC 覆盖汇总、未覆盖单元和质量门禁指标；它不新增事实，只用于更快地展示统计结果。</p>
+      <p class="feature-intro"><strong>读模型：</strong>数据来自当前基线的活跃预聚合结果。点击“重建读模型”会重新从验收标准、追溯链接、运行边和融合三态计算；展示页只读取聚合表，不新增事实。</p>
       <div class="toolbar">
         <button type="button" class="primary-button" :disabled="readModelBusy" @click="doRebuildReadModels">重建读模型</button>
         <select v-model="readModelKind" class="policy-select" @change="loadReadModel">
@@ -283,10 +302,14 @@
       </div>
       <div v-if="readModelRows.length" class="read-model-result">
         <p class="read-model-caption">{{ readModelDescription }}</p>
+        <p class="data-source-note">{{ readModelSourceNote }}</p>
         <div class="result-table-block">
+          <div class="list-toolbar">
+            <input v-model.trim="readModelKeyword" type="search" placeholder="搜索当前读模型结果" @input="readModelPage = 1" />
+          </div>
           <div class="result-table-head">
             <strong>{{ readModelKindText }}</strong>
-            <span>显示 {{ pagedReadModelDisplayRows.length }} / {{ readModelDisplayRows.length }} 条</span>
+            <span>显示 {{ pagedReadModelDisplayRows.length }} / {{ filteredReadModelDisplayRows.length }} 条</span>
           </div>
           <div class="table-scroll">
             <table class="data-table read-model-table">
@@ -298,7 +321,8 @@
               </tbody>
             </table>
           </div>
-          <AppPagination v-model:page="readModelPage" v-model:page-size="readModelPageSize" :total="readModelDisplayRows.length" item-name="条读模型" :page-sizes="[10, 20, 50, 100]" />
+          <AppPagination v-model:page="readModelPage" v-model:page-size="readModelPageSize" :total="filteredReadModelDisplayRows.length" item-name="条读模型" :page-sizes="[10, 20, 50, 100]" />
+          <p v-if="!filteredReadModelDisplayRows.length" class="table-note">没有匹配的读模型结果。</p>
         </div>
       </div>
       <div v-else-if="!readModelBusy" class="empty-state"><strong>暂无读模型数据</strong><span>请先完成相关事实图投影；如果需要 AC 覆盖或门禁类汇总，还需先运行 AI 分析，然后点击“重建读模型”。</span></div>
@@ -335,6 +359,7 @@
           <template v-if="comparisonTab === 'ac'">
             <div ref="acComparisonRef" class="comparison-card-head">
               <h3 class="section-title">AC 证据变化 <span class="badge-count">{{ filteredAcDeltas.length }}</span></h3>
+              <input v-model.trim="acDeltaKeyword" class="compact-search" type="search" placeholder="搜索 AC 或证据" @input="acDeltaPage = 1" />
               <select v-model="acDeltaFilter" class="policy-select compact-select">
                 <option value="">全部变化</option><option value="ADDED">仅新增</option><option value="REMOVED">仅移除</option><option value="EVIDENCE_CHANGED">仅证据变化</option>
               </select>
@@ -370,6 +395,7 @@
           <template v-else>
             <div ref="fusionComparisonRef" class="comparison-card-head">
               <h3 class="section-title">融合状态迁移 <span class="badge-count">{{ filteredFusionDeltas.length }}</span></h3>
+              <input v-model.trim="fusionDeltaKeyword" class="compact-search" type="search" placeholder="搜索代码符号或状态" @input="fusionDeltaPage = 1" />
               <select v-model="fusionDeltaFilter" class="policy-select compact-select">
                 <option value="">全部迁移</option><option value="EXECUTED_CONFIRMED">迁移为已执行确认</option><option value="REACHABLE_NOT_EXECUTED">迁移为可达未执行</option><option value="NOT_OBSERVABLE">迁移为不可观测</option>
               </select>
@@ -410,6 +436,7 @@ import { fetchVerificationOverview, type VerificationBaseline } from '@/api/veri
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import AppPagination from '@/components/AppPagination.vue'
 import { useToast } from '@/composables/useToast'
+import { isBusinessCodeItem, isGraphCodeKind } from '@/shared/codeGraphScope'
 import {
   compareBaselines, evaluateAssertionConsistency, fetchAssertionConsistency,
   fetchFusionView, fetchGraphView, fetchReadModel,
@@ -444,6 +471,9 @@ const projections = [
   { key: 'traceability', label: '追溯图', hint: '将已生成的 AC、用例、实现和运行证据串成追溯关系。' },
 ] as const
 type ProjectionKey = (typeof projections)[number]['key']
+const GRAPH_QUERY_MAX_NODES = 1000
+const GRAPH_QUERY_MAX_EDGES = 2000
+const FUSION_VIEW_MAX_NODES = 5000
 
 const loading = ref(false)
 const error = ref('')
@@ -470,10 +500,15 @@ const hoverNode = ref('')
 const nodeTableKeyword = ref('')
 const nodeTablePage = ref(1)
 const nodeTablePageSize = ref(10)
+const fusionKeyword = ref('')
+const fusionStateFilter = ref('')
 const fusionNodePage = ref(1)
 const fusionNodePageSize = ref(20)
+const assertionKeyword = ref('')
+const assertionVerdictFilter = ref('')
 const assertionPage = ref(1)
 const assertionPageSize = ref(20)
+const readModelKeyword = ref('')
 const readModelPage = ref(1)
 const readModelPageSize = ref(20)
 const graphScrollRef = ref<HTMLElement | null>(null)
@@ -502,6 +537,8 @@ const compareBusy = ref(false)
 const comparisonTab = ref<'ac' | 'fusion'>('ac')
 const selectedAcDeltaId = ref('')
 const selectedFusionDeltaKey = ref('')
+const acDeltaKeyword = ref('')
+const fusionDeltaKeyword = ref('')
 const acDeltaFilter = ref('')
 const fusionDeltaFilter = ref('')
 const acDeltaPage = ref(1)
@@ -513,8 +550,21 @@ const fusionComparisonRef = ref<HTMLElement | null>(null)
 
 const comparableBaselines = computed(() => baselines.value.filter((item) => item.id !== baselineId.value))
 const currentBaselineLabel = computed(() => baselines.value.find((item) => item.id === baselineId.value)?.name || '当前基线')
-const filteredAcDeltas = computed(() => (comparison.value?.acDeltas || []).filter((delta) => !acDeltaFilter.value || delta.changeType === acDeltaFilter.value))
-const filteredFusionDeltas = computed(() => (comparison.value?.fusionDeltas || []).filter((delta) => !fusionDeltaFilter.value || delta.afterState === fusionDeltaFilter.value))
+const filteredAcDeltas = computed(() => (comparison.value?.acDeltas || []).filter((delta) => {
+  if (acDeltaFilter.value && delta.changeType !== acDeltaFilter.value) return false
+  const keyword = acDeltaKeyword.value.trim().toLowerCase()
+  if (!keyword) return true
+  return [delta.criterionId, delta.acKey, delta.changeType, delta.beforeEvidence, delta.afterEvidence, acDeltaText(delta.changeType), evidenceCodeText(delta.beforeEvidence), evidenceCodeText(delta.afterEvidence)]
+    .filter(Boolean).join(' ').toLowerCase().includes(keyword)
+}))
+const filteredFusionDeltas = computed(() => (comparison.value?.fusionDeltas || []).filter((delta) => {
+  if (!isBusinessCodeItem({ symbol: delta.symbol, displayName: delta.symbol })) return false
+  if (fusionDeltaFilter.value && delta.afterState !== fusionDeltaFilter.value) return false
+  const keyword = fusionDeltaKeyword.value.trim().toLowerCase()
+  if (!keyword) return true
+  return [delta.symbol, delta.beforeState, delta.afterState, fusionNodeText(delta.beforeState), fusionNodeText(delta.afterState)]
+    .filter(Boolean).join(' ').toLowerCase().includes(keyword)
+}))
 const pagedAcDeltas = computed(() => pageSlice(filteredAcDeltas.value, acDeltaPage.value, acDeltaPageSize.value))
 const pagedFusionDeltas = computed(() => pageSlice(filteredFusionDeltas.value, fusionDeltaPage.value, fusionDeltaPageSize.value))
 const selectedAcDelta = computed(() => filteredAcDeltas.value.find((delta) => delta.criterionId === selectedAcDeltaId.value) || null)
@@ -526,8 +576,16 @@ const readModelDescription = computed(() => ({
   RM_HOT_CALL_CHAIN: '汇总运行期间观察到的调用链路和耗时，用于定位高频或高耗时路径。',
   RM_UNCOVERED_UNITS: '列出静态上可达、但当前基线未观察到动态执行证据的代码单元。',
   RM_IMPACT_SUMMARY: '按代码符号汇总可能受变更影响的验收标准和测试用例，用于辅助评估变更范围。',
-  RM_QUALITY_GATE_SUMMARY: '汇总当前基线的需求验证闭环指标，供质量门禁和发布评估使用。',
+  RM_QUALITY_GATE_SUMMARY: '汇总当前基线的需求验证闭环指标。验证闭环按“有用例依据 + 有实现依据 + 有覆盖率依据 + 有执行依据”同时满足计算。',
 }[readModelKind.value] || '图谱事实的预聚合查询结果。'))
+const readModelSourceNote = computed(() => ({
+  RM_AC_COVERAGE_SUMMARY: '来源：验收标准列表 + 追溯链接。每一行对应 1 条验收标准，表头字段由该 AC 是否存在 TESTCASE、SOURCE_SYMBOL、COVERAGE、EXECUTION 链接计算。',
+  RM_SYMBOL_TEST_PROTECTION: '来源：追溯链接。先找 SOURCE_SYMBOL 关联的 AC，再通过这些 AC 找 TESTCASE，用于判断代码符号是否有测试保护。',
+  RM_HOT_CALL_CHAIN: '来源：活跃 CALLS_RUNTIME 边。调用次数、耗时和结果来自运行调用边的 attributes。',
+  RM_UNCOVERED_UNITS: '来源：融合三态。只展示“可达未执行”的方法节点，即静态可达但没有动态执行证据。',
+  RM_IMPACT_SUMMARY: '来源：追溯链接。按 SOURCE_SYMBOL 汇总可能影响的 AC 和建议复测用例。',
+  RM_QUALITY_GATE_SUMMARY: '来源：验收标准列表 + 追溯链接。总数来自 AC 数量；用例/实现/覆盖率/执行分别统计有对应链接的 AC；验证闭环为四类依据都存在的 AC。',
+}[readModelKind.value] || '来源：当前基线已重建的活跃读模型聚合。'))
 
 type ReadModelColumn = { key: string; label: string }
 type ReadModelCell = { key: string; value: string; mono?: boolean; muted?: boolean }
@@ -537,12 +595,33 @@ const readModelColumns = computed<ReadModelColumn[]>(() => ({
   RM_HOT_CALL_CHAIN: [{ key: 'source', label: '调用起点' }, { key: 'target', label: '调用目标' }, { key: 'count', label: '调用次数' }, { key: 'duration', label: '耗时' }, { key: 'outcome', label: '结果' }],
   RM_UNCOVERED_UNITS: [{ key: 'unit', label: '未覆盖代码单元' }, { key: 'location', label: '位置' }, { key: 'reason', label: '原因' }],
   RM_IMPACT_SUMMARY: [{ key: 'symbol', label: '变更代码符号' }, { key: 'ac', label: '可能影响的验收标准' }, { key: 'testcase', label: '建议复测用例' }],
-  RM_QUALITY_GATE_SUMMARY: [{ key: 'criteria', label: '验收标准总数' }, { key: 'testcase', label: '有用例依据' }, { key: 'implementation', label: '有实现依据' }, { key: 'coverage', label: '有覆盖率依据' }, { key: 'execution', label: '有执行依据' }, { key: 'closed', label: '验证闭环' }],
+  RM_QUALITY_GATE_SUMMARY: [{ key: 'criteria', label: '验收标准总数' }, { key: 'testcase', label: '有用例依据' }, { key: 'implementation', label: '有实现依据' }, { key: 'coverage', label: '有覆盖率依据' }, { key: 'execution', label: '有执行依据' }, { key: 'closed', label: '全链路闭环' }],
 }[readModelKind.value] || []))
 const readModelDisplayRows = computed(() => readModelRows.value.map((row) => ({ id: row.id, cells: readModelCells(row.payload) })))
-const pagedFusionNodes = computed(() => pageSlice(fusion.value?.nodes || [], fusionNodePage.value, fusionNodePageSize.value))
-const pagedAssertions = computed(() => pageSlice(assertions.value, assertionPage.value, assertionPageSize.value))
-const pagedReadModelDisplayRows = computed(() => pageSlice(readModelDisplayRows.value, readModelPage.value, readModelPageSize.value))
+const filteredFusionNodes = computed(() => (fusion.value?.nodes || []).filter((node) => {
+  if (!isBusinessCodeItem({ id: node.nodeId, displayName: node.displayName, stableSymbolId: node.stableSymbolId, locator: node.locator })) return false
+  if (fusionStateFilter.value && node.fusionState !== fusionStateFilter.value) return false
+  const keyword = fusionKeyword.value.trim().toLowerCase()
+  if (!keyword) return true
+  return [node.nodeId, node.displayName, node.stableSymbolId, node.locator, fusionNodeText(node.fusionState)]
+    .filter(Boolean).join(' ').toLowerCase().includes(keyword)
+}))
+const filteredAssertions = computed(() => assertions.value.filter((item) => {
+  if (assertionVerdictFilter.value && item.verdict !== assertionVerdictFilter.value) return false
+  const keyword = assertionKeyword.value.trim().toLowerCase()
+  if (!keyword) return true
+  return [item.criterionId, item.acKey, item.verdict, assertionVerdictText(item.verdict), item.bestTestcaseKey, pct(item.assertionOverlap)]
+    .filter(Boolean).join(' ').toLowerCase().includes(keyword)
+}))
+const filteredReadModelDisplayRows = computed(() => {
+  const keyword = readModelKeyword.value.trim().toLowerCase()
+  const rows = readModelDisplayRows.value.filter(isBusinessReadModelRow)
+  if (!keyword) return rows
+  return rows.filter((row) => [row.id, ...row.cells.map((cell) => cell.value)].join(' ').toLowerCase().includes(keyword))
+})
+const pagedFusionNodes = computed(() => pageSlice(filteredFusionNodes.value, fusionNodePage.value, fusionNodePageSize.value))
+const pagedAssertions = computed(() => pageSlice(filteredAssertions.value, assertionPage.value, assertionPageSize.value))
+const pagedReadModelDisplayRows = computed(() => pageSlice(filteredReadModelDisplayRows.value, readModelPage.value, readModelPageSize.value))
 const readModelKindText = computed(() => ({
   RM_AC_COVERAGE_SUMMARY: 'AC 覆盖汇总',
   RM_SYMBOL_TEST_PROTECTION: '符号测试保护',
@@ -554,15 +633,19 @@ const readModelKindText = computed(() => ({
 
 const nodeKindCounts = computed(() => {
   const counts: Record<string, number> = {}
-  for (const n of graph.value?.nodes ?? []) counts[n.kind] = (counts[n.kind] ?? 0) + 1
+  for (const n of visibleGraphNodes.value) counts[n.kind] = (counts[n.kind] ?? 0) + 1
   return counts
 })
-const graphNodeById = computed(() => new Map((graph.value?.nodes ?? []).map((node) => [node.id, node])))
+const visibleGraphNodes = computed(() => (graph.value?.nodes || []).filter(isVisibleGraphNode))
+const visibleGraphNodeIds = computed(() => new Set(visibleGraphNodes.value.map((node) => node.id)))
+const visibleGraphEdges = computed(() => (graph.value?.edges || []).filter((edge) => visibleGraphNodeIds.value.has(edge.sourceNodeId) && visibleGraphNodeIds.value.has(edge.targetNodeId)))
+const externalFilteredNodeCount = computed(() => Math.max(0, (graph.value?.nodes.length || 0) - visibleGraphNodes.value.length))
+const graphNodeById = computed(() => new Map(visibleGraphNodes.value.map((node) => [node.id, node])))
 const hoverGraphNode = computed(() => hoverNode.value ? graphNodeById.value.get(hoverNode.value) : undefined)
 const hoverSvgNode = computed(() => svgLayout.value.nodes.find((node) => node.id === hoverNode.value))
 const filteredGraphNodes = computed(() => {
   const keyword = nodeTableKeyword.value.trim().toLowerCase()
-  const nodes = graph.value?.nodes || []
+  const nodes = visibleGraphNodes.value
   if (!keyword) return nodes
   return nodes.filter((node) => graphNodeSearchText(node).includes(keyword))
 })
@@ -602,14 +685,13 @@ const GRAPH_LANES: Array<{ label: string; kinds: string[] }> = [
 ]
 
 const svgLayout = computed<{ nodes: SvgNode[]; edges: SvgEdge[]; width: number; height: number }>(() => {
-  const g = graph.value
-  if (!g || !g.nodes.length) return { nodes: [], edges: [], width: 900, height: 480 }
+  if (!graph.value || !visibleGraphNodes.value.length) return { nodes: [], edges: [], width: 900, height: 480 }
   const cellWidth = 150
   const rowHeight = 82
   const laneGap = 56
-  const groups = GRAPH_LANES.map((lane) => ({ ...lane, nodes: g.nodes.filter((node) => lane.kinds.includes(node.kind)) }))
+  const groups = GRAPH_LANES.map((lane) => ({ ...lane, nodes: visibleGraphNodes.value.filter((node) => lane.kinds.includes(node.kind)) }))
   const knownKinds = new Set(GRAPH_LANES.flatMap((lane) => lane.kinds))
-  const remaining = g.nodes.filter((node) => !knownKinds.has(node.kind))
+  const remaining = visibleGraphNodes.value.filter((node) => !knownKinds.has(node.kind))
   if (remaining.length) groups.push({ label: '其他事实', kinds: [], nodes: remaining })
   const maxColumns = Math.max(6, ...groups.map((group) => Math.ceil(Math.sqrt(group.nodes.length || 1))))
   const width = Math.max(900, maxColumns * cellWidth + 110)
@@ -631,7 +713,7 @@ const svgLayout = computed<{ nodes: SvgNode[]; edges: SvgEdge[]; width: number; 
     y += Math.max(1, Math.ceil(group.nodes.length / columns)) * rowHeight + laneGap
   }
   const edges: SvgEdge[] = []
-  for (const edge of g.edges) {
+  for (const edge of visibleGraphEdges.value) {
     const source = pos.get(edge.sourceNodeId)
     const target = pos.get(edge.targetNodeId)
     if (source && target) edges.push({ x1: source.x, y1: source.y, x2: target.x, y2: target.y, type: edge.type })
@@ -646,11 +728,11 @@ function pageSlice<T>(items: T[], page: number, pageSize: number) {
 function scrollToComparison(element: HTMLElement | null) {
   void nextTick(() => element?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
 }
-watch([acDeltaFilter, acDeltaPageSize], () => { acDeltaPage.value = 1 })
-watch([fusionDeltaFilter, fusionDeltaPageSize], () => { fusionDeltaPage.value = 1 })
-watch(fusionNodePageSize, () => { fusionNodePage.value = 1 })
-watch(assertionPageSize, () => { assertionPage.value = 1 })
-watch([readModelKind, readModelPageSize], () => { readModelPage.value = 1 })
+watch([acDeltaFilter, acDeltaKeyword, acDeltaPageSize], () => { acDeltaPage.value = 1 })
+watch([fusionDeltaFilter, fusionDeltaKeyword, fusionDeltaPageSize], () => { fusionDeltaPage.value = 1 })
+watch([fusionKeyword, fusionStateFilter, fusionNodePageSize], () => { fusionNodePage.value = 1 })
+watch([assertionKeyword, assertionVerdictFilter, assertionPageSize], () => { assertionPage.value = 1 })
+watch([readModelKind, readModelKeyword, readModelPageSize], () => { readModelPage.value = 1 })
 watch(comparison, () => {
   comparisonTab.value = 'ac'
   selectedAcDeltaId.value = ''
@@ -659,6 +741,8 @@ watch(comparison, () => {
   fusionDeltaPage.value = 1
   acDeltaFilter.value = ''
   fusionDeltaFilter.value = ''
+  acDeltaKeyword.value = ''
+  fusionDeltaKeyword.value = ''
 })
 
 onMounted(async () => {
@@ -677,7 +761,9 @@ async function loadGraph() {
     graph.value = await fetchGraphView(projectId.value, {
       baselineId: baselineId.value,
       focusId: focusId.value || undefined,
-      depth: depth.value, maxNodes: maxNodes.value, maxEdges: maxEdges.value,
+      depth: depth.value,
+      maxNodes: clamp(maxNodes.value, 1, GRAPH_QUERY_MAX_NODES),
+      maxEdges: clamp(maxEdges.value, 1, GRAPH_QUERY_MAX_EDGES),
     })
     nodeTablePage.value = 1
     await nextTick()
@@ -814,7 +900,7 @@ async function loadFusion() {
   if (fusionLoading.value) return
   fusionLoading.value = true
   try {
-    fusion.value = await fetchFusionView(projectId.value, baselineId.value, 1000)
+    fusion.value = await fetchFusionView(projectId.value, baselineId.value, FUSION_VIEW_MAX_NODES)
     fusionNodePage.value = 1
   }
   catch (e) { toast.error(msg(e)) }
@@ -969,6 +1055,26 @@ function msg(e: unknown) { return e instanceof Error ? e.message : '操作失败
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
 }
+function isVisibleGraphNode(node: GraphNode) {
+  if (!isGraphCodeKind(node.kind)) return true
+  return isBusinessCodeItem({
+    id: node.id,
+    kind: node.kind,
+    displayName: node.displayName,
+    stableSymbolId: node.stableSymbolId,
+    logicalSymbolId: node.logicalSymbolId,
+    locator: node.locator,
+    path: node.locator,
+  })
+}
+function isBusinessReadModelRow(row: { id: string; cells: ReadModelCell[] }) {
+  if (!['RM_SYMBOL_TEST_PROTECTION', 'RM_HOT_CALL_CHAIN', 'RM_UNCOVERED_UNITS', 'RM_IMPACT_SUMMARY'].includes(readModelKind.value)) return true
+  return isBusinessCodeItem({
+    id: row.id,
+    displayName: row.cells.map((cell) => cell.value).join(' '),
+    symbol: row.cells.find((cell) => cell.mono)?.value,
+  })
+}
 function graphNodeSearchText(node: GraphNode) {
   return [
     node.id,
@@ -1092,6 +1198,7 @@ function nodeTooltipRows(node: GraphNode) {
 .projection-guide strong { color:var(--oat-primary-dark);font-size:13px; }
 .feature-intro { margin:0;padding:10px 13px;border-left:3px solid var(--oat-primary);border-radius:0 8px 8px 0;background:var(--oat-surface-soft);color:var(--oat-text-secondary);font-size:13px;line-height:1.6; }
 .feature-intro strong { color:var(--oat-text); }
+.data-source-note { margin:0;padding:8px 10px;border:1px solid rgba(100,116,139,.18);border-radius:8px;background:#fff;color:var(--oat-text-muted);font-size:12px;line-height:1.55; }
 .svg-canvas-wrap { position:relative;height:min(680px, calc(100vh - 210px));min-height:420px;border:1px solid var(--oat-border);border-radius:12px;background:#fff;padding:8px;overflow:auto;overscroll-behavior:contain;cursor:grab; }
 .svg-canvas-wrap.panning { cursor:grabbing;user-select:none; }
 .graph-explainer { margin:2px 2px 10px;padding:8px 10px;border-radius:8px;background:var(--oat-surface-soft);color:var(--oat-text-secondary);font-size:12px;line-height:1.5; }
@@ -1210,7 +1317,7 @@ function nodeTooltipRows(node: GraphNode) {
 .comparison-summary span,.comparison-summary small { color:var(--oat-text-muted);font-size:12px; }
 .comparison-summary strong { color:var(--oat-primary-dark);font-size:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
 .comparison-card { min-width:0; }
-.comparison-card-head { display:flex;align-items:center;justify-content:space-between;gap:8px; }
+.comparison-card-head { display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap; }
 .comparison-tabs { display:flex;gap:4px;border-bottom:1px solid var(--oat-border); }
 .comparison-tabs button { display:inline-flex;align-items:center;gap:6px;border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 12px;color:var(--oat-text-muted);cursor:pointer;font-size:13px;font-weight:900; }
 .comparison-tabs button.active { border-bottom-color:var(--oat-primary);color:var(--oat-primary-dark); }
@@ -1222,6 +1329,7 @@ function nodeTooltipRows(node: GraphNode) {
 .comparison-detail dd { margin:0;overflow-wrap:anywhere; }
 .comparison-detail code { margin-left:6px;color:var(--oat-text-muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px; }
 .compact-select { max-width:160px; }
+.compact-search { min-height:34px;min-width:min(320px,100%);border:1px solid var(--oat-border);border-radius:8px;padding:6px 10px;background:#fff;color:var(--oat-text);font-size:13px; }
 .comparison-table-wrap { max-height:520px;overflow:auto;border:1px solid var(--oat-border);border-radius:8px; }
 .comparison-table-wrap .data-table { min-width:620px; }
 .comparison-table-wrap .data-table th { position:sticky;top:0;background:#fff;z-index:1; }

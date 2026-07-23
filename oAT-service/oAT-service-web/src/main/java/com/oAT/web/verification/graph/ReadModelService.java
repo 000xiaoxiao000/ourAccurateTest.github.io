@@ -54,6 +54,9 @@ public class ReadModelService {
     public List<GraphRepository.GraphAggregate> read(String projectId, String baselineId, String kind) {
         verificationRepository.findBaseline(projectId, baselineId)
                 .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
+        if (QUALITY_GATE_SUMMARY.equals(kind)) {
+            rebuildQualityGateSummary(projectId, baselineId);
+        }
         return graphRepository.findActiveAggregates(baselineId, kind);
     }
 
@@ -196,6 +199,8 @@ public class ReadModelService {
         int total = criteria.size();
         Set<String> closedLoop = new LinkedHashSet<>(withTestcase);
         closedLoop.retainAll(withImplementation);
+        closedLoop.retainAll(withCoverage);
+        closedLoop.retainAll(withExecution);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("totalCriteria", total);
         payload.put("testcaseCoveredCount", withTestcase.size());

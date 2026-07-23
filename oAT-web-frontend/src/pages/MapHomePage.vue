@@ -57,14 +57,66 @@
     </div>
 
     <section v-if="activeTab === 'trace'" class="tab-page trace-tab">
+      <aside class="trace-list-pane">
+        <div class="pane-head">
+          <div>
+            <strong>追溯数据列表</strong>
+            <span>列表展示当前基线全部已返回节点，选择后生成关系图</span>
+          </div>
+          <button type="button" class="trace-list-clear" :disabled="!selectedTraceIds.size" @click="clearTraceListSelection">清空</button>
+        </div>
+        <div class="trace-list-tabs" role="tablist" aria-label="追溯数据层">
+          <button v-for="layer in traceListLayers" :key="layer.key" type="button" :class="{ active: activeTraceLayer === layer.key }" @click="switchTraceLayer(layer.key)">
+            {{ layer.label }} <b>{{ layer.count }}</b>
+          </button>
+        </div>
+        <div class="trace-list-toolbar">
+          <input v-model.trim="traceListKeyword" type="search" placeholder="搜索名称、ID、描述、定位" />
+          <span v-if="traceListTotal">{{ traceListStart }}-{{ traceListEnd }} / {{ traceListTotal }}</span>
+          <span v-else>0 条</span>
+        </div>
+        <div class="trace-list-scroll">
+          <div v-if="!traceListRows.length" class="empty-card">当前层暂无数据</div>
+          <label v-for="node in traceListRows" :key="node.id" class="trace-list-row" :class="{ selected: selectedTraceIds.has(node.id) }">
+            <input type="checkbox" :checked="selectedTraceIds.has(node.id)" @change="toggleTraceListNode(node.id)" />
+            <span class="trace-list-main">
+              <strong :title="node.label">{{ node.label || node.id }}</strong>
+              <small :title="traceNodeTitle(node)">{{ node.locator || node.symbol || node.id }}</small>
+            </span>
+            <span class="trace-list-links">{{ traceNodeLinkCount(node.id) }}</span>
+          </label>
+        </div>
+        <div class="trace-list-pagination">
+          <button type="button" :disabled="traceListPage <= 1" @click="traceListPage -= 1">上一页</button>
+          <span>第 {{ traceListPage }} / {{ traceListPageCount }} 页</span>
+          <button type="button" :disabled="traceListPage >= traceListPageCount" @click="traceListPage += 1">下一页</button>
+        </div>
+        <div v-if="selectedTraceIds.size" class="trace-selection-summary">
+          已选择 <strong>{{ selectedTraceIds.size }}</strong> 个节点，右侧显示其关联关系
+        </div>
+      </aside>
       <main class="map-pane trace-map-pane">
         <div class="pane-head map-head">
           <div>
             <strong>三层追溯关系图</strong>
             <span>正向为需求驱动下层，反向为下层溯源上层</span>
           </div>
+          <button type="button" class="trace-info-toggle" @click="traceInfoExpanded = !traceInfoExpanded">
+            {{ traceInfoExpanded ? '收起说明' : '展开说明' }}
+          </button>
         </div>
-        <section class="trace-map-info" aria-label="三层追溯关系图说明">
+        <div class="trace-map-tools">
+          <label class="trace-query">
+            <span>查询</span>
+            <input v-model.trim="traceGraphKeyword" type="search" placeholder="搜索需求、用例、代码、描述或定位信息" />
+          </label>
+          <div class="trace-layer-counts" aria-label="三层数量">
+            <span>需求层 {{ traceGraph.layerCounts.requirements }}</span>
+            <span>测试用例层 {{ traceGraph.layerCounts.testcases }}</span>
+            <span>代码层 {{ traceGraph.layerCounts.code }}</span>
+          </div>
+        </div>
+        <section v-if="traceInfoExpanded" class="trace-map-info" aria-label="三层追溯关系图说明">
           <div class="trace-map-legend">
             <strong>图例</strong>
             <span><i class="legend req"></i>需求层</span>
@@ -94,7 +146,8 @@
           </div>
         </section>
         <div v-if="map.loading.value" class="trace-empty"><span class="spin">◌</span><span>加载中…</span></div>
-        <div v-else-if="!traceGraph.nodes.length" class="trace-empty">暂无可展示的三层追溯关系。</div>
+        <div v-else-if="!selectedTraceIds.size" class="trace-empty"><strong>尚未生成关系图</strong><span>请从左侧列表选择一个或多个节点</span></div>
+        <div v-else-if="!traceGraph.nodes.length" class="trace-empty"><strong>所选节点暂无关系</strong><span>请换一个节点，或调整上方筛选条件</span></div>
         <div v-else class="trace-map-scroll">
           <svg class="trace-map-svg" :viewBox="`0 0 ${traceGraph.width} ${traceGraph.height}`" role="img" aria-label="三层追溯关系图" @click="clearTraceGraphSelection">
             <defs>
@@ -298,7 +351,8 @@
           </template>
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
-          <div v-if="!dependencyGraph.nodes.length" class="empty-card">暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
+          <div v-if="!miniGraphReady" class="empty-card">请选择左侧代码树中的文件、类或方法，或输入搜索关键字后查看依赖关系图。</div>
+          <div v-else-if="!dependencyGraph.nodes.length" class="empty-card">当前选择范围暂无源码依赖数据。请确认当前基线已绑定源码，且源码快照包含可解析的 import 信息。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${dependencyGraph.width} ${dependencyGraph.height}`" role="img" aria-label="代码依赖关系图" @click="clearMiniGraphSelection">
             <defs><marker id="dependency-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g
@@ -328,7 +382,8 @@
           >{{ miniGraphTooltip.text }}</div>
         </div>
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
-          <div v-if="!controlFlowGraph.nodes.length" class="empty-card">暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
+          <div v-if="!miniGraphReady" class="empty-card">请选择左侧代码树中的方法、类或文件，或输入搜索关键字后查看控制流图。</div>
+          <div v-else-if="!controlFlowGraph.nodes.length" class="empty-card">当前选择范围暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
           <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图" @click="clearMiniGraphSelection">
             <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
             <g
@@ -464,6 +519,7 @@ import type { VerificationBaseline } from '@/api/verification'
 import type { CodeTreeNode, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'
 import { useTraceabilityMap } from '@/features/map/composables/useTraceabilityMap'
 import type { TraceFilter } from '@/features/map/composables/useTraceabilityMap'
+import { filterBusinessCodeTree } from '@/shared/codeGraphScope'
 
 interface TreeNode {
   key: string
@@ -509,8 +565,15 @@ const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
 const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
 const selectedTraceId = ref('')
+const selectedTraceIds = ref<Set<string>>(new Set())
+const activeTraceLayer = ref<'requirements' | 'testcases' | 'code'>('requirements')
+const traceListKeyword = ref('')
+const traceListPage = ref(1)
+const traceListPageSize = 50
 const selectedCallGraphId = ref('')
 const selectedMiniGraphId = ref('')
+const traceInfoExpanded = ref(false)
+const traceGraphKeyword = ref('')
 const miniGraphFocusHighlightDisabled = ref(false)
 const miniGraphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 const callGraphGlobalEnabled = ref(false)
@@ -550,6 +613,15 @@ watch(() => map.loading.value, (loading) => {
   }
 })
 
+watch([traceListKeyword, activeTraceLayer], () => {
+  traceListPage.value = 1
+})
+
+watch(() => map.nodes.value, () => {
+  const available = new Set(map.nodes.value.map((node) => node.id))
+  selectedTraceIds.value = new Set([...selectedTraceIds.value].filter((id) => available.has(id)))
+}, { deep: false })
+
 const filters: Array<{ value: TraceFilter; label: string }> = [
   { value: 'ALL', label: '全部' },
   { value: 'COMPLETE', label: '完整链' },
@@ -582,13 +654,34 @@ const displayOpenClasses = computed(() => {
   return classes
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
-const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value, selectedTraceId.value))
+const traceListLayers = computed(() => [
+  { key: 'requirements' as const, label: '需求', count: traceListNodes('requirements').length },
+  { key: 'testcases' as const, label: '测试用例', count: traceListNodes('testcases').length },
+  { key: 'code' as const, label: '代码', count: traceListNodes('code').length },
+])
+const traceListFiltered = computed(() => {
+  const keyword = normalizeSearch(traceListKeyword.value)
+  return traceListNodes(activeTraceLayer.value)
+    .filter((node) => !keyword || traceNodeSearchText(node).includes(keyword))
+    .sort((left, right) => String(left.label || left.id).localeCompare(String(right.label || right.id)))
+})
+const traceListTotal = computed(() => traceListFiltered.value.length)
+const traceListPageCount = computed(() => Math.max(1, Math.ceil(traceListTotal.value / traceListPageSize)))
+const traceListStart = computed(() => traceListTotal.value ? (traceListPage.value - 1) * traceListPageSize + 1 : 0)
+const traceListEnd = computed(() => Math.min(traceListTotal.value, traceListPage.value * traceListPageSize))
+const traceListRows = computed(() => traceListFiltered.value.slice(traceListStart.value - 1, traceListEnd.value))
+const traceGraph = computed(() => buildTraceGraph(map.nodes.value, map.filteredEdges.value, selectedTraceIds.value, selectedTraceId.value, traceGraphKeyword.value))
 const callGraphReady = computed(() => Boolean(map.focusId.value || codeKeyword.value || callGraphGlobalEnabled.value))
+const miniGraphReady = computed(() => Boolean(map.focusId.value || codeKeyword.value))
 const callGraph = computed(() => callGraphReady.value
   ? buildCallGraph(map.nodes.value, map.edges.value, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, selectedCallGraphId.value, callGraphScope.value, codeKeyword.value)
   : emptyCallGraph())
-const dependencyGraph = computed(() => buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value))
-const controlFlowGraph = computed(() => buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value))
+const dependencyGraph = computed(() => miniGraphReady.value
+  ? buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value)
+  : emptyMiniGraph())
+const controlFlowGraph = computed(() => miniGraphReady.value
+  ? buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value)
+  : emptyMiniGraph())
 const visibleMiniGraph = computed(() => callViewMode.value === 'dependency' ? dependencyGraph.value : callViewMode.value === 'control' ? controlFlowGraph.value : null)
 const miniGraphHighlight = computed(() => buildMiniGraphHighlight(visibleMiniGraph.value, selectedMiniGraphId.value, miniGraphFocusHighlightDisabled.value ? '' : map.focusId.value))
 const callViewMeta = computed(() => {
@@ -835,6 +928,7 @@ async function reload() {
 async function reloadBaseline() {
   map.focusId.value = ''
   selectedTraceId.value = ''
+  selectedTraceIds.value = new Set()
   selectedCallGraphId.value = ''
   callGraphGlobalEnabled.value = false
   loadedCodeDataKey.value = ''
@@ -896,6 +990,37 @@ function selectTraceNode(id: string) {
 }
 
 function clearTraceGraphSelection() {
+  selectedTraceId.value = ''
+}
+
+function traceListNodes(layer: 'requirements' | 'testcases' | 'code') {
+  if (layer === 'requirements') return map.nodes.value.filter((node) => node.kind === 'REQUIREMENT')
+  if (layer === 'testcases') return map.nodes.value.filter((node) => node.kind === 'TESTCASE')
+  return map.nodes.value.filter((node) => node.kind.startsWith('CODE_') && isBusinessTraceCode(node))
+}
+
+function isBusinessTraceCode(node: TraceabilityNode) {
+  return filterBusinessCodeTree([{ id: node.id, label: node.label, symbol: node.symbol, locator: node.locator, description: node.description }]).length > 0
+}
+
+function traceNodeLinkCount(id: string) {
+  return map.filteredEdges.value.filter((edge) => edge.source === id || edge.target === id).length
+}
+
+function switchTraceLayer(layer: 'requirements' | 'testcases' | 'code') {
+  activeTraceLayer.value = layer
+  traceListPage.value = 1
+}
+
+function toggleTraceListNode(id: string) {
+  const next = new Set(selectedTraceIds.value)
+  next.has(id) ? next.delete(id) : next.add(id)
+  selectedTraceIds.value = next
+  selectedTraceId.value = id
+}
+
+function clearTraceListSelection() {
+  selectedTraceIds.value = new Set()
   selectedTraceId.value = ''
 }
 
@@ -1068,8 +1193,9 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
 }
 
 function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNode[] {
-  if (!keyword) return nodes
-  return nodes
+  const businessNodes = filterBusinessCodeTree(nodes) as CodeTreeNode[]
+  if (!keyword) return businessNodes
+  return businessNodes
     .map((node) => {
       const children = filterCodeTreeNodes(node.children || [], keyword)
       if (children.length || searchableCodeTreeNode(node).includes(keyword)) {
@@ -1326,18 +1452,51 @@ function numberArrayMetadata(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number') : []
 }
 
-function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], selectedNodeId: string) {
+function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], selectedNodeIds: Set<string>, selectedNodeId: string, keyword = '') {
   const nodeMap = new Map(nodes.map((node) => [node.id, node]))
   const traceEdges = collapseTraceEdges(edges, nodeMap)
+  if (!selectedNodeIds.size) {
+    return {
+      width: 1180,
+      height: 560,
+      lanes: [],
+      nodes: [],
+      edges: [],
+      linkedIds: new Set<string>(),
+      layerCounts: { requirements: 0, testcases: 0, code: 0 },
+      relatedNodeIds: new Set<string>(),
+      relatedEdgeIds: new Set<string>(),
+      hasSelection: false,
+      selectedNodeId: '',
+    }
+  }
+  const selectedScopeIds = new Set([...selectedNodeIds].map((id) => traceLayerNodeId(id, nodeMap)))
   const edgeIds = new Set<string>()
   traceEdges.forEach((edge) => {
     edgeIds.add(edge.source)
     edgeIds.add(edge.target)
   })
 
-  const requirements = pickLayerNodes(nodes, 'REQUIREMENT', edgeIds)
-  const testcases = pickLayerNodes(nodes, 'TESTCASE', edgeIds)
-  const code = pickLayerNodes(nodes.filter((node) => node.kind === 'CODE_FILE'), 'CODE_', edgeIds, 24)
+  const selectedGraphScope = new Set(selectedScopeIds)
+  traceEdges.forEach((edge) => {
+    if (selectedScopeIds.has(edge.source)) selectedGraphScope.add(edge.target)
+    if (selectedScopeIds.has(edge.target)) selectedGraphScope.add(edge.source)
+  })
+  const keywordScope = traceGraphQueryScope(nodes, traceEdges, keyword)
+  const scopedNodeIds = keywordScope
+    ? new Set([...selectedGraphScope].filter((id) => keywordScope.has(id)))
+    : selectedGraphScope
+  const visibleNodes = nodes.filter((node) => scopedNodeIds.has(traceLayerNodeId(node.id, nodeMap)) || scopedNodeIds.has(node.id))
+  const visibleTraceEdges = traceEdges.filter((edge) => scopedNodeIds.has(edge.source) && scopedNodeIds.has(edge.target))
+  const visibleEdgeIds = new Set<string>()
+  visibleTraceEdges.forEach((edge) => {
+    visibleEdgeIds.add(edge.source)
+    visibleEdgeIds.add(edge.target)
+  })
+
+  const requirements = pickLayerNodes(visibleNodes, 'REQUIREMENT', visibleEdgeIds)
+  const testcases = pickLayerNodes(visibleNodes, 'TESTCASE', visibleEdgeIds)
+  const code = pickLayerNodes(visibleNodes.filter((node) => node.kind === 'CODE_FILE'), 'CODE_', visibleEdgeIds)
   const rawLayers = [
     { key: 'requirements', title: layerTitle('需求层 (Requirements)', requirements), nodes: requirements.nodes, tone: 'req' },
     { key: 'testcases', title: layerTitle('测试用例层 (Test Cases)', testcases), nodes: testcases.nodes, tone: 'tc' },
@@ -1386,7 +1545,7 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], s
     })
   })
   const height = Math.max(560, currentY + 4)
-  const graphEdges = traceEdges
+  const graphEdges = visibleTraceEdges
     .filter((edge) => positioned.has(edge.source) && positioned.has(edge.target))
     .map((edge): SvgEdge => {
       const source = positioned.get(edge.source)!
@@ -1411,11 +1570,16 @@ function buildTraceGraph(nodes: TraceabilityNode[], edges: TraceabilityEdge[], s
   return {
     width,
     height,
-    lanes,
-    nodes: [...positioned.values()],
-    edges: graphEdges,
-    linkedIds: edgeIds,
-    relatedNodeIds,
+	    lanes,
+	    nodes: [...positioned.values()],
+	    edges: graphEdges,
+	    linkedIds: visibleEdgeIds,
+	    layerCounts: {
+	      requirements: requirements.nodes.length,
+	      testcases: testcases.nodes.length,
+	      code: code.nodes.length,
+	    },
+	    relatedNodeIds,
     relatedEdgeIds,
     hasSelection: Boolean(selectedNodeId && positioned.has(selectedNodeId)),
     selectedNodeId,
@@ -1440,6 +1604,31 @@ function traceGraphRelatedEdgeIds(focusId: string, edges: SvgEdge[]) {
     if (edge.source === focusId || edge.target === focusId) ids.add(edge.id)
   })
   return ids
+}
+
+function traceGraphQueryScope(nodes: TraceabilityNode[], edges: TraceabilityEdge[], keyword: string) {
+  const query = normalizeSearch(keyword)
+  if (!query) return null
+  const matches = new Set(nodes.filter((node) => traceNodeSearchText(node).includes(query)).map((node) => node.id))
+  if (!matches.size) return new Set<string>()
+  const scoped = new Set(matches)
+  edges.forEach((edge) => {
+    if (matches.has(edge.source)) scoped.add(edge.target)
+    if (matches.has(edge.target)) scoped.add(edge.source)
+  })
+  return scoped
+}
+
+function traceNodeSearchText(node: TraceabilityNode) {
+  return normalizeSearch([
+    node.id,
+    node.kind,
+    node.label,
+    node.description,
+    node.symbol,
+    node.locator,
+    node.parentId,
+  ].filter(Boolean).join(' '))
 }
 
 function collapseTraceEdges(edges: TraceabilityEdge[], nodeMap: Map<string, TraceabilityNode>) {
@@ -1559,6 +1748,15 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     edges.push({ id: `control:${index}`, source: source.id, target: target.id, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
   }
   return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
+}
+
+function emptyMiniGraph() {
+  return {
+    width: 860,
+    height: 420,
+    nodes: [] as MiniGraphNode[],
+    edges: [] as MiniGraphEdge[],
+  }
 }
 
 function buildMiniGraphHighlight(graph: { nodes: MiniGraphNode[]; edges: MiniGraphEdge[] } | null, selectedId: string, focusId: string) {
@@ -2219,10 +2417,35 @@ onBeforeUnmount(() => {
 .workspace-tabs button { border:0; border-bottom:3px solid transparent; padding:11px 16px; background:transparent; color:#475569; font-size:14px; font-weight:900; cursor:pointer; }
 .workspace-tabs button.active { border-color:#0f766e; color:#0f766e; }
 .tab-page { min-height:calc(100vh - 340px); }
-.trace-tab { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.trace-tab { display:grid; grid-template-columns:minmax(300px, .72fr) minmax(0, 1.7fr); gap:14px; min-width:0; align-items:stretch; }
 .calls-tab { display:grid; grid-template-columns:360px minmax(0,1fr); grid-template-areas:'tree graph'; gap:14px; min-height:calc(100vh - 340px); overflow:hidden; }
 .call-graph-pane, .code-side-pane, .map-pane, .reference-panel { overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:14px; background:rgba(255,255,255,.96); box-shadow:0 14px 36px rgba(15,23,42,.05); }
 .trace-map-pane { display:flex; flex-direction:column; min-height:620px; min-width:0; }
+.trace-list-pane { display:flex; flex-direction:column; min-width:0; min-height:620px; overflow:hidden; border:1px solid rgba(15,23,42,.08); border-radius:14px; background:#fff; box-shadow:0 14px 36px rgba(15,23,42,.05); }
+.trace-list-clear { border:1px solid #dbe4ee; border-radius:7px; padding:5px 8px; background:#fff; color:#64748b; font-size:11px; font-weight:900; cursor:pointer; }
+.trace-list-clear:hover:not(:disabled) { border-color:#0f766e; color:#0f766e; }
+.trace-list-clear:disabled { cursor:not-allowed; opacity:.45; }
+.trace-list-tabs { display:flex; border-bottom:1px solid #eef2f5; }
+.trace-list-tabs button { flex:1; min-width:0; border:0; border-bottom:2px solid transparent; padding:10px 5px; background:#fff; color:#64748b; font-size:11px; font-weight:900; cursor:pointer; }
+.trace-list-tabs button.active { border-color:#0f766e; background:#f0fdfa; color:#0f766e; }
+.trace-list-tabs b { margin-left:2px; color:inherit; }
+.trace-list-toolbar { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #eef2f5; }
+.trace-list-toolbar input { flex:1; min-width:0; box-sizing:border-box; border:1px solid #dbe4ee; border-radius:7px; padding:7px 9px; color:#172033; font-size:12px; outline:0; }
+.trace-list-toolbar input:focus { border-color:#14b8a6; box-shadow:0 0 0 2px rgba(20,184,166,.14); }
+.trace-list-toolbar span { flex:0 0 auto; color:#64748b; font-size:11px; font-weight:800; }
+.trace-list-scroll { flex:1; min-height:0; overflow:auto; padding:8px; }
+.trace-list-row { display:flex; align-items:center; gap:8px; min-width:0; border:1px solid transparent; border-radius:7px; padding:8px; cursor:pointer; }
+.trace-list-row:hover, .trace-list-row.selected { border-color:rgba(15,118,110,.25); background:#f0fdfa; }
+.trace-list-row input { flex:0 0 auto; accent-color:#0f766e; }
+.trace-list-main { display:grid; gap:3px; min-width:0; flex:1; }
+.trace-list-main strong, .trace-list-main small { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.trace-list-main strong { color:#172033; font-size:12px; }
+.trace-list-main small { color:#64748b; font-size:10px; }
+.trace-list-links { flex:0 0 auto; min-width:20px; border-radius:999px; padding:2px 5px; background:#f1f5f9; color:#64748b; font-size:10px; font-weight:900; text-align:center; }
+.trace-list-pagination { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 12px; border-top:1px solid #eef2f5; color:#64748b; font-size:11px; font-weight:800; }
+.trace-list-pagination button { border:1px solid #dbe4ee; border-radius:6px; padding:5px 7px; background:#fff; color:#475569; font-size:11px; cursor:pointer; }
+.trace-list-pagination button:disabled { cursor:not-allowed; opacity:.45; }
+.trace-selection-summary { padding:8px 12px; border-top:1px solid #d1fae5; background:#ecfdf5; color:#047857; font-size:11px; font-weight:800; }
 .call-graph-pane, .code-side-pane { display:flex; flex-direction:column; min-width:0; }
 .call-graph-pane { grid-area:graph; }
 .code-side-pane { grid-area:tree; }
@@ -2283,6 +2506,14 @@ onBeforeUnmount(() => {
 .graph-loading-state strong { color:#172033; font-size:15px; }
 .graph-loading-state small { max-width:420px; color:#64748b; font-size:12px; line-height:1.6; }
 .map-head { align-items:center; }
+.trace-info-toggle { border:1px solid #dbe4ee; border-radius:8px; padding:7px 10px; background:#fff; color:#0f766e; font-size:12px; font-weight:900; cursor:pointer; white-space:nowrap; }
+.trace-info-toggle:hover { background:#ecfdf5; border-color:#99f6e4; }
+.trace-map-tools { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 14px; border-bottom:1px solid #eef2f5; background:#fff; }
+.trace-query { display:grid; gap:4px; flex:1 1 420px; min-width:min(100%,280px); color:#64748b; font-size:11px; font-weight:900; }
+.trace-query input { min-height:34px; border:1px solid #dbe4ee; border-radius:8px; padding:7px 10px; background:#fff; color:#172033; font-size:13px; }
+.trace-query input:focus { outline:none; border-color:#14b8a6; box-shadow:0 0 0 2px rgba(20,184,166,.14); }
+.trace-layer-counts { display:flex; gap:7px; flex-wrap:wrap; align-items:center; }
+.trace-layer-counts span { border-radius:999px; padding:4px 9px; background:#f1f5f9; color:#475569; font-size:11px; font-weight:900; }
 .map-legend { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; color:#64748b; font-size:11px; font-weight:800; }
 .map-legend span { display:flex; align-items:center; gap:5px; }
 .trace-map-info { display:grid; gap:8px; padding:10px 14px; border-bottom:1px solid #eef2f5; background:#fcfdf8; }
@@ -2511,5 +2742,6 @@ onBeforeUnmount(() => {
 .code-tree-head { border-top:1px solid #eef2f5; }
 .tree-scroll { flex:1; min-height:160px; overflow-y:auto; padding:8px 6px 12px; }
 @media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { min-height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
+@media(max-width:980px) { .trace-tab { grid-template-columns:1fr; } .trace-list-pane { min-height:420px; max-height:560px; } }
 @media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
 </style>
