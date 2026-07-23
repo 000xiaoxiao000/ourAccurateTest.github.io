@@ -202,7 +202,7 @@
 
     <!-- FUSION TAB -->
     <div v-show="activeTab === 'fusion'" class="tab-panel">
-      <p class="feature-intro"><strong>融合三态：</strong>数据来自当前基线的活跃 METHOD 节点。后端把方法节点与动态证据和静态调用关系关联：有覆盖/运行调用/触达证据为“已执行确认”，只有静态调用关系为“可达未执行”，两者都没有为“不可观测”。</p>
+      <p class="feature-intro"><strong>融合三态：</strong>以当前基线活跃的 METHOD 节点为准，并复用“调用链路图 · 覆盖率数据”的方法覆盖结果。存在方法覆盖、运行调用或触达证据即为“已执行确认”；仅有静态调用关系为“可达未执行”；两者均无才是“不可观测”。</p>
       <button type="button" class="secondary-button" :disabled="fusionLoading" @click="loadFusion">
         {{ fusionLoading ? '加载中...' : '加载融合三态' }}
       </button>
@@ -1223,7 +1223,7 @@ function nodeTooltipRows(node: GraphNode) {
 .svg-label { font-size:10px;fill:var(--oat-text);text-anchor:middle;font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px; }
 .svg-node-tooltip {
   position:fixed;
-  z-index:80;
+  z-index:3000;
   width:min(520px, calc(100vw - 36px));
   max-height:min(420px, calc(100vh - 36px));
   overflow:auto;
@@ -1235,7 +1235,7 @@ function nodeTooltipRows(node: GraphNode) {
   border-radius:8px;
   background:rgba(255,255,255,.98);
   color:var(--oat-text);
-  box-shadow:0 18px 42px rgba(15,23,42,.18);
+  box-shadow:0 18px 42px rgba(15,23,42,.18),0 0 0 1px rgba(255,255,255,.75) inset;
   pointer-events:none;
 }
 .svg-node-tooltip.near-right { transform:translate(calc(-100% - 12px), 12px); }

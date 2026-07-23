@@ -165,21 +165,26 @@
                 :key="node.id"
                 :class="['trace-svg-node', node.tone, { active: traceGraph.selectedNodeId === node.id, linked: traceGraph.relatedNodeIds.has(node.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedNodeIds.has(node.id) }]"
                 @click.stop="selectTraceNode(node.id)"
+                @pointerenter="showGraphTooltip($event, traceNodeTitle(node.raw))"
+                @pointermove="showGraphTooltip($event, traceNodeTitle(node.raw))"
+                @pointerleave="hideGraphTooltip"
               >
-                <title>{{ traceNodeTitle(node.raw) }}</title>
                 <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
                 <text class="node-title" :x="node.x + node.width / 2" :y="node.y + 22">{{ node.shortLabel }}</text>
                 <text class="node-subtitle" :x="node.x + node.width / 2" :y="node.y + 40">{{ node.shortDesc }}</text>
               </g>
             </g>
             <g class="trace-edge-layer">
-              <g v-for="edge in traceGraph.edges" :key="edge.id" :class="['trace-svg-edge', evidenceTone(edge.raw), { active: traceGraph.relatedEdgeIds.has(edge.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedEdgeIds.has(edge.id) }]">
-                <title>{{ traceEdgeTitle(edge.raw) }}</title>
+              <g v-for="edge in traceGraph.edges" :key="edge.id" :class="['trace-svg-edge', evidenceTone(edge.raw), { active: traceGraph.relatedEdgeIds.has(edge.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedEdgeIds.has(edge.id) }]"
+                @pointerenter="showGraphTooltip($event, traceEdgeTitle(edge.raw))"
+                @pointermove="showGraphTooltip($event, traceEdgeTitle(edge.raw))"
+                @pointerleave="hideGraphTooltip">
                 <path :d="edge.path" marker-end="url(#trace-arrow)" />
                 <text :x="edge.labelX" :y="edge.labelY">{{ relationLabel(edge.raw.relation) }}</text>
               </g>
             </g>
           </svg>
+          <div v-if="graphTooltip.visible" class="graph-tooltip" :style="{ left: graphTooltip.left + 'px', top: graphTooltip.top + 'px' }" role="tooltip">{{ graphTooltip.text }}</div>
         </div>
       </main>
 
@@ -440,9 +445,11 @@
             <g
               v-for="edge in callGraph.edges"
               :key="edge.id"
-              :class="['call-svg-edge', evidenceTone(edge.raw), { structure: edge.raw.generationMethod === 'CODE_STRUCTURE', inferred: edge.raw.generationMethod === 'SOURCE_EXPRESSION', recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedEdgeIds.has(edge.id) }]"
+              :class="['call-svg-edge', evidenceTone(edge.raw), { structure: edge.raw.generationMethod === 'CODE_STRUCTURE', inferred: edge.raw.generationMethod === 'SOURCE_EXPRESSION', recursive: edge.source === edge.target, active: callGraph.relatedEdgeIds.has(edge.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(edge.source) && !callGraph.relatedNodeIds.has(edge.target) }]"
+              @pointerenter="showGraphTooltip($event, callEdgeTitle(edge.raw))"
+              @pointermove="showGraphTooltip($event, callEdgeTitle(edge.raw))"
+              @pointerleave="hideGraphTooltip"
             >
-              <title>{{ callEdgeTitle(edge.raw) }}</title>
               <path :d="edge.path" marker-end="url(#call-arrow)" />
               <template v-if="edge.raw.generationMethod !== 'CODE_STRUCTURE'">
                 <rect class="edge-label-bg" :x="edge.labelX - edge.labelWidth / 2" :y="edge.labelY - 13" :width="edge.labelWidth" height="19" rx="4" />
@@ -454,8 +461,10 @@
               :key="node.id"
               :class="['call-svg-node', `call-${callNodeTone(node.raw)}`, { active: callGraph.selectedNodeId === node.id, linked: callGraph.relatedNodeIds.has(node.id), dimmed: callGraph.hasSelection && !callGraph.relatedNodeIds.has(node.id), recursive: Boolean(node.raw.metadata?.recursive) }]"
               @click.stop="selectCallGraphNode(node.id)"
+              @pointerenter="showGraphTooltip($event, traceNodeTitle(node.raw))"
+              @pointermove="showGraphTooltip($event, traceNodeTitle(node.raw))"
+              @pointerleave="hideGraphTooltip"
             >
-              <title>{{ traceNodeTitle(node.raw) }}</title>
               <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="3" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.shortLabel }}</text>
               <text class="call-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 36">{{ node.shortDesc }}</text>
@@ -576,6 +585,7 @@ const traceInfoExpanded = ref(false)
 const traceGraphKeyword = ref('')
 const miniGraphFocusHighlightDisabled = ref(false)
 const miniGraphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
+const graphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 const callGraphGlobalEnabled = ref(false)
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
@@ -593,6 +603,7 @@ watch([activeTab, callViewMode], () => {
   selectedMiniGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = false
   hideMiniGraphTooltip()
+  hideGraphTooltip()
   if (activeTab.value === 'calls') {
     void ensureCodeDataLoaded()
   }
@@ -1076,11 +1087,29 @@ function hideMiniGraphTooltip() {
   miniGraphTooltip.value.visible = false
 }
 
+function showGraphTooltip(event: PointerEvent, text: string) {
+  const width = Math.min(360, Math.max(240, window.innerWidth - 32))
+  const height = Math.min(280, Math.max(120, window.innerHeight - 32))
+  const gap = 14
+  const left = event.clientX + width + gap > window.innerWidth
+    ? Math.max(16, event.clientX - width - gap)
+    : Math.min(window.innerWidth - width - 16, event.clientX + gap)
+  const top = event.clientY + height + gap > window.innerHeight
+    ? Math.max(16, event.clientY - height - gap)
+    : Math.min(window.innerHeight - height - 16, event.clientY + gap)
+  graphTooltip.value = { visible: true, text, left, top }
+}
+
+function hideGraphTooltip() {
+  graphTooltip.value.visible = false
+}
+
 function clearMiniGraphSelection() {
   selectedMiniGraphId.value = ''
   selectedCallGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = true
   hideMiniGraphTooltip()
+  hideGraphTooltip()
 }
 
 function clearCallGraphSelection() {
@@ -2605,7 +2634,7 @@ onBeforeUnmount(() => {
 .trace-map-svg { display:block; width:100%; min-width:920px; height:auto; min-height:560px; cursor:default; }
 .lane-band { fill:rgba(254,252,232,.74); stroke:#c6c453; stroke-width:1; }
 .lane-title { fill:#475569; font-size:13px; font-weight:900; text-anchor:middle; }
-.trace-edge-layer { pointer-events:none; }
+.trace-edge-layer { pointer-events:auto; }
 .trace-svg-edge path, .call-svg-edge path { fill:none; stroke:#64748b; stroke-width:1.4; opacity:.72; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
 .trace-svg-edge text, .call-svg-edge text { fill:#475569; font-size:11px; font-weight:800; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; transition:opacity .16s ease, fill .16s ease; }
 .trace-svg-edge.derived path { stroke-dasharray:4 4; opacity:.62; }
@@ -2647,7 +2676,28 @@ onBeforeUnmount(() => {
 .coverage-unselected-state span { max-width:520px; font-size:12px; line-height:1.6; }
 .code-analysis-panel { position:relative; flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
-.mini-graph-tooltip { position:absolute; z-index:4; box-sizing:border-box; width:min(460px,calc(100% - 32px)); max-height:min(320px,calc(100% - 32px)); overflow:auto; border:1px solid #cbd5e1; border-radius:6px; padding:9px 10px; background:rgba(255,255,255,.98); box-shadow:0 10px 22px rgba(15,23,42,.18); color:#334155; font-size:12px; font-weight:700; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; pointer-events:none; }
+.mini-graph-tooltip,
+.graph-tooltip {
+  box-sizing:border-box;
+  min-width:180px;
+  max-width:min(460px,calc(100vw - 32px));
+  max-height:min(360px,calc(100vh - 32px));
+  overflow:auto;
+  border:1px solid rgba(15,23,42,.14);
+  border-radius:8px;
+  padding:10px 12px;
+  background:rgba(255,255,255,.98);
+  box-shadow:0 18px 42px rgba(15,23,42,.18),0 0 0 1px rgba(255,255,255,.75) inset;
+  color:#172033;
+  font-size:12px;
+  font-weight:700;
+  line-height:1.55;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  pointer-events:none;
+}
+.mini-graph-tooltip { position:absolute; z-index:12; width:min(460px,calc(100% - 32px)); }
+.graph-tooltip { position:fixed; z-index:3000; width:min(460px,calc(100vw - 32px)); }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
 .mini-graph-edge.active path { stroke:#0f766e; stroke-width:3; opacity:1; }
 .mini-graph-edge.dimmed { opacity:.14; }
@@ -2666,7 +2716,7 @@ onBeforeUnmount(() => {
 .coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }
 .coverage-source-head span { flex:0 0 auto; color:#64748b; font-size:12px; font-weight:800; }
-.source-code-scroll { flex:1; min-height:0; overflow:auto; background:#fff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12px; line-height:1.45; }
+.source-code-scroll { flex:1; min-height:0; overflow:auto; background:#fff; font-family:var(--oat-font-mono); font-size:12px; line-height:1.45; }
 .source-line { display:grid; grid-template-columns:52px minmax(0,1fr); min-width:760px; }
 .source-line.covered { background:#dcfce7; }
 .source-line.missed { background:#fee2e2; }

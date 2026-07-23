@@ -467,10 +467,14 @@
           </div>
           <article v-for="finding in pagedFindings" :key="finding.id" class="finding-card" :class="finding.severity.toLowerCase()">
             <div class="finding-main">
-              <span>
-                {{ perspectiveText(finding.perspective) }} · {{ severityText(finding.severity) }} · {{ reviewStatusText(finding.reviewStatus) }}
-                · {{ verdictText(finding.verdict) }} · {{ evidenceLevelText(finding.evidenceLevel) }} · {{ findingTypeText(finding.findingType) }}
-              </span>
+              <div class="finding-meta-tags" aria-label="问题状态">
+                <span class="finding-tag perspective" :class="lowerToken(finding.perspective)">{{ perspectiveText(finding.perspective) }}</span>
+                <span class="finding-tag severity" :class="lowerToken(finding.severity)">{{ severityText(finding.severity) }}</span>
+                <span class="finding-tag review" :class="lowerToken(finding.reviewStatus)">{{ reviewStatusText(finding.reviewStatus) }}</span>
+                <span class="finding-tag verdict" :class="lowerToken(finding.verdict)">{{ verdictText(finding.verdict) }}</span>
+                <span class="finding-tag evidence" :class="lowerToken(finding.evidenceLevel)">{{ evidenceLevelText(finding.evidenceLevel) }}</span>
+                <span class="finding-tag type" :class="lowerToken(finding.findingType)">{{ findingTypeText(finding.findingType) }}</span>
+              </div>
               <h3>{{ finding.title }}</h3>
               <p>{{ finding.description }}</p>
               <small v-if="finding.suggestion">建议：{{ finding.suggestion }}</small>
@@ -568,8 +572,10 @@
               <strong>{{ record.title }}</strong>
               <button v-if="record.copyText" type="button" class="ghost-button" @click="copyWriteBack(record.copyText)">复制内容</button>
             </div>
-            <span>{{ record.meta }}</span>
-            <p v-if="record.summary">{{ record.summary }}</p>
+            <div class="evidence-meta" aria-label="依据状态">
+              <span v-for="item in record.metaItems" :key="item.key" class="evidence-tag" :class="item.tone">{{ item.label }}</span>
+            </div>
+            <p v-if="record.summary" class="evidence-summary">{{ record.summary }}</p>
             <a v-if="record.url" :href="record.url" target="_blank" rel="noreferrer">{{ record.url }}</a>
             <pre v-if="record.detail" class="writeback-message">{{ record.detail }}</pre>
           </article>
@@ -660,6 +666,7 @@ type EvidenceRecord = {
   reviewStatus?: string
   title: string
   meta: string
+  metaItems: Array<{ key: string; label: string; tone: string }>
   summary: string
   detail?: string
   url?: string
@@ -1032,6 +1039,7 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
       reviewStatus: link.reviewStatus,
       title,
       meta,
+      metaItems: evidenceMetaItems(link.evidenceLevel, link.reviewStatus, link.confidence, link.generationMethod),
       summary,
       detail: locator && locator !== summary ? locator : undefined,
       searchable: [title, meta, summary, locator, criterion?.content].filter(Boolean).join(' '),
@@ -1062,6 +1070,7 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
         reviewStatus: finding.reviewStatus,
         title,
         meta,
+        metaItems: evidenceMetaItems(finding.evidenceLevel, finding.reviewStatus, undefined, criterion?.acKey),
         summary,
         detail: locator && locator !== summary ? locator : undefined,
         searchable: [title, meta, summary, locator, finding.suggestion, criterion?.content].filter(Boolean).join(' '),
@@ -1079,6 +1088,10 @@ const evidenceRecords = computed<EvidenceRecord[]>(() => {
       reviewStatus: action.status,
       title,
       meta,
+      metaItems: [
+        { key: 'connector', label: action.connectorType, tone: 'source' },
+        { key: 'time', label: formatTime(action.createTime), tone: 'neutral' },
+      ],
       summary,
       detail: action.message,
       url: action.externalUrl,
@@ -1826,6 +1839,10 @@ function stringValue(value: unknown) {
   }
 }
 
+function lowerToken(value?: string) {
+  return String(value || 'unknown').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')
+}
+
 function uniqueCount(values: Array<string | undefined>) {
   return new Set(values.filter((value): value is string => Boolean(value))).size
 }
@@ -1991,6 +2008,29 @@ function formatBytes(value?: number) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`
   return `${Math.round(size / 1024 / 102.4) / 10} MB`
+}
+
+function evidenceMetaItems(level?: string, status?: string, confidence?: number, generationMethod?: string) {
+  const items: Array<{ key: string; label: string; tone: string }> = []
+  if (level) items.push({ key: 'level', label: evidenceLevelText(level), tone: `level ${lowerToken(level)}` })
+  if (status) items.push({ key: 'status', label: reviewStatusText(status), tone: `status ${lowerToken(status)}` })
+  if (confidence !== undefined) items.push({ key: 'confidence', label: `置信度 ${Math.round(confidence * 100)}%`, tone: 'confidence' })
+  if (generationMethod) items.push({
+    key: 'method',
+    label: evidenceGenerationMethodText(generationMethod),
+    tone: 'method',
+  })
+  return items
+}
+
+function evidenceGenerationMethodText(value?: string) {
+  const map: Record<string, string> = {
+    SOURCE_ENDPOINT_MATCH: '源码接口映射匹配',
+    SOURCE_SYMBOL_MATCH: '源码符号匹配',
+    AI_CANDIDATE: 'AI 候选关联',
+    MANUAL: '人工关联',
+  }
+  return value ? map[value] || value : ''
 }
 
 function reviewStatusText(value?: string) {
@@ -2615,14 +2655,17 @@ button,
   --arrow-left: 50%;
   position: fixed;
   z-index: 1000;
-  padding: 8px 10px;
-  border: 1px solid rgba(15, 118, 110, .22);
+  max-width: min(460px, calc(100vw - 32px));
+  max-height: min(360px, calc(100vh - 32px));
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(15, 23, 42, .14);
   border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, .18), 0 0 0 1px rgba(255, 255, 255, .75) inset;
   color: var(--oat-text);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.55;
   overflow-wrap: anywhere;
   pointer-events: none;
@@ -2636,9 +2679,9 @@ button,
   left: var(--arrow-left, 50%);
   width: 10px;
   height: 10px;
-  border-right: 1px solid rgba(15, 118, 110, .22);
-  border-bottom: 1px solid rgba(15, 118, 110, .22);
-  background: #fff;
+  border-right: 1px solid rgba(15, 23, 42, .14);
+  border-bottom: 1px solid rgba(15, 23, 42, .14);
+  background: rgba(255, 255, 255, .98);
   content: '';
 }
 
@@ -2842,6 +2885,117 @@ button,
   min-width: 0;
 }
 
+.finding-meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.finding-tag {
+  --tag-bg: rgba(100, 116, 139, .10);
+  --tag-border: rgba(100, 116, 139, .18);
+  --tag-color: #334155;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid var(--tag-border);
+  border-radius: 999px;
+  background: var(--tag-bg);
+  color: var(--tag-color);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.2;
+  letter-spacing: .015em;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .72) inset;
+}
+
+.finding-tag.severity.medium,
+.finding-tag.review.pending,
+.finding-tag.verdict.partial {
+  --tag-bg: linear-gradient(135deg, rgba(245, 158, 11, .20), rgba(253, 230, 138, .42));
+  --tag-border: rgba(217, 119, 6, .34);
+  --tag-color: #92400e;
+}
+
+.finding-tag.verdict.not_verifiable,
+.finding-tag.evidence.e0,
+.finding-tag.type.missing_testcase,
+.finding-tag.type.missing_evidence,
+.finding-tag.type.missing_runtime_evidence,
+.finding-tag.type.missing_implementation_evidence {
+  --tag-bg: linear-gradient(135deg, rgba(220, 38, 38, .14), rgba(254, 226, 226, .72));
+  --tag-border: rgba(220, 38, 38, .30);
+  --tag-color: #b91c1c;
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, .06), 0 1px 0 rgba(255, 255, 255, .78) inset;
+}
+
+.finding-tag.review.confirmed,
+.finding-tag.verdict.satisfied,
+.finding-tag.verdict.statically_consistent,
+.finding-tag.evidence.e2,
+.finding-tag.evidence.e3,
+.finding-tag.evidence.e4 {
+  --tag-bg: linear-gradient(135deg, rgba(22, 163, 74, .13), rgba(220, 252, 231, .68));
+  --tag-border: rgba(22, 163, 74, .26);
+  --tag-color: #166534;
+}
+
+.finding-tag.severity.critical,
+.finding-tag.severity.high,
+.finding-tag.verdict.not_satisfied {
+  --tag-bg: linear-gradient(135deg, rgba(220, 38, 38, .18), rgba(254, 202, 202, .60));
+  --tag-border: rgba(220, 38, 38, .36);
+  --tag-color: #991b1b;
+}
+
+.finding-tag.severity.low,
+.finding-tag.severity.info,
+.finding-tag.evidence.e1 {
+  --tag-bg: linear-gradient(135deg, rgba(var(--oat-accent-rgb), .12), rgba(219, 234, 254, .70));
+  --tag-border: rgba(var(--oat-accent-rgb), .24);
+  --tag-color: #1d4ed8;
+}
+
+.finding-tag.review.rejected,
+.finding-tag.review.exempted,
+.finding-tag.review.written_back,
+.finding-tag.verdict.exempted,
+.finding-tag.verdict.stale {
+  --tag-bg: rgba(100, 116, 139, .10);
+  --tag-border: rgba(100, 116, 139, .20);
+  --tag-color: #475569;
+}
+
+.finding-tag.perspective.test {
+  --tag-bg: rgba(124, 58, 237, .10);
+  --tag-border: rgba(124, 58, 237, .20);
+  --tag-color: #6d28d9;
+}
+
+.finding-tag.perspective.development {
+  --tag-bg: rgba(14, 116, 144, .10);
+  --tag-border: rgba(14, 116, 144, .22);
+  --tag-color: #0e7490;
+}
+
+.finding-tag.perspective.product,
+.finding-tag.perspective.cross {
+  --tag-bg: rgba(var(--oat-primary-rgb), .10);
+  --tag-border: rgba(var(--oat-primary-rgb), .22);
+  --tag-color: var(--oat-primary-dark);
+}
+
+.finding-tag.type.missing_testcase,
+.finding-tag.verdict.not_verifiable,
+.finding-tag.evidence.e0,
+.finding-tag.review.pending,
+.finding-tag.severity.medium {
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .finding-main p,
 .finding-main small {
   overflow-wrap: anywhere;
@@ -2906,6 +3060,48 @@ button,
   gap: 8px;
 }
 
+.evidence-panel .evidence-record {
+  gap: 10px;
+  padding: 14px;
+  border-color: rgba(var(--oat-primary-rgb), .18);
+  background: linear-gradient(135deg, rgba(var(--oat-primary-rgb), .045), #fff 56%);
+}
+
+.evidence-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.evidence-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 25px;
+  padding: 3px 9px;
+  border: 1px solid rgba(100, 116, 139, .2);
+  border-radius: 999px;
+  background: rgba(100, 116, 139, .08);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.2;
+}
+
+.evidence-tag.level.e2,
+.evidence-tag.level.e3,
+.evidence-tag.level.e4,
+.evidence-tag.status.confirmed {
+  border-color: rgba(22, 163, 74, .3);
+  background: linear-gradient(135deg, rgba(22, 163, 74, .14), rgba(220, 252, 231, .7));
+  color: #166534;
+}
+
+.evidence-tag.status.pending { border-color: rgba(217, 119, 6, .32); background: rgba(245, 158, 11, .12); color: #92400e; }
+.evidence-tag.confidence { border-color: rgba(var(--oat-accent-rgb), .26); background: rgba(var(--oat-accent-rgb), .1); color: #1d4ed8; }
+.evidence-tag.method { border-color: rgba(var(--oat-primary-rgb), .3); background: rgba(var(--oat-primary-rgb), .11); color: var(--oat-primary-dark); }
+.evidence-tag.source { border-color: rgba(124, 58, 237, .25); background: rgba(124, 58, 237, .09); color: #6d28d9; }
+.evidence-summary { margin: 0; color: var(--oat-text-secondary); font-size: 14px; font-weight: 650; line-height: 1.7; letter-spacing: .005em; }
+
 .evidence-heading {
   display: flex;
   align-items: center;
@@ -2922,7 +3118,7 @@ button,
   border-radius: 12px;
   background: #0f172a;
   color: #e2e8f0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--oat-font-mono);
   font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;

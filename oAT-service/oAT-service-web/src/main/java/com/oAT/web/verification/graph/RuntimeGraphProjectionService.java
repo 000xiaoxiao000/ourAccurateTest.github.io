@@ -79,7 +79,8 @@ public class RuntimeGraphProjectionService {
         int nodes = 0;
         int edges = 0;
         for (ClassCoverageIndex.MethodCoverageDetail method : file.getMethods()) {
-            if (method == null || !method.isCovered() || !StringUtils.hasText(method.getMethodName())) continue;
+            if (method == null || (!method.isCovered() && method.getCoveredLines() <= 0)
+                    || !StringUtils.hasText(method.getMethodName())) continue;
             String className = StringUtils.hasText(method.getClassName()) ? method.getClassName() : file.getClassName();
             GraphRepository.GraphNode target = graphRepository.findActiveMethod(baselineId, className, method.getMethodName(),
                     method.getMethodDesc(), method.getStartLine()).orElse(null);
