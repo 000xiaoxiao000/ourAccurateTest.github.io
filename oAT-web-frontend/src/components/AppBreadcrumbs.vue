@@ -74,7 +74,7 @@ const routeLabels: Record<string, string> = {
   'project-apps': '源码工程',
   'app-settings': '源码工程设置',
   'app-repository': '仓库配置',
-  'app-api-endpoints': '接口证据工具（旧）',
+  'app-api-endpoints': '接口依据工具（旧）',
   'version-apps': '源码快照（旧）',
   'version-list': '版本列表（旧）',
   'version-create': '新建版本（旧）',

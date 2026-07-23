@@ -1,6 +1,7 @@
 package com.oAT.web.verification.graph;
 
 import com.oAT.web.verification.VerificationRepository;
+import com.oAT.web.verification.model.GraphModels.GraphNodeKind;
 import com.oAT.web.verification.model.GraphModels.SnapshotKind;
 import com.oAT.web.verification.model.VerificationModels.Baseline;
 import org.springframework.stereotype.Service;
@@ -229,6 +230,20 @@ public class GraphService {
                 : null;
         return new GraphView(graphRepository.findActiveSnapshot(baselineId, SnapshotKind.STATIC).orElse(null), nodes, edges,
                 nodesClipped, edgesClipped, depth, maxNodes, maxEdges, summary, clipReasons, totalNodes, totalEdgesAmong, expandHint);
+    }
+
+    public List<GraphRepository.GraphNode> focusCandidates(String projectId, String baselineId, Integer requestedLimit) {
+        verificationRepository.findBaseline(projectId, baselineId)
+                .orElseThrow(() -> new IllegalArgumentException("分析基线不存在或不属于当前项目"));
+        int limit = bounded(requestedLimit, 5_000, 10_000);
+        return graphRepository.findFocusCandidateNodes(baselineId, List.of(
+                GraphNodeKind.REQUIREMENT,
+                GraphNodeKind.ACCEPTANCE_CRITERION,
+                GraphNodeKind.TESTCASE,
+                GraphNodeKind.METHOD,
+                GraphNodeKind.COVERAGE_UNIT,
+                GraphNodeKind.TEST_EXECUTION
+        ), limit);
     }
 
     private GraphSummary summary(String baselineId) {

@@ -44,14 +44,14 @@
       <article class="connection-card planned">
         <div class="conn-icon">🧪</div>
         <h3>TestRail / Xray / MeterSphere</h3>
-        <p>通过测试管理平台 API 拉取用例库、测试计划和执行结果，提供执行证据和覆盖率数据。</p>
+        <p>通过测试管理平台 API 拉取用例库、测试计划和执行结果，提供执行依据和覆盖率数据。</p>
         <div class="conn-badge planned-badge">L3 · 持续验证 · 计划中</div>
         <span class="conn-action disabled-button">待接入</span>
       </article>
 
       <article class="connection-card planned">
         <div class="conn-icon">🔄</div>
-        <h3>CI / CD 执行证据</h3>
+        <h3>CI / CD 执行依据</h3>
         <p>通过 Jenkins、GitLab CI、GitHub Actions 接入测试执行结果和 JaCoCo/Istanbul 覆盖率报告。</p>
         <div class="conn-badge planned-badge">L3 · 持续验证 · 计划中</div>
         <span class="conn-action disabled-button">待接入</span>

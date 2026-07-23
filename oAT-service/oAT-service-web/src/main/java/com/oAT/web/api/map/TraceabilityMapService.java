@@ -927,11 +927,15 @@ public class TraceabilityMapService {
                 completeReq.add(req);
             }
         });
-        long codeCount = nodes.stream().filter(node -> node.kind().name().startsWith("CODE_")).count();
+        long codeFileCount = nodes.stream().filter(node -> node.kind() == NodeKind.CODE_FILE).count();
+        long codeClassCount = nodes.stream().filter(node -> node.kind() == NodeKind.CODE_CLASS).count();
+        long codeMethodCount = nodes.stream().filter(node -> node.kind() == NodeKind.CODE_METHOD).count();
+        long codeCount = codeFileCount + codeClassCount + codeMethodCount;
         long staticCount = nodes.stream().filter(node -> node.evidenceState() == EvidenceState.STATIC || node.evidenceState() == EvidenceState.BOTH).count();
         double rate = criteria.isEmpty() ? 0 : completeReq.size() * 1.0 / criteria.size();
         boolean clipped = warnings.stream().anyMatch(item -> item.contains("裁剪"));
-        return new TraceabilitySummary(criteria.size(), testcases.size(), (int) codeCount, completeReq.size(), rate,
+        return new TraceabilitySummary(criteria.size(), testcases.size(), (int) codeCount,
+                (int) codeFileCount, (int) codeClassCount, (int) codeMethodCount, completeReq.size(), rate,
                 (int) staticCount, dynamicNodes.size(), criteria.size() - reqWithTest.size(),
                 testcases.size() - tcWithCode.size(), dynamicEvidence, staticBridge, clipped);
     }

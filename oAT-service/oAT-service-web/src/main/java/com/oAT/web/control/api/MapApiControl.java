@@ -247,6 +247,14 @@ public class MapApiControl {
         return graphService.query(projectId, baselineId, focusId, depth, maxNodes, maxEdges);
     }
 
+    @GetMapping("/graph/focus-candidates")
+    public List<com.oAT.web.verification.graph.GraphRepository.GraphNode> graphFocusCandidates(
+            @PathVariable String projectId,
+            @RequestParam String baselineId,
+            @RequestParam(required = false) Integer limit) {
+        return graphService.focusCandidates(projectId, baselineId, limit);
+    }
+
     public record StaticGraphProjectionResponse(String snapshotId, int nodeCount, int edgeCount) {}
 
     @GetMapping("/apps/{appId}")

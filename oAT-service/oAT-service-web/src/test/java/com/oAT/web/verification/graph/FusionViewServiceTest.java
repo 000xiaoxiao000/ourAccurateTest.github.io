@@ -64,6 +64,21 @@ class FusionViewServiceTest {
     }
 
     @Test
+    void dynamic_evidence_takes_precedence_over_static_reachability() {
+        GraphRepository.GraphNode method = method("coveredAndReachable", 12);
+        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method));
+        when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of());
+        when(graphRepository.findDynamicallyEvidencedNodeIds(BASELINE)).thenReturn(Set.of(method.id()));
+        when(graphRepository.findStaticallyReachableNodeIds(BASELINE)).thenReturn(Set.of(method.id()));
+
+        FusionViewService.FusionView view = service.build(PROJECT, BASELINE, 100);
+
+        assertEquals(1, view.executedConfirmed());
+        assertEquals(0, view.reachableNotExecuted());
+        assertEquals("EXECUTED_CONFIRMED", view.nodes().get(0).fusionState());
+    }
+
+    @Test
     void does_not_mark_every_static_method_as_reachable_without_a_static_edge() {
         when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method("orphan", 12)));
         when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of());

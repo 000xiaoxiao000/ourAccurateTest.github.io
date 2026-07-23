@@ -115,7 +115,11 @@ public class RuntimeGraphProjectionService {
             String className = StringUtils.hasText(method.getClassName()) ? method.getClassName() : file.getClassName();
             GraphRepository.GraphNode target = graphRepository.findActiveMethod(baselineId, className, method.getMethodName(),
                     method.getMethodDesc(), method.getStartLine()).orElse(null);
-            if (target == null) continue;
+            if (target == null) {
+                target = coverageOnlyMethodNode(snapshot, projectId, baselineId, className, method, path);
+                graphRepository.saveNode(target);
+                nodes++;
+            }
             String locator = path + ":" + method.getStartLine() + "#" + method.getMethodName();
             String id = "method-coverage:" + GraphModels.fingerprint(snapshot.id() + "|" + locator + "|" + value(method.getMethodDesc()));
             GraphRepository.GraphNode coverage = new GraphRepository.GraphNode(id, snapshot.id(), baselineId, projectId,
@@ -130,6 +134,26 @@ public class RuntimeGraphProjectionService {
             edges++;
         }
         return new ProjectionCounts(nodes, edges);
+    }
+
+    private GraphRepository.GraphNode coverageOnlyMethodNode(GraphRepository.GraphSnapshot snapshot, String projectId, String baselineId,
+                                                            String className, ClassCoverageIndex.MethodCoverageDetail method,
+                                                            String sourcePath) {
+        String owner = value(className).replace('/', '.').replace('$', '.');
+        if (!StringUtils.hasText(owner)) owner = sourcePath;
+        String descriptor = value(method.getMethodDesc());
+        String path = StringUtils.hasText(sourcePath) && !"unknown".equals(sourcePath) ? sourcePath : pathForClass(owner);
+        GraphModels.SymbolIdentity symbol = new GraphModels.SymbolIdentity(firstText(snapshot.repositoryUrl(), "coverage"),
+                firstText(snapshot.sourceCommit(), "unversioned"), path, owner, method.getMethodName(), descriptor, "");
+        String locator = path + ":" + method.getStartLine();
+        Map<String, Object> attributes = new LinkedHashMap<>();
+        attributes.put("descriptor", descriptor);
+        attributes.put("line", method.getStartLine());
+        attributes.put("resolution", "COVERAGE_ONLY");
+        attributes.put("source", "coverage");
+        return new GraphRepository.GraphNode("coverage-method:" + symbol.fingerprint(), snapshot.id(), baselineId, projectId,
+                GraphNodeKind.METHOD, symbol.stableId(), symbol.logicalId(), locator, owner + "#" + method.getMethodName(),
+                null, attributes);
     }
 
     private Map<String, Object> methodCoverageAttributes(ClassCoverageIndex.MethodCoverageDetail method) {
@@ -167,6 +191,14 @@ public class RuntimeGraphProjectionService {
     private double coverageRate(ClassCoverageIndex value) {
         if (value.getLineRate() != null) return value.getLineRate();
         return value.getTotalLines() <= 0 ? 0d : (double) value.getCoveredLines() / value.getTotalLines();
+    }
+
+    private String pathForClass(String className) {
+        return value(className).replace('.', '/') + ".java";
+    }
+
+    private String firstText(String first, String fallback) {
+        return StringUtils.hasText(first) ? first : fallback;
     }
 
     private String normalizePath(String value) { return value == null ? "unknown" : value.replace('\\', '/'); }

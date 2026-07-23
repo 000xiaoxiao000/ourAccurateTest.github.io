@@ -3,7 +3,7 @@
     <header class="page-header plain-header">
       <div>
         <div class="eyebrow">AI 验证 · 覆盖与执行</div>
-        <h1>覆盖度 &amp; 执行证据</h1>
+        <h1>覆盖度 &amp; 执行依据</h1>
         <p class="subtext">多维度覆盖率指标：用例覆盖、实现覆盖、执行有效覆盖、运行时覆盖和闭环率。</p>
       </div>
       <div class="header-actions">
@@ -25,24 +25,24 @@
         </article>
 
         <article class="metric-card">
-          <span class="metric-label" title="有多少验收标准在源码中找到了实现证据">实现覆盖率</span>
+          <span class="metric-label" title="有多少验收标准在源码中找到了实现依据">实现覆盖率</span>
           <strong class="metric-value" :class="rateClass(metrics.implementationCoverageRate)">{{ pct(metrics.implementationCoverageRate) }}</strong>
           <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.implementationCoverageRate), '--color': rateColor(metrics.implementationCoverageRate) }"></div></div>
-          <small>{{ metrics.implementedCriteria }} / {{ metrics.totalCriteria }} 条 AC 有代码证据</small>
+          <small>{{ metrics.implementedCriteria }} / {{ metrics.totalCriteria }} 条 AC 有代码依据</small>
         </article>
 
         <article class="metric-card">
-          <span class="metric-label" title="有多少验收标准有测试执行记录">执行证据覆盖</span>
+          <span class="metric-label" title="有多少验收标准有测试执行记录">执行依据覆盖</span>
           <strong class="metric-value" :class="rateClass(metrics.executionEvidenceRate)">{{ pct(metrics.executionEvidenceRate) }}</strong>
           <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.executionEvidenceRate), '--color': rateColor(metrics.executionEvidenceRate) }"></div></div>
           <small>{{ metrics.executedCriteria }} / {{ metrics.totalCriteria }} 条 AC 有执行记录</small>
         </article>
 
         <article class="metric-card">
-          <span class="metric-label" title="有多少验收标准有覆盖率证据（JaCoCo/Istanbul等）">运行时覆盖</span>
+          <span class="metric-label" title="有多少验收标准有覆盖率依据（JaCoCo/Istanbul等）">运行时覆盖</span>
           <strong class="metric-value" :class="rateClass(metrics.runtimeCoverageRate)">{{ pct(metrics.runtimeCoverageRate) }}</strong>
           <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.runtimeCoverageRate), '--color': rateColor(metrics.runtimeCoverageRate) }"></div></div>
-          <small>{{ metrics.coveredByRuntimeCriteria }} / {{ metrics.totalCriteria }} 条 AC 有运行证据</small>
+          <small>{{ metrics.coveredByRuntimeCriteria }} / {{ metrics.totalCriteria }} 条 AC 有运行依据</small>
         </article>
 
         <article v-if="metrics.coverageFileCount" class="metric-card">
@@ -60,7 +60,7 @@
         </article>
 
         <article class="metric-card highlight">
-          <span class="metric-label" title="同时有用例和代码实现证据的验收标准比例">闭环率</span>
+          <span class="metric-label" title="同时有用例和代码实现依据的验收标准比例">闭环率</span>
           <strong class="metric-value" :class="rateClass(metrics.closedLoopRate)">{{ pct(metrics.closedLoopRate) }}</strong>
           <div class="metric-bar"><div class="metric-fill" :style="{ width: pct(metrics.closedLoopRate), '--color': rateColor(metrics.closedLoopRate) }"></div></div>
           <small>{{ metrics.closedLoopCriteria }} / {{ metrics.totalCriteria }} 条 AC 用例+实现双覆盖</small>
@@ -76,9 +76,9 @@
       <section class="coverage-notice">
         <h3>覆盖口径说明</h3>
         <ul>
-          <li><strong>静态一致（E2）</strong>：有需求、用例、代码三类证据，但无执行或覆盖率数据 → <code>STATICALLY_CONSISTENT</code></li>
-          <li><strong>执行证据（E3）</strong>：有测试运行记录 → 可部分证明实际行为</li>
-          <li><strong>已满足（E4）</strong>：有覆盖率证据 + 人工确认 → <code>SATISFIED</code></li>
+          <li><strong>静态一致（E2）</strong>：有需求、用例、代码三类依据，但无执行或覆盖率数据 → <code>STATICALLY_CONSISTENT</code></li>
+          <li><strong>执行依据（E3）</strong>：有测试运行记录 → 可部分证明实际行为</li>
+          <li><strong>已满足（E4）</strong>：有覆盖率依据 + 人工确认 → <code>SATISFIED</code></li>
           <li>只有语义相似不等于覆盖，AI 发现需人工确认才计入正式指标</li>
         </ul>
       </section>

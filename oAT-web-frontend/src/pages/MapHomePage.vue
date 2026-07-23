@@ -35,8 +35,11 @@
       <div><strong>{{ percent(map.response.value.summary.completeChainRate) }}</strong><span>完整链路率</span></div>
       <div><strong>{{ map.response.value.summary.requirementCount }}</strong><span>需求</span></div>
       <div><strong>{{ map.response.value.summary.testcaseCount }}</strong><span>测试用例</span></div>
-      <div><strong>{{ map.response.value.summary.codeCount }}</strong><span>代码节点</span></div>
-      <div><strong>{{ map.response.value.summary.dynamicEvidenceCount }}</strong><span>动态证据</span></div>
+      <div>
+        <strong>{{ map.response.value.summary.codeCount }}</strong>
+        <span :title="codeSummaryTitle">代码符号</span>
+      </div>
+      <div><strong>{{ map.response.value.summary.dynamicEvidenceCount }}</strong><span>运行记录</span></div>
       <div><strong>{{ map.response.value.summary.brokenRequirementCount + map.response.value.summary.brokenTestcaseCount }}</strong><span>断链</span></div>
     </section>
 
@@ -478,7 +481,7 @@
         <div class="pane-head">
           <div>
             <strong>代码树</strong>
-            <span>{{ map.response.value?.summary.codeCount || 0 }} 个符号</span>
+            <span>{{ codeTreeSummaryText }}</span>
           </div>
           <div class="tree-actions">
             <button type="button" @click="expandTree">展开</button>
@@ -649,6 +652,16 @@ const baselineStatusText = computed(() => {
   return `当前基线：${baseline.name || baseline.id}${version ? ` · ${version}` : ''}`
 })
 const errorMessage = computed(() => friendlyMapError(map.error.value, selectedBaselineId.value || map.activeBaselineId.value))
+const codeSummaryTitle = computed(() => {
+  const summary = map.response.value?.summary
+  if (!summary) return ''
+  return `文件 ${summary.codeFileCount ?? 0} · 类 ${summary.codeClassCount ?? 0} · 方法 ${summary.codeMethodCount ?? 0}`
+})
+const codeTreeSummaryText = computed(() => {
+  const summary = map.response.value?.summary
+  if (!summary) return '0 个代码符号'
+  return `${summary.codeCount || 0} 个代码符号 · 方法 ${summary.codeMethodCount ?? 0}`
+})
 
 const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
 const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value).map(toTreeNode))
@@ -713,7 +726,7 @@ const callViewMeta = computed(() => {
   if (callViewMode.value === 'coverage') {
     return {
       title: '覆盖率数据',
-      description: '展示覆盖/执行证据匹配到的代码节点',
+      description: '展示覆盖率和执行记录匹配到的代码节点',
       count: coverageFileRows.value.length
         ? `${coverageFileRows.value.length} 个文件 · ${coverageRows.value.length} 条节点`
         : `${coverageRows.value.length} 条数据`,
@@ -1257,10 +1270,10 @@ function relationCount(nodeId: string, relation: TraceRelation) {
 
 function coverageSummaryText(node: TraceabilityNode) {
   const coverage = node.coverage
-  if (!coverage) return node.evidenceState === 'STATIC' || node.evidenceState === 'NONE' ? '无覆盖摘要' : '已匹配动态证据'
+  if (!coverage) return node.evidenceState === 'STATIC' || node.evidenceState === 'NONE' ? '无覆盖摘要' : '已匹配运行记录'
   const line = coverage.lineRate !== undefined ? `行覆盖 ${Math.round(coverage.lineRate * 100)}%` : ''
   const branch = coverage.branchRate !== undefined ? `分支覆盖 ${Math.round(coverage.branchRate * 100)}%` : ''
-  return [line, branch].filter(Boolean).join(' · ') || '已匹配覆盖证据'
+  return [line, branch].filter(Boolean).join(' · ') || '已匹配覆盖记录'
 }
 
 function toCoverageRow(node: TraceabilityNode) {
@@ -1444,7 +1457,7 @@ function hasCoverageSummary(node: TraceabilityNode) {
 function coverageStateText(node: TraceabilityNode, hasReport: boolean, isCovered: boolean) {
   if (hasReport && isCovered) return '已覆盖'
   if (hasReport) return '未覆盖'
-  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return '动态证据'
+  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return '运行记录'
   return '无报告'
 }
 
@@ -2252,10 +2265,10 @@ function traceEdgeTitle(edge: TraceabilityEdge) {
   return [
     `${source?.label || edge.source} → ${target?.label || edge.target}`,
     `关系：${relationLabel(edge.relation)}`,
-    edge.evidenceLevel ? `证据等级：${edge.evidenceLevel}` : '',
+    edge.evidenceLevel ? `可信等级：${edge.evidenceLevel}` : '',
     edge.reviewStatus ? `状态：${edge.reviewStatus}` : '',
     edge.confidence !== undefined ? `置信度：${Math.round(edge.confidence * 100)}%` : '',
-    edgeEvidenceText(edge) ? `依据：${edgeEvidenceText(edge)}` : '',
+    edgeEvidenceText(edge) ? `来源：${edgeEvidenceText(edge)}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -2266,9 +2279,9 @@ function callEdgeTitle(edge: TraceabilityEdge) {
     `${source?.label || edge.source} → ${target?.label || edge.target}`,
     `调用类型：${callEvidenceLabel(edge, target)}`,
     edgeCallKind(edge, target) === 'STATIC' ? '方法调用：静态调用' : '方法调用：普通调用',
-    edge.generationMethod ? `生成方式：${edge.generationMethod}` : '',
-    edge.evidenceLevel ? `证据等级：${edge.evidenceLevel}` : '',
-    edgeEvidenceText(edge) ? `依据：${edgeEvidenceText(edge)}` : '',
+    edge.generationMethod ? `生成方式：${generationMethodText(edge.generationMethod)}` : '',
+    edge.evidenceLevel ? `可信等级：${edge.evidenceLevel}` : '',
+    edgeEvidenceText(edge) ? `来源：${edgeEvidenceText(edge)}` : '',
   ].filter(Boolean).join('\n')
 }
 
@@ -2321,8 +2334,31 @@ function searchableCallEdge(edge: TraceabilityEdge) {
 
 function edgeEvidenceText(edge: TraceabilityEdge) {
   const evidence = edge.evidence?.[0]
-  const base = edge.callEvidence || edge.evidenceType
-  return [base, edge.generationMethod, evidence?.traceId, evidence?.caseName, evidence?.reason].filter(Boolean).join(' · ')
+  return [callEvidenceText(edge), generationMethodText(edge.generationMethod), evidence?.traceId, evidence?.caseName, evidence?.reason]
+    .filter(Boolean).join(' · ')
+}
+
+function callEvidenceText(edge: TraceabilityEdge) {
+  if (edge.callEvidence === 'DYNAMIC_CONFIRMED') return '运行确认'
+  if (edge.callEvidence === 'STATIC_BRIDGED') return '静态补全'
+  if (edge.callEvidence === 'STATIC_ONLY') return '静态调用'
+  if (edge.evidenceType === 'COVERAGE') return '覆盖率'
+  if (edge.evidenceType === 'EXECUTION_TRACE') return '执行记录'
+  if (edge.evidenceType === 'STATIC_ANALYSIS') return '静态分析'
+  if (edge.evidenceType === 'DOCUMENT') return '文档关联'
+  if (edge.evidenceType === 'DERIVED') return '推导关系'
+  return ''
+}
+
+function generationMethodText(value?: string) {
+  return ({
+    CODE_STRUCTURE: '代码结构',
+    SOURCE_EXPRESSION: '源码表达式',
+    SOURCE_CALL_ANALYSIS: '源码调用分析',
+    DYNAMIC_TRACE: '运行轨迹',
+    TRACEABILITY_TEXT_MATCH: '文本匹配',
+    DERIVED_FROM_REQUIREMENT_CODE: '需求与实现推导',
+  } as Record<string, string>)[String(value || '')] || value || ''
 }
 
 function callEvidenceLabel(edge: TraceabilityEdge, targetNode?: TraceabilityNode) {

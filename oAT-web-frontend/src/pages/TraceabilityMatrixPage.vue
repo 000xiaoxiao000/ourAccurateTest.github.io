@@ -2,9 +2,9 @@
   <section class="page-content">
     <header class="page-header plain-header">
       <div>
-        <div class="eyebrow">AI 验证 · 追溯证据</div>
+        <div class="eyebrow">AI 验证 · 追溯依据</div>
         <h1>双向追溯矩阵</h1>
-        <p class="subtext">以验收标准为最小单位，展示需求 → 测试用例 → 代码符号 → 执行证据的正向追溯关系与证据等级。</p>
+        <p class="subtext">以验收标准为最小单位，展示需求 → 测试用例 → 代码符号 → 执行依据的正向追溯关系与依据等级。</p>
       </div>
       <div class="header-actions">
         <button type="button" class="secondary-button" :disabled="loading" @click="load">刷新</button>
@@ -27,12 +27,12 @@
           <option value="NOT_VERIFIABLE">不可验证</option>
         </select>
         <select v-model="filterEvidence">
-          <option value="">全部证据等级</option>
-          <option value="E0">E0 无证据</option>
-          <option value="E1">E1 用例证据</option>
-          <option value="E2">E2 代码证据</option>
-          <option value="E3">E3 执行证据</option>
-          <option value="E4">E4 覆盖率证据</option>
+          <option value="">全部依据等级</option>
+          <option value="E0">E0 无依据</option>
+          <option value="E1">E1 用例依据</option>
+          <option value="E2">E2 代码依据</option>
+          <option value="E3">E3 执行依据</option>
+          <option value="E4">E4 覆盖率依据</option>
         </select>
         <span class="filter-count">显示 {{ filtered.length }} / {{ matrix.length }} 条 AC</span>
       </div>
@@ -41,8 +41,8 @@
         <div class="table-head">
           <span>验收标准</span>
           <span>测试用例覆盖</span>
-          <span>代码 / 执行证据</span>
-          <span>结论 · 证据级</span>
+          <span>代码 / 执行依据</span>
+          <span>结论 · 依据级</span>
         </div>
 
         <article v-for="row in filtered" :key="row.criterion.id" class="matrix-row" :class="row.verdict.toLowerCase()">
@@ -81,7 +81,7 @@
                 {{ targetTypeText(link.targetType) }} · {{ link.evidenceLevel }} · {{ reviewText(link.reviewStatus) }}
               </button>
             </div>
-            <em v-else class="no-coverage">无代码 / 执行证据</em>
+            <em v-else class="no-coverage">无代码 / 执行依据</em>
           </div>
 
           <div class="verdict-cell">
@@ -188,8 +188,8 @@ const reviewMap: Record<string, string> = {
 function reviewText(s: string) { return reviewMap[s] || s }
 
 const levelHelpMap: Record<string, string> = {
-  E0: '没有证据，需要补充', E1: '有用例关联但无代码/执行证据',
-  E2: '有代码实现证据（静态）', E3: '有测试执行证据', E4: '有覆盖率证据（最强）',
+  E0: '没有依据，需要补充', E1: '有用例关联但无代码/执行依据',
+  E2: '有代码实现依据（静态）', E3: '有测试执行依据', E4: '有覆盖率依据（最强）',
 }
 function levelHelp(l: string) { return levelHelpMap[l] || '' }
 

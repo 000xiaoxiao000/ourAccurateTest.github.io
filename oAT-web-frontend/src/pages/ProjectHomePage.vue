@@ -52,7 +52,7 @@
           <div class="panel-head ai-panel-head">
             <div>
               <h2>AI 需求一致性验证</h2>
-              <p class="panel-desc">冻结需求、用例、Bug、源码和运行证据，输出 AI 生成的追溯矩阵和问题清单</p>
+              <p class="panel-desc">冻结需求、用例、Bug、源码和运行依据，输出 AI 生成的追溯矩阵和问题清单</p>
             </div>
             <RouterLink class="ai-entry primary" :to="`/p/${projectId}/verification`">
               进入 AI 验证
@@ -70,7 +70,7 @@
               <span class="status-dot active"></span>
               <div>
                 <strong>需求一致性分析</strong>
-                <span>基于需求、用例、源码和执行证据生成追溯结果</span>
+                <span>基于需求、用例、源码和执行依据生成追溯结果</span>
               </div>
             </div>
           </div>
@@ -152,9 +152,9 @@ const requirementAssetCount = computed(() => verificationOverview.value?.require
 
 const aiCapabilities = [
   { icon: '需', title: 'AC 提取', text: '把需求拆成可验证的最小验收标准' },
-  { icon: '追', title: '双向追溯', text: '关联 AC、用例、源码符号和运行证据' },
-  { icon: '审', title: '证据审核', text: '确认、驳回、豁免或回写到外部事实源' },
-  { icon: '险', title: 'AI 风险发现', text: '由 AI 基于证据输出缺失、偏差和不可验证项' },
+  { icon: '追', title: '双向追溯', text: '关联 AC、用例、源码符号和运行依据' },
+  { icon: '审', title: '依据审核', text: '确认、驳回、豁免或回写到外部事实源' },
+  { icon: '险', title: 'AI 风险发现', text: '由 AI 基于依据输出缺失、偏差和不可验证项' },
 ]
 
 function formatTime(value?: string) {

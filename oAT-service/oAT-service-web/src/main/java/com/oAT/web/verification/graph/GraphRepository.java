@@ -143,6 +143,15 @@ public class GraphRepository {
                 """, this::node, baselineId, kind.name());
     }
 
+    public List<GraphNode> findFocusCandidateNodes(String baselineId, List<GraphNodeKind> kinds, int limit) {
+        if (kinds == null || kinds.isEmpty()) return List.of();
+        String[] kindNames = kinds.stream().map(GraphNodeKind::name).toArray(String[]::new);
+        return jdbc.query("""
+                SELECT * FROM oat_graph_node WHERE baseline_id = ? AND node_kind = ANY (?) AND invalidated_at IS NULL
+                ORDER BY node_kind, display_name LIMIT ?
+                """, this::node, baselineId, kindNames, limit);
+    }
+
     public List<GraphEdge> findActiveEdgesByType(String baselineId, GraphEdgeType type) {
         return jdbc.query("""
                 SELECT * FROM oat_graph_edge WHERE baseline_id = ? AND edge_type = ? AND invalidated_at IS NULL
@@ -330,8 +339,10 @@ public class GraphRepository {
         return jdbc.query("""
                 SELECT * FROM oat_graph_node WHERE baseline_id = ? AND node_kind = 'METHOD' AND invalidated_at IS NULL
                 AND REPLACE(stable_symbol_id, '/', '.') ILIKE ?
-                AND (? = '' OR attributes_json ->> 'descriptor' = ?)
-                ORDER BY CASE WHEN ? > 0 AND locator LIKE ? THEN 0 ELSE 1 END, display_name
+                ORDER BY
+                  CASE WHEN ? <> '' AND attributes_json ->> 'descriptor' = ? THEN 0 ELSE 1 END,
+                  CASE WHEN ? > 0 AND locator LIKE ? THEN 0 ELSE 1 END,
+                  display_name
                 LIMIT 1
                 """, this::node, baselineId, stablePattern, descriptor == null ? "" : descriptor,
                 descriptor == null ? "" : descriptor, startLine, "%:" + startLine).stream().findFirst();

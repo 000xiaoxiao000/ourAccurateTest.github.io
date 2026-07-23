@@ -3,8 +3,8 @@
     <div class="page-header">
       <div>
         <div class="eyebrow">API Discovery</div>
-        <h1>接口证据扫描（旧工具）</h1>
-        <p class="subtext">辅助从源码包或制品包中提取接口证据；主流程请使用 AI 验证基线。</p>
+        <h1>接口依据扫描（旧工具）</h1>
+        <p class="subtext">辅助从源码包或制品包中提取接口依据；主流程请使用 AI 验证基线。</p>
       </div>
       <div class="header-actions">
         <RouterLink class="secondary-link" :to="`/p/${projectId}/apps/${appId}/settings`">返回源码工程</RouterLink>
@@ -293,10 +293,10 @@ async function uploadArtifact() {
     if (selectedCachePath.value) form.set('cachePath', selectedCachePath.value)
     if (selectedFile.value) form.set('file', selectedFile.value)
     await apiPost<string>(`${endpointBase()}/upload`, form)
-    notice.value = '接口证据扫描完成'
+    notice.value = '接口依据扫描完成'
     await loadEndpoints()
   } catch (err) {
-    notice.value = err instanceof Error ? err.message : '接口证据扫描失败'
+    notice.value = err instanceof Error ? err.message : '接口依据扫描失败'
   } finally {
     uploading.value = false
   }

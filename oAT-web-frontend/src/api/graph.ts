@@ -204,6 +204,13 @@ export function fetchGraphView(projectId: string, query: {
   return apiGetRaw<GraphView>(`${mapBase(projectId)}?${params.toString()}`)
 }
 
+export function fetchGraphFocusCandidates(projectId: string, baselineId: string, limit?: number) {
+  const params = new URLSearchParams()
+  params.set('baselineId', baselineId)
+  if (limit) params.set('limit', String(limit))
+  return apiGetRaw<GraphNode[]>(`${mapBase(projectId)}/focus-candidates?${params.toString()}`)
+}
+
 export function projectControlFlowGraph(projectId: string, baselineId: string) {
   return apiPostRaw<StaticProjectionResponse>(`${mapBase(projectId)}/control-flow-project?baselineId=${baselineId}`)
 }

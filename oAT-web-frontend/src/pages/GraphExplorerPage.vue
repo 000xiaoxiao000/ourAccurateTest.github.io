@@ -42,16 +42,20 @@
 
     <!-- GRAPH QUERY TAB -->
     <div v-show="activeTab === 'graph'" class="tab-panel">
-      <p class="feature-intro"><strong>图谱查询：</strong>查看当前范围内的事实节点与关系。数据来自当前基线的活跃图谱节点和边；未聚焦时按节点类型和名称取前 {{ GRAPH_QUERY_MAX_NODES }} 个节点，聚焦时按节点 ID 做深度遍历。表格中的“测试执行”表示测试报告或流水线中的一次测试运行记录，不是源码方法。</p>
+      <p class="feature-intro"><strong>图谱查询：</strong>先选择需求、用例或代码对象，再查看它上下游的关系。需要排查全量数据时，可切换到“全量排查”模式。</p>
       <div class="query-bar">
+        <span class="graph-mode-toggle">
+          <button type="button" :class="{ active: graphQueryMode === 'focus' }" @click="switchGraphQueryMode('focus')">聚焦关系</button>
+          <button type="button" :class="{ active: graphQueryMode === 'explore' }" @click="switchGraphQueryMode('explore')">全量排查</button>
+        </span>
         <label class="field-inline focus-field">
-          <span>聚焦节点 ID</span>
+          <span>当前对象</span>
           <span class="focus-input-wrap">
-            <input v-model.trim="focusId" type="text" list="graph-focus-node-options" placeholder="留空=全量；可从表格点“聚焦”" />
-            <button v-if="focusId" type="button" aria-label="清空聚焦节点 ID" title="清空" @click="focusId = ''">×</button>
+            <input v-model.trim="focusId" type="text" list="graph-focus-node-options" placeholder="可从左侧列表选择，或粘贴节点 ID" />
+            <button v-if="focusId" type="button" aria-label="清空聚焦节点 ID" title="清空" @click="clearGraphFocus">×</button>
           </span>
           <datalist id="graph-focus-node-options">
-            <option v-for="node in graph?.nodes || []" :key="node.id" :value="node.id">
+            <option v-for="node in focusCandidates" :key="node.id" :value="node.id">
               {{ nodeKindText(node.kind) }} · {{ node.displayName }}
             </option>
           </datalist>
@@ -68,103 +72,137 @@
           <span>边上限</span>
           <input v-model.number="maxEdges" type="number" min="1" :max="GRAPH_QUERY_MAX_EDGES" />
         </label>
-        <button type="button" class="primary-button" :disabled="loading" @click="loadGraph">查询</button>
+        <button type="button" class="primary-button" :disabled="loading" @click="loadGraph">{{ focusId || graphQueryMode === 'explore' ? '查询' : '刷新列表' }}</button>
       </div>
 
       <div v-if="graph" class="graph-result">
-        <div v-if="graph.clipReasons.length" class="clip-banner">
+        <div v-if="graph.clipReasons.length && (focusId || graphQueryMode === 'explore')" class="clip-banner">
           <strong>裁剪提示</strong>
           <ul><li v-for="(r, i) in graph.clipReasons" :key="i">{{ r }}</li></ul>
           <small v-if="graph.expandHint">{{ graph.expandHint }}</small>
         </div>
-        <div class="graph-stats">
-          <span>业务节点 {{ visibleGraphNodes.length }}<template v-if="externalFilteredNodeCount"> / 已过滤框架 {{ externalFilteredNodeCount }}</template></span>
-          <span>业务边 {{ visibleGraphEdges.length }}<template v-if="graph.edgesInScope"> / 范围内 {{ graph.edgesInScope }}</template></span>
-          <span>深度 {{ graph.depth }}</span>
-        </div>
-        <div class="node-kind-legend">
-          <span v-for="(count, kind) in nodeKindCounts" :key="kind" class="kind-chip" :class="`k-${kind}`">
-            {{ nodeKindText(kind) }} {{ count }}
-          </span>
-          <span class="view-toggle">
-            <button type="button" :class="{ active: graphViewMode === 'graph' }" @click="graphViewMode = 'graph'">图形</button>
-            <button type="button" :class="{ active: graphViewMode === 'table' }" @click="graphViewMode = 'table'">表格</button>
-          </span>
-        </div>
+        <div class="graph-workbench">
+          <aside class="graph-picker">
+            <div class="picker-head">
+              <div>
+                <strong>对象列表</strong>
+                <span>选择后查看上下游关系</span>
+              </div>
+              <button v-if="focusId" type="button" class="inline-table-button" @click="clearGraphFocus">清空</button>
+            </div>
+            <div class="picker-tabs">
+              <button v-for="group in graphPickerGroups" :key="group.key" type="button"
+                      :class="{ active: graphPickerKind === group.key }" @click="graphPickerKind = group.key">
+                {{ group.label }} <span>{{ group.count }}</span>
+              </button>
+            </div>
+            <input v-model.trim="graphPickerKeyword" class="picker-search" type="search" placeholder="搜索名称、类型或位置" />
+            <div class="picker-list">
+              <button v-for="node in graphPickerNodes" :key="node.id" type="button" class="picker-node"
+                      :class="{ active: node.id === focusId }" @click="focusGraphNode(node.id)">
+                <span class="kind-tag" :class="`k-${node.kind}`">{{ nodeKindText(node.kind) }}</span>
+                <strong>{{ graphNodeDisplayName(node) }}</strong>
+                <small>{{ node.locator || node.stableSymbolId || node.id }}</small>
+              </button>
+              <p v-if="!graphPickerNodes.length" class="table-note">当前列表没有匹配对象。</p>
+            </div>
+          </aside>
 
-        <div
-          v-if="graphViewMode === 'graph'"
-          ref="graphScrollRef"
-          class="svg-canvas-wrap"
-          :class="{ panning: graphPanning }"
-          @scroll="updateGraphOverviewViewport"
-          @pointerdown="startGraphPan"
-          @pointermove="moveGraphPan"
-          @pointerup="endGraphPan"
-          @pointercancel="endGraphPan"
-        >
-          <div class="graph-explainer"><strong>阅读方式：</strong>圆点代表事实节点，连线代表它们之间的关系；颜色区分节点类型。图按“需求与测试 → 代码结构 → 控制流与运行证据”分层排列，便于观察证据如何落到代码。左上角概览和主图均绘制本次查询返回的全部节点；可横向、纵向滚动浏览，悬停节点可查看详情。</div>
-          <div
-            v-if="svgLayout.nodes.length"
-            ref="graphVisualsRef"
-            class="graph-visuals"
-            :style="{ width: `${svgLayout.width}px`, minHeight: `${svgLayout.height + 128}px` }"
-          >
-            <svg
-              class="graph-overview"
-              :viewBox="`0 0 ${svgLayout.width} ${svgLayout.height}`"
-              aria-label="图谱概览"
-              @pointerdown.prevent="startOverviewPan"
-              @pointermove.prevent="moveOverviewPan"
-              @pointerup="endOverviewPan"
-              @pointercancel="endOverviewPan"
-            >
-              <line v-for="(e, i) in svgLayout.edges" :key="`mini-e${i}`" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="mini-edge" />
-              <circle v-for="n in svgLayout.nodes" :key="`mini-n${n.id}`" :cx="n.x" :cy="n.y" r="3" class="svg-node" :class="`k-${n.kind}`" />
-              <rect
-                v-if="overviewViewport.visible"
-                class="overview-viewport"
-                :x="overviewViewport.x"
-                :y="overviewViewport.y"
-                :width="overviewViewport.width"
-                :height="overviewViewport.height"
-                rx="10"
-              />
-            </svg>
-            <svg
-              :viewBox="`0 0 ${svgLayout.width} ${svgLayout.height}`"
-              class="svg-canvas"
-              preserveAspectRatio="xMidYMid meet"
-              :style="{ width: `${svgLayout.width}px`, height: `${svgLayout.height}px` }"
-            >
-              <line v-for="(e, i) in svgLayout.edges" :key="`e${i}`"
-                    :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="svg-edge" :class="`et-${e.type}`" />
-              <g v-for="n in svgLayout.nodes" :key="n.id" :transform="`translate(${n.x},${n.y})`" class="svg-node-g"
-                 @mouseenter="showNodeTooltip(n.id, $event)" @mousemove="moveNodeTooltip" @mouseleave="hideNodeTooltip">
-                <circle :r="hoverNode === n.id ? 10 : 6" class="svg-node" :class="`k-${n.kind}`" />
-                <text v-if="hoverNode === n.id || svgLayout.nodes.length <= 40" :y="-12" class="svg-label">{{ n.label }}</text>
-              </g>
-            </svg>
-          </div>
-          <div
-            v-if="hoverGraphNode && hoverSvgNode"
-            class="svg-node-tooltip"
-            :class="{ 'near-right': tooltipPosition.nearRight, 'near-bottom': tooltipPosition.nearBottom }"
-            :style="{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }"
-            role="tooltip"
-          >
-            <strong>{{ hoverGraphNode.displayName || hoverGraphNode.id }}</strong>
-            <dl>
-              <template v-for="item in nodeTooltipRows(hoverGraphNode)" :key="item.label">
-                <dt>{{ item.label }}</dt>
-                <dd>{{ item.value }}</dd>
-              </template>
-            </dl>
-          </div>
-          <p v-if="!svgLayout.nodes.length" class="table-note">当前范围没有可绘制的边关系，请调整聚焦符号或深度。</p>
-        </div>
+          <main class="graph-main">
+            <div v-if="!focusId && graphQueryMode === 'focus'" class="empty-state graph-focus-empty">
+              <strong>请选择一个对象查看关系</strong>
+              <span>从左侧选择需求、用例、方法、覆盖率或测试执行记录后，会按当前深度展开上下游关系。</span>
+            </div>
+            <template v-else>
+              <div class="graph-stats">
+                <span>{{ graphQueryMode === 'explore' ? '全量排查' : '聚焦关系' }}</span>
+                <span>业务节点 {{ visibleGraphNodes.length }}<template v-if="externalFilteredNodeCount"> / 已过滤框架 {{ externalFilteredNodeCount }}</template></span>
+                <span>业务边 {{ visibleGraphEdges.length }}<template v-if="graph.edgesInScope"> / 范围内 {{ graph.edgesInScope }}</template></span>
+                <span>深度 {{ graph.depth }}</span>
+              </div>
+              <div class="node-kind-legend">
+                <span v-for="(count, kind) in nodeKindCounts" :key="kind" class="kind-chip" :class="`k-${kind}`">
+                  {{ nodeKindText(kind) }} {{ count }}
+                </span>
+                <span class="view-toggle">
+                  <button type="button" :class="{ active: graphViewMode === 'graph' }" @click="graphViewMode = 'graph'">图形</button>
+                  <button type="button" :class="{ active: graphViewMode === 'table' }" @click="graphViewMode = 'table'">表格</button>
+                </span>
+              </div>
 
-        <template v-else>
+              <div
+                v-if="graphViewMode === 'graph'"
+                ref="graphScrollRef"
+                class="svg-canvas-wrap"
+                :class="{ panning: graphPanning }"
+                @scroll="updateGraphOverviewViewport"
+                @pointerdown="startGraphPan"
+                @pointermove="moveGraphPan"
+                @pointerup="endGraphPan"
+                @pointercancel="endGraphPan"
+              >
+                <div class="graph-explainer"><strong>阅读方式：</strong>圆点代表节点，连线代表关系；颜色区分节点类型。图按“需求与测试 → 代码结构 → 控制流与运行数据”分层排列，便于观察测试与覆盖率如何落到代码。</div>
+                <div
+                  v-if="svgLayout.nodes.length"
+                  ref="graphVisualsRef"
+                  class="graph-visuals"
+                  :style="{ width: `${svgLayout.width}px`, minHeight: `${svgLayout.height + 128}px` }"
+                >
+                  <svg
+                    class="graph-overview"
+                    :viewBox="`0 0 ${svgLayout.width} ${svgLayout.height}`"
+                    aria-label="图谱概览"
+                    @pointerdown.prevent="startOverviewPan"
+                    @pointermove.prevent="moveOverviewPan"
+                    @pointerup="endOverviewPan"
+                    @pointercancel="endOverviewPan"
+                  >
+                    <line v-for="(e, i) in svgLayout.edges" :key="`mini-e${i}`" :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="mini-edge" />
+                    <circle v-for="n in svgLayout.nodes" :key="`mini-n${n.id}`" :cx="n.x" :cy="n.y" r="3" class="svg-node" :class="`k-${n.kind}`" />
+                    <rect
+                      v-if="overviewViewport.visible"
+                      class="overview-viewport"
+                      :x="overviewViewport.x"
+                      :y="overviewViewport.y"
+                      :width="overviewViewport.width"
+                      :height="overviewViewport.height"
+                      rx="10"
+                    />
+                  </svg>
+                  <svg
+                    :viewBox="`0 0 ${svgLayout.width} ${svgLayout.height}`"
+                    class="svg-canvas"
+                    preserveAspectRatio="xMidYMid meet"
+                    :style="{ width: `${svgLayout.width}px`, height: `${svgLayout.height}px` }"
+                  >
+                    <line v-for="(e, i) in svgLayout.edges" :key="`e${i}`"
+                          :x1="e.x1" :y1="e.y1" :x2="e.x2" :y2="e.y2" class="svg-edge" :class="`et-${e.type}`" />
+                    <g v-for="n in svgLayout.nodes" :key="n.id" :transform="`translate(${n.x},${n.y})`" class="svg-node-g"
+                       @mouseenter="showNodeTooltip(n.id, $event)" @mousemove="moveNodeTooltip" @mouseleave="hideNodeTooltip">
+                      <circle :r="hoverNode === n.id ? 10 : 6" class="svg-node" :class="`k-${n.kind}`" />
+                      <text v-if="hoverNode === n.id || svgLayout.nodes.length <= 40" :y="-12" class="svg-label">{{ n.label }}</text>
+                    </g>
+                  </svg>
+                </div>
+                <div
+                  v-if="hoverGraphNode && hoverSvgNode"
+                  class="svg-node-tooltip"
+                  :class="{ 'near-right': tooltipPosition.nearRight, 'near-bottom': tooltipPosition.nearBottom }"
+                  :style="{ left: `${tooltipPosition.x}px`, top: `${tooltipPosition.y}px` }"
+                  role="tooltip"
+                >
+                  <strong>{{ hoverGraphNode.displayName || hoverGraphNode.id }}</strong>
+                  <dl>
+                    <template v-for="item in nodeTooltipRows(hoverGraphNode)" :key="item.label">
+                      <dt>{{ item.label }}</dt>
+                      <dd>{{ item.value }}</dd>
+                    </template>
+                  </dl>
+                </div>
+                <p v-if="!svgLayout.nodes.length" class="table-note">当前范围没有可绘制的边关系，请调整对象或深度。</p>
+              </div>
+
+              <template v-else>
           <div class="list-toolbar">
             <input v-model.trim="nodeTableKeyword" type="search" placeholder="搜索类型、名称、源码位置、用例或执行环境" @input="nodeTablePage = 1" />
             <span>共 {{ filteredGraphNodes.length }} 个节点</span>
@@ -195,26 +233,29 @@
             :page-sizes="[10, 20, 50]"
           />
           <p v-if="!filteredGraphNodes.length" class="table-note">没有匹配的节点。</p>
-        </template>
+              </template>
+            </template>
+          </main>
+        </div>
       </div>
       <div v-else-if="!loading" class="empty-state"><strong>暂无图谱数据</strong><span>请先投影事实图，再执行查询。</span></div>
     </div>
 
     <!-- FUSION TAB -->
     <div v-show="activeTab === 'fusion'" class="tab-panel">
-      <p class="feature-intro"><strong>融合三态：</strong>以当前基线活跃的 METHOD 节点为准，并复用“调用链路图 · 覆盖率数据”的方法覆盖结果。存在方法覆盖、运行调用或触达证据即为“已执行确认”；仅有静态调用关系为“可达未执行”；两者均无才是“不可观测”。</p>
+      <p class="feature-intro"><strong>融合三态：</strong>以事实图谱中的活跃方法节点为准，统计口径不同于链路地图的文件/类/方法代码符号总数。存在方法覆盖、运行调用或测试触达记录即为“已执行确认”；没有运行记录但参与静态调用关系的为“可达未执行”；两者均无才是“不可观测”。</p>
       <button type="button" class="secondary-button" :disabled="fusionLoading" @click="loadFusion">
         {{ fusionLoading ? '加载中...' : '加载融合三态' }}
       </button>
       <div v-if="fusion" class="fusion-result">
         <div class="fusion-summary">
-          <div class="fusion-card confirmed"><span class="num">{{ fusion.executedConfirmed }}</span><span>已执行确认</span></div>
-          <div class="fusion-card reachable"><span class="num">{{ fusion.reachableNotExecuted }}</span><span>可达未执行</span></div>
-          <div class="fusion-card observable"><span class="num">{{ fusion.notObservable }}</span><span>不可观测</span></div>
-          <div class="fusion-card total"><span class="num">{{ fusion.totalMethods }}</span><span>方法总数</span></div>
+          <div class="fusion-card confirmed" title="方法有覆盖记录、运行调用记录或测试触达记录"><span class="num">{{ fusion.executedConfirmed }}</span><span>已执行确认</span></div>
+          <div class="fusion-card reachable" title="方法没有运行记录，但出现在静态调用关系中"><span class="num">{{ fusion.reachableNotExecuted }}</span><span>可达未执行</span></div>
+          <div class="fusion-card observable" title="方法既没有运行记录，也没有静态调用关系"><span class="num">{{ fusion.notObservable }}</span><span>不可观测</span></div>
+          <div class="fusion-card total" title="事实图谱中的方法节点总数，不包含文件和类"><span class="num">{{ fusion.totalMethods }}</span><span>方法总数</span></div>
         </div>
         <div v-if="fusion.clipped" class="notice warn">{{ fusion.clipReason }}</div>
-        <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；融合会直接复用当前基线的覆盖率和测试执行证据。</span></div>
+        <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；融合会直接复用当前基线的覆盖率和测试执行记录。</span></div>
         <div v-else class="result-table-block">
           <div class="list-toolbar">
             <input v-model.trim="fusionKeyword" type="search" placeholder="搜索方法、符号或源码位置" @input="fusionNodePage = 1" />
@@ -330,10 +371,10 @@
 
     <!-- BASELINE COMPARISON TAB -->
     <div v-show="activeTab === 'compare'" class="tab-panel">
-      <p class="feature-intro"><strong>基线比较：</strong>以当前基线为“新版本”，选择一个历史基线作为“旧版本”，查看哪些验收标准的证据闭合和哪些方法的执行状态发生变化。</p>
+      <p class="feature-intro"><strong>基线比较：</strong>以当前基线为“新版本”，选择一个历史基线作为“旧版本”，查看哪些验收标准的验证依据和哪些方法的执行状态发生变化。</p>
       <section class="ops-block">
         <h3 class="section-title">新旧基线比较</h3>
-        <p class="ops-hint">与另一个基线对比：哪些 AC 的证据闭合发生增减，哪些方法的融合三态发生迁移。当前基线作为目标（新），选择一个基准（旧）。</p>
+        <p class="ops-hint">与另一个基线对比：哪些 AC 的验证依据发生增减，哪些方法的融合三态发生迁移。当前基线作为目标（新），选择一个基准（旧）。</p>
         <label class="field-inline">
           <span>历史基线（旧）</span>
           <select v-model="compareBaseId" class="policy-select">
@@ -346,27 +387,27 @@
 
       <template v-if="comparison">
         <section class="comparison-summary">
-          <article><span>验收标准证据变化</span><strong>{{ comparison.acDeltas.length }}</strong><small>新增、移除或证据变化</small></article>
+          <article><span>验收标准依据变化</span><strong>{{ comparison.acDeltas.length }}</strong><small>新增、移除或依据变化</small></article>
           <article><span>融合状态迁移</span><strong>{{ comparison.fusionDeltas.length }}</strong><small>方法执行状态发生变化</small></article>
           <article><span>当前版本</span><strong>{{ currentBaselineLabel }}</strong><small>与所选历史基线对比</small></article>
         </section>
         <section class="ops-block comparison-card">
           <div class="comparison-tabs" role="tablist" aria-label="基线比较结果类型">
-            <button type="button" :class="{ active: comparisonTab === 'ac' }" @click="comparisonTab = 'ac'">AC 证据变化 <span>{{ filteredAcDeltas.length }}</span></button>
+            <button type="button" :class="{ active: comparisonTab === 'ac' }" @click="comparisonTab = 'ac'">AC 依据变化 <span>{{ filteredAcDeltas.length }}</span></button>
             <button type="button" :class="{ active: comparisonTab === 'fusion' }" @click="comparisonTab = 'fusion'">融合状态迁移 <span>{{ filteredFusionDeltas.length }}</span></button>
           </div>
 
           <template v-if="comparisonTab === 'ac'">
             <div ref="acComparisonRef" class="comparison-card-head">
-              <h3 class="section-title">AC 证据变化 <span class="badge-count">{{ filteredAcDeltas.length }}</span></h3>
-              <input v-model.trim="acDeltaKeyword" class="compact-search" type="search" placeholder="搜索 AC 或证据" @input="acDeltaPage = 1" />
+              <h3 class="section-title">AC 依据变化 <span class="badge-count">{{ filteredAcDeltas.length }}</span></h3>
+              <input v-model.trim="acDeltaKeyword" class="compact-search" type="search" placeholder="搜索 AC 或依据" @input="acDeltaPage = 1" />
               <select v-model="acDeltaFilter" class="policy-select compact-select">
-                <option value="">全部变化</option><option value="ADDED">仅新增</option><option value="REMOVED">仅移除</option><option value="EVIDENCE_CHANGED">仅证据变化</option>
+                <option value="">全部变化</option><option value="ADDED">仅新增</option><option value="REMOVED">仅移除</option><option value="EVIDENCE_CHANGED">仅依据变化</option>
               </select>
             </div>
             <div v-if="filteredAcDeltas.length" class="comparison-table-wrap">
               <table class="data-table">
-                <thead><tr><th>验收标准</th><th>变化</th><th>旧证据</th><th>新证据</th><th>操作</th></tr></thead>
+                <thead><tr><th>验收标准</th><th>变化</th><th>旧依据</th><th>新依据</th><th>操作</th></tr></thead>
                 <tbody>
                   <tr v-for="d in pagedAcDeltas" :key="d.criterionId">
                     <td class="mono">{{ d.acKey }}</td>
@@ -378,18 +419,18 @@
                 </tbody>
               </table>
             </div>
-            <p v-else class="table-note">当前筛选下没有 AC 证据变化。</p>
+            <p v-else class="table-note">当前筛选下没有 AC 依据变化。</p>
             <AppPagination v-if="filteredAcDeltas.length" v-model:page="acDeltaPage" v-model:page-size="acDeltaPageSize" :total="filteredAcDeltas.length" item-name="条 AC 变化" :page-sizes="[10, 20, 50]" @update:page="scrollToComparison(acComparisonRef)" />
             <section v-if="selectedAcDelta" class="comparison-detail">
               <h4>{{ selectedAcDelta.acKey }} · {{ acDeltaText(selectedAcDelta.changeType) }}</h4>
               <dl>
                 <dt>验收标准 ID</dt><dd class="mono">{{ selectedAcDelta.criterionId }}</dd>
                 <dt>变化类型</dt><dd>{{ acDeltaText(selectedAcDelta.changeType) }}</dd>
-                <dt>旧证据</dt><dd>{{ evidenceCodeText(selectedAcDelta.beforeEvidence) }} <code>{{ selectedAcDelta.beforeEvidence || '-' }}</code></dd>
-                <dt>新证据</dt><dd>{{ evidenceCodeText(selectedAcDelta.afterEvidence) }} <code>{{ selectedAcDelta.afterEvidence || '-' }}</code></dd>
+                <dt>旧依据</dt><dd>{{ evidenceCodeText(selectedAcDelta.beforeEvidence) }} <code>{{ selectedAcDelta.beforeEvidence || '-' }}</code></dd>
+                <dt>新依据</dt><dd>{{ evidenceCodeText(selectedAcDelta.afterEvidence) }} <code>{{ selectedAcDelta.afterEvidence || '-' }}</code></dd>
               </dl>
             </section>
-            <small class="ops-hint">证据：用例、实现、覆盖率、执行；“无”表示该类依据缺失。</small>
+            <small class="ops-hint">依据：用例、实现、覆盖率、执行；“无”表示该类依据缺失。</small>
           </template>
 
           <template v-else>
@@ -439,7 +480,7 @@ import { useToast } from '@/composables/useToast'
 import { isBusinessCodeItem, isGraphCodeKind } from '@/shared/codeGraphScope'
 import {
   compareBaselines, evaluateAssertionConsistency, fetchAssertionConsistency,
-  fetchFusionView, fetchGraphView, fetchReadModel,
+  fetchFusionView, fetchGraphFocusCandidates, fetchGraphView, fetchReadModel,
   projectBranchCoverageGraph, projectControlFlowGraph, projectRuntimeCoverageGraph,
   projectStaticDependencyGraph, projectStaticGraph, projectTestExecutionGraph,
   projectTraceabilityGraph, rebuildReadModels,
@@ -468,8 +509,8 @@ const projections = [
   { key: 'dependency', label: '依赖图', hint: '生成继承、注入、读写、路由和依赖关系。' },
   { key: 'coverage', label: '覆盖率', hint: '将导入的覆盖率报告关联到代码单元。' },
   { key: 'branch', label: '分支覆盖', hint: '将分支覆盖报告关联到控制流分支。' },
-  { key: 'testExec', label: '测试执行', hint: '将测试执行记录关联到测试用例和运行证据。' },
-  { key: 'traceability', label: '追溯图', hint: '将已生成的 AC、用例、实现和运行证据串成追溯关系。' },
+  { key: 'testExec', label: '测试执行', hint: '将测试执行记录关联到测试用例和运行数据。' },
+  { key: 'traceability', label: '追溯图', hint: '将已生成的 AC、用例、实现和运行记录串成追溯关系。' },
 ] as const
 type ProjectionKey = (typeof projections)[number]['key']
 type ProjectionResponse = StaticProjectionResponse | RuntimeProjectionResponse | TraceabilityProjectionResponse
@@ -482,6 +523,7 @@ const error = ref('')
 const busyKey = ref('')
 
 const graph = ref<GraphView | null>(null)
+const focusCandidates = ref<GraphNode[]>([])
 const focusId = ref('')
 const depth = ref(3)
 const maxNodes = ref(GRAPH_QUERY_MAX_NODES)
@@ -502,6 +544,9 @@ const hoverNode = ref('')
 const nodeTableKeyword = ref('')
 const nodeTablePage = ref(1)
 const nodeTablePageSize = ref(10)
+const graphQueryMode = ref<'focus' | 'explore'>('focus')
+const graphPickerKind = ref<'all' | 'requirements' | 'testcases' | 'methods' | 'runtime'>('all')
+const graphPickerKeyword = ref('')
 const fusionKeyword = ref('')
 const fusionStateFilter = ref('')
 const fusionNodePage = ref(1)
@@ -573,19 +618,19 @@ const selectedAcDelta = computed(() => filteredAcDeltas.value.find((delta) => de
 const selectedFusionDelta = computed(() => filteredFusionDeltas.value.find((delta, index) => fusionDeltaKey(delta, index) === selectedFusionDeltaKey.value) || null)
 
 const readModelDescription = computed(() => ({
-  RM_AC_COVERAGE_SUMMARY: '按验收标准汇总已关联的用例、实现、覆盖率和执行证据，用于发现验证闭环缺口。',
+  RM_AC_COVERAGE_SUMMARY: '按验收标准汇总已关联的用例、实现、覆盖率和执行记录，用于发现验证闭环缺口。',
   RM_SYMBOL_TEST_PROTECTION: '按代码符号汇总它关联的验收标准和测试用例，用于评估代码变更是否受到测试保护。',
   RM_HOT_CALL_CHAIN: '汇总运行期间观察到的调用链路和耗时，用于定位高频或高耗时路径。',
-  RM_UNCOVERED_UNITS: '列出静态上可达、但当前基线未观察到动态执行证据的代码单元。',
+  RM_UNCOVERED_UNITS: '列出静态上可达、但当前基线未观察到运行记录的代码单元。',
   RM_IMPACT_SUMMARY: '按代码符号汇总可能受变更影响的验收标准和测试用例，用于辅助评估变更范围。',
   RM_QUALITY_GATE_SUMMARY: '汇总当前基线的需求验证闭环指标。验证闭环按“有用例依据 + 有实现依据 + 有覆盖率依据 + 有执行依据”同时满足计算。',
 }[readModelKind.value] || '图谱事实的预聚合查询结果。'))
 const readModelSourceNote = computed(() => ({
-  RM_AC_COVERAGE_SUMMARY: '来源：验收标准列表 + 追溯链接。每一行对应 1 条验收标准，表头字段由该 AC 是否存在 TESTCASE、SOURCE_SYMBOL、COVERAGE、EXECUTION 链接计算。',
-  RM_SYMBOL_TEST_PROTECTION: '来源：追溯链接。先找 SOURCE_SYMBOL 关联的 AC，再通过这些 AC 找 TESTCASE，用于判断代码符号是否有测试保护。',
-  RM_HOT_CALL_CHAIN: '来源：活跃 CALLS_RUNTIME 边。调用次数、耗时和结果来自运行调用边的 attributes。',
-  RM_UNCOVERED_UNITS: '来源：融合三态。只展示“可达未执行”的方法节点，即静态可达但没有动态执行证据。',
-  RM_IMPACT_SUMMARY: '来源：追溯链接。按 SOURCE_SYMBOL 汇总可能影响的 AC 和建议复测用例。',
+  RM_AC_COVERAGE_SUMMARY: '来源：验收标准列表 + 追溯链接。每一行对应 1 条验收标准，表头字段由该 AC 是否关联用例、实现、覆盖率和执行记录计算。',
+  RM_SYMBOL_TEST_PROTECTION: '来源：追溯链接。先找代码实现关联的 AC，再通过这些 AC 找测试用例，用于判断代码符号是否有测试保护。',
+  RM_HOT_CALL_CHAIN: '来源：运行调用关系。调用次数、耗时和结果来自运行期间采集到的调用数据。',
+  RM_UNCOVERED_UNITS: '来源：融合三态。只展示“可达未执行”的方法节点，即静态可达但没有运行记录。',
+  RM_IMPACT_SUMMARY: '来源：追溯链接。按代码实现汇总可能影响的 AC 和建议复测用例。',
   RM_QUALITY_GATE_SUMMARY: '来源：验收标准列表 + 追溯链接。总数来自 AC 数量；用例/实现/覆盖率/执行分别统计有对应链接的 AC；验证闭环为四类依据都存在的 AC。',
 }[readModelKind.value] || '来源：当前基线已重建的活跃读模型聚合。'))
 
@@ -643,6 +688,33 @@ const visibleGraphNodeIds = computed(() => new Set(visibleGraphNodes.value.map((
 const visibleGraphEdges = computed(() => (graph.value?.edges || []).filter((edge) => visibleGraphNodeIds.value.has(edge.sourceNodeId) && visibleGraphNodeIds.value.has(edge.targetNodeId)))
 const externalFilteredNodeCount = computed(() => Math.max(0, (graph.value?.nodes.length || 0) - visibleGraphNodes.value.length))
 const graphNodeById = computed(() => new Map(visibleGraphNodes.value.map((node) => [node.id, node])))
+const visibleFocusCandidates = computed(() => focusCandidates.value.filter(isVisibleGraphNode))
+const graphPickerSourceNodes = computed(() => visibleFocusCandidates.value.filter((node) => [
+  'REQUIREMENT', 'ACCEPTANCE_CRITERION', 'TESTCASE', 'METHOD', 'COVERAGE_UNIT', 'TEST_EXECUTION',
+].includes(node.kind)))
+const graphPickerGroups = computed(() => {
+  const nodes = graphPickerSourceNodes.value
+  return [
+    { key: 'all' as const, label: '全部', count: nodes.length },
+    { key: 'requirements' as const, label: '需求', count: nodes.filter((node) => ['REQUIREMENT', 'ACCEPTANCE_CRITERION'].includes(node.kind)).length },
+    { key: 'testcases' as const, label: '用例', count: nodes.filter((node) => node.kind === 'TESTCASE').length },
+    { key: 'methods' as const, label: '方法', count: nodes.filter((node) => node.kind === 'METHOD').length },
+    { key: 'runtime' as const, label: '运行数据', count: nodes.filter((node) => ['COVERAGE_UNIT', 'TEST_EXECUTION'].includes(node.kind)).length },
+  ]
+})
+const graphPickerNodes = computed(() => {
+  const keyword = graphPickerKeyword.value.trim().toLowerCase()
+  return graphPickerSourceNodes.value
+    .filter((node) => {
+      if (graphPickerKind.value === 'requirements') return ['REQUIREMENT', 'ACCEPTANCE_CRITERION'].includes(node.kind)
+      if (graphPickerKind.value === 'testcases') return node.kind === 'TESTCASE'
+      if (graphPickerKind.value === 'methods') return node.kind === 'METHOD'
+      if (graphPickerKind.value === 'runtime') return ['COVERAGE_UNIT', 'TEST_EXECUTION'].includes(node.kind)
+      return true
+    })
+    .filter((node) => !keyword || graphNodeSearchText(node).includes(keyword))
+    .slice(0, 80)
+})
 const hoverGraphNode = computed(() => hoverNode.value ? graphNodeById.value.get(hoverNode.value) : undefined)
 const hoverSvgNode = computed(() => svgLayout.value.nodes.find((node) => node.id === hoverNode.value))
 const filteredGraphNodes = computed(() => {
@@ -683,7 +755,7 @@ interface SvgEdge { x1: number; y1: number; x2: number; y2: number; type: string
 const GRAPH_LANES: Array<{ label: string; kinds: string[] }> = [
   { label: '需求与测试', kinds: ['REQUIREMENT', 'ACCEPTANCE_CRITERION', 'TESTCASE', 'TEST_STEP', 'TEST_EXECUTION'] },
   { label: '代码结构', kinds: ['SOURCE_FILE', 'TYPE', 'METHOD', 'FIELD', 'ENDPOINT', 'CONFIG', 'SQL_STATEMENT'] },
-  { label: '控制流与运行证据', kinds: ['BASIC_BLOCK', 'DECISION', 'BRANCH', 'RUNTIME_SPAN', 'COVERAGE_UNIT'] },
+  { label: '控制流与运行数据', kinds: ['BASIC_BLOCK', 'DECISION', 'BRANCH', 'RUNTIME_SPAN', 'COVERAGE_UNIT'] },
 ]
 
 const svgLayout = computed<{ nodes: SvgNode[]; edges: SvgEdge[]; width: number; height: number }>(() => {
@@ -748,7 +820,7 @@ watch(comparison, () => {
 })
 
 onMounted(async () => {
-  await Promise.all([loadGraph(), loadBaselines()])
+  await Promise.all([loadGraph(), loadGraphFocusCandidates(), loadBaselines()])
 })
 
 async function loadBaselines() {
@@ -774,9 +846,32 @@ async function loadGraph() {
   finally { loading.value = false }
 }
 
+async function loadGraphFocusCandidates() {
+  if (!baselineId.value) return
+  try {
+    focusCandidates.value = await fetchGraphFocusCandidates(projectId.value, baselineId.value, 10_000)
+  } catch (e) {
+    toast.error(msg(e))
+    focusCandidates.value = []
+  }
+}
+
+async function switchGraphQueryMode(mode: 'focus' | 'explore') {
+  graphQueryMode.value = mode
+  graphViewMode.value = 'graph'
+  await loadGraph()
+}
+
 async function focusGraphNode(nodeId: string) {
   focusId.value = nodeId
+  graphQueryMode.value = 'focus'
   graphViewMode.value = 'graph'
+  await loadGraph()
+}
+
+async function clearGraphFocus() {
+  focusId.value = ''
+  graphQueryMode.value = 'focus'
   await loadGraph()
 }
 
@@ -894,6 +989,7 @@ async function runProjection(key: ProjectionKey) {
     else if (key === 'testExec') result = await projectTestExecutionGraph(pid, bid)
     else result = await projectTraceabilityGraph(pid, bid)
     showProjectionResultToast(key, result)
+    await loadGraphFocusCandidates()
     await loadGraph()
   } catch (e) { toast.error(msg(e)) }
   finally { busyKey.value = '' }
@@ -1000,7 +1096,7 @@ function fusionDeltaKey(delta: FusionStateDelta, index: number) {
 }
 
 function acDeltaText(t: string) {
-  return t === 'ADDED' ? '新增' : t === 'REMOVED' ? '移除' : '证据变化'
+  return t === 'ADDED' ? '新增' : t === 'REMOVED' ? '移除' : '依据变化'
 }
 function acDeltaClass(t: string) {
   return t === 'REMOVED' ? 'failed' : 'passed'
@@ -1183,6 +1279,9 @@ function nodeTooltipRows(node: GraphNode) {
 .tab.active { color:var(--oat-primary);border-bottom-color:var(--oat-primary); }
 .tab-panel { display:flex;flex-direction:column;gap:14px; }
 .query-bar { display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap; }
+.graph-mode-toggle { display:inline-flex;border:1px solid var(--oat-border);border-radius:9px;overflow:hidden;background:#fff; }
+.graph-mode-toggle button { min-height:34px;border:0;background:#fff;padding:6px 12px;font-size:13px;font-weight:800;color:var(--oat-text-muted);cursor:pointer; }
+.graph-mode-toggle button.active { background:var(--oat-primary);color:#fff; }
 .field-inline { display:grid;gap:4px; }
 .field-inline span { font-size:12px;font-weight:700;color:var(--oat-text-secondary); }
 .field-inline input { border:1px solid var(--oat-border);border-radius:8px;padding:7px 10px;font-size:13px;min-width:110px; }
@@ -1211,6 +1310,26 @@ function nodeTooltipRows(node: GraphNode) {
 .clip-banner strong { color:#92400e;font-size:13px; }
 .clip-banner ul { margin:0;padding-left:18px;font-size:12px;color:#92400e; }
 .clip-banner small { font-size:11px;color:var(--oat-text-muted); }
+.graph-workbench { display:grid;grid-template-columns:minmax(280px, 360px) minmax(0, 1fr);gap:14px;align-items:start; }
+.graph-picker, .graph-main { min-width:0;border:1px solid var(--oat-border);border-radius:12px;background:#fff; }
+.graph-picker { overflow:hidden; }
+.picker-head { display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--oat-border); }
+.picker-head strong { display:block;font-size:14px;color:var(--oat-text); }
+.picker-head span { display:block;margin-top:2px;font-size:12px;color:var(--oat-text-muted); }
+.picker-tabs { display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));border-bottom:1px solid var(--oat-border); }
+.picker-tabs button { min-width:0;border:0;border-right:1px solid var(--oat-border);background:#f8fafc;padding:8px 4px;font-size:12px;font-weight:850;color:var(--oat-text-muted);cursor:pointer; }
+.picker-tabs button:last-child { border-right:0; }
+.picker-tabs button.active { background:rgba(var(--oat-primary-rgb), .08);color:var(--oat-primary-dark);box-shadow:inset 0 -2px 0 var(--oat-primary); }
+.picker-tabs span { display:block;margin-top:2px;font-size:11px;color:inherit;opacity:.82; }
+.picker-search { width:calc(100% - 24px);min-height:34px;margin:12px;border:1px solid var(--oat-border);border-radius:8px;padding:6px 10px;font-size:13px; }
+.picker-list { max-height:min(640px, calc(100vh - 330px));min-height:260px;overflow:auto;padding:6px 8px 10px; }
+.picker-node { width:100%;display:grid;grid-template-columns:auto minmax(0, 1fr);gap:5px 8px;align-items:center;border:0;border-radius:8px;background:transparent;padding:9px 8px;text-align:left;cursor:pointer;color:var(--oat-text); }
+.picker-node:hover, .picker-node.active { background:rgba(var(--oat-primary-rgb), .07); }
+.picker-node.active { box-shadow:inset 3px 0 0 var(--oat-primary); }
+.picker-node strong { min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.picker-node small { grid-column:2;color:var(--oat-text-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+.graph-main { padding:12px; }
+.graph-focus-empty { min-height:360px;justify-content:center; }
 .graph-stats { display:flex;gap:16px;font-size:13px;font-weight:700;color:var(--oat-text-secondary); }
 .node-kind-legend { display:flex;gap:6px;flex-wrap:wrap;align-items:center; }
 .view-toggle { display:inline-flex;margin-left:auto;border:1px solid var(--oat-border);border-radius:8px;overflow:hidden; }
@@ -1368,6 +1487,8 @@ function nodeTooltipRows(node: GraphNode) {
 .empty-state strong { font-size:16px; }
 .empty-state span { color:var(--oat-text-muted);font-size:13px; }
 @media (max-width: 900px) {
+  .graph-workbench { grid-template-columns:1fr; }
+  .picker-list { max-height:360px; }
   .comparison-summary { grid-template-columns:1fr; }
   .comparison-detail dl { grid-template-columns:1fr; }
 }

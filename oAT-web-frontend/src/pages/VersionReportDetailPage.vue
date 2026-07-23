@@ -48,7 +48,7 @@
         <article class="hero-card accent-endpoint">
           <span>影响接口</span>
           <strong>{{ endpointCount }}</strong>
-          <small>基于旧接口证据扫描与变更类/方法匹配</small>
+          <small>基于旧接口依据扫描与变更类/方法匹配</small>
         </article>
       </div>
 
@@ -207,7 +207,7 @@
               </div>
               <div v-else class="linked-usecases muted">暂无接口关联用例</div>
             </article>
-            <div v-if="!payload.endpoints?.length" class="empty-card">未匹配到影响接口证据。建议优先使用 AI 验证基线确认需求、用例和源码关系。</div>
+            <div v-if="!payload.endpoints?.length" class="empty-card">未匹配到影响接口依据。建议优先使用 AI 验证基线确认需求、用例和源码关系。</div>
           </div>
           <AppPagination
             v-if="endpointCount > 0"

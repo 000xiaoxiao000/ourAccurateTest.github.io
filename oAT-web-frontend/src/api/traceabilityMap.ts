@@ -27,6 +27,9 @@ export interface TraceabilitySummary {
   requirementCount: number
   testcaseCount: number
   codeCount: number
+  codeFileCount?: number
+  codeClassCount?: number
+  codeMethodCount?: number
   completeChainCount: number
   completeChainRate: number
   staticNodeCount: number
