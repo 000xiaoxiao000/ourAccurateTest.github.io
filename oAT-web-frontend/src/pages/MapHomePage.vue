@@ -166,7 +166,7 @@
               <g
                 v-for="node in traceGraph.nodes"
                 :key="node.id"
-                :class="['trace-svg-node', node.tone, { active: traceGraph.selectedNodeId === node.id, linked: traceGraph.relatedNodeIds.has(node.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedNodeIds.has(node.id) }]"
+                :class="['trace-svg-node', node.tone, { executed: codeNodeHasDynamicCoverage(node.raw), active: traceGraph.selectedNodeId === node.id, linked: traceGraph.relatedNodeIds.has(node.id), dimmed: traceGraph.hasSelection && !traceGraph.relatedNodeIds.has(node.id) }]"
                 @click.stop="selectTraceNode(node.id)"
                 @pointerenter="showGraphTooltip($event, traceNodeTitle(node.raw))"
                 @pointermove="showGraphTooltip($event, traceNodeTitle(node.raw))"
@@ -2723,9 +2723,12 @@ onBeforeUnmount(() => {
 .trace-svg-node rect { stroke-width:2; filter:drop-shadow(0 8px 12px rgba(15,23,42,.08)); transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
 .trace-svg-node.req rect { fill:#bfdbfe; stroke:#2563eb; }
 .trace-svg-node.tc rect { fill:#fed7aa; stroke:#f97316; }
-.trace-svg-node.code rect { fill:#bbf7d0; stroke:#15803d; }
-.trace-svg-node.active rect { stroke:#7c3aed; stroke-width:3.4; filter:drop-shadow(0 10px 18px rgba(124,58,237,.22)); }
-.trace-svg-node.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.8; filter:drop-shadow(0 8px 15px rgba(15,118,110,.18)); }
+.trace-svg-node.code rect { fill:#bbf7d0; stroke:transparent; stroke-width:0; }
+.trace-svg-node.code.executed rect { stroke:#15803d; stroke-width:2; }
+.trace-svg-node:not(.code).active rect, .trace-svg-node.code.executed.active rect { stroke:#7c3aed; stroke-width:3.4; filter:drop-shadow(0 10px 18px rgba(124,58,237,.22)); }
+.trace-svg-node.code.active rect { filter:drop-shadow(0 10px 18px rgba(124,58,237,.22)); }
+.trace-svg-node:not(.code).linked:not(.active) rect, .trace-svg-node.code.executed.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.8; filter:drop-shadow(0 8px 15px rgba(15,118,110,.18)); }
+.trace-svg-node.code.linked:not(.active) rect { filter:drop-shadow(0 8px 15px rgba(15,118,110,.18)); }
 .trace-svg-node.dimmed { opacity:.24; }
 .node-title, .node-subtitle { text-anchor:middle; pointer-events:none; }
 .node-title { fill:#172033; font-size:12px; font-weight:900; }
