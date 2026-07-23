@@ -1,6 +1,6 @@
 package com.oAT.web.service.entity;
 
-import com.oAT.web.esDao.entity.LabelGroup;
+import com.oAT.web.persistence.entity.LabelGroup;
 
 import java.util.Date;
 

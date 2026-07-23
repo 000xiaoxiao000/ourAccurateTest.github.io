@@ -4,7 +4,7 @@ import com.oAT.web.common.FriendlyErrorMessageUtil;
 import com.oAT.web.common.Job;
 import com.oAT.web.common.compare.CompareResult;
 import com.oAT.web.common.compare.CompareUtils;
-import com.oAT.web.esDao.entity.VersionCompareReport;
+import com.oAT.web.persistence.entity.VersionCompareReport;
 import com.oAT.web.exceptions.FriendlyException;
 import com.oAT.web.domain.version.VersionGitDiffCompareService;
 import com.oAT.web.domain.version.VersionItemCatalogService;

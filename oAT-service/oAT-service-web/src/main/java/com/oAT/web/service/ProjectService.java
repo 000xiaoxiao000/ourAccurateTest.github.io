@@ -1,6 +1,6 @@
 package com.oAT.web.service;
 
-import com.oAT.web.esDao.entity.LabelGroup;
+import com.oAT.web.persistence.entity.LabelGroup;
 import com.oAT.web.exceptions.UserOperationException;
 import com.oAT.web.service.entity.LabelGroupVo;
 import com.oAT.web.service.entity.LableType;

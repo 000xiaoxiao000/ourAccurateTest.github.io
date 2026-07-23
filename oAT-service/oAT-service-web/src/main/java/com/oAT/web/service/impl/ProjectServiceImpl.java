@@ -1,10 +1,10 @@
 package com.oAT.web.service.impl;
 
-import com.oAT.web.esDao.SystemRepository;
-import com.oAT.web.esDao.entity.LabelGroup;
-import com.oAT.web.esDao.entity.Project;
-import com.oAT.web.esDao.entity.ProjectMember;
-import com.oAT.web.esDao.entity.SystemIndex;
+import com.oAT.web.persistence.SystemRepository;
+import com.oAT.web.persistence.entity.LabelGroup;
+import com.oAT.web.persistence.entity.Project;
+import com.oAT.web.persistence.entity.ProjectMember;
+import com.oAT.web.persistence.entity.SystemIndex;
 import com.oAT.web.exceptions.UserOperationException;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.entity.*;

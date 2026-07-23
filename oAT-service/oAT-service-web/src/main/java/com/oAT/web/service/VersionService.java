@@ -1,6 +1,6 @@
 package com.oAT.web.service;
 
-import com.oAT.web.esDao.entity.VersionCompareReport;
+import com.oAT.web.persistence.entity.VersionCompareReport;
 import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.service.entity.CompareJobVo;
 import com.oAT.web.service.entity.VersionCompareReportVo;

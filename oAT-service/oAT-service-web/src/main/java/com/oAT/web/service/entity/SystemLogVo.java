@@ -1,6 +1,6 @@
 package com.oAT.web.service.entity;
 
-import com.oAT.web.esDao.entity.SystemLog;
+import com.oAT.web.persistence.entity.SystemLog;
 
 import java.io.Serializable;
 import java.util.Date;

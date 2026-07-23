@@ -1,8 +1,8 @@
 package com.oAT.web.domain.usecase;
 
-import com.oAT.web.esDao.CaseCenterRepository;
-import com.oAT.web.esDao.entity.CaseCenterIndex;
-import com.oAT.web.esDao.entity.Usecase;
+import com.oAT.web.persistence.CaseCenterRepository;
+import com.oAT.web.persistence.entity.CaseCenterIndex;
+import com.oAT.web.persistence.entity.Usecase;
 import com.oAT.web.service.entity.DirectoryDeleteResult;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.PageRequest;

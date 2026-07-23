@@ -1,8 +1,8 @@
 package com.oAT.web.verification.graph;
 
-import com.oAT.web.esDao.StaticInfoRepository;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
-import com.oAT.web.esDao.entity.StaticSourceMethodInfo;
+import com.oAT.web.persistence.StaticInfoRepository;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
+import com.oAT.web.persistence.entity.StaticSourceMethodInfo;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.GraphModels;
 import com.oAT.web.verification.model.GraphModels.EvidenceKind;

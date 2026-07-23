@@ -8,7 +8,7 @@
     <artifactId>oAT-service</artifactId>
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
-    <name>AI Requirement Verification Service Aggregator</name>
+    <name>ourAccurateTest Service Aggregator</name>
     <description>Service modules for AI-assisted requirement, testcase and source code consistency verification</description>
 
     <!-- 所有模块统一使用 JDK 17+ -->

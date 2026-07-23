@@ -1,7 +1,7 @@
 package com.oAT.web.coverage.universal;
 
 import com.oAT.web.common.EncryptUtil;
-import com.oAT.web.esDao.entity.ClassCoverageIndex;
+import com.oAT.web.persistence.entity.ClassCoverageIndex;
 
 import java.io.Serializable;
 import java.util.ArrayList;

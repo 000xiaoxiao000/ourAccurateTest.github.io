@@ -1,63 +1,58 @@
 # oAT-service
 
-`oAT-service` 是 oAccurateTest 的服务端 Maven 聚合模块，统一管理 AI 分析模块和后端主服务。该模块本身不启动进程，主要用于聚合构建和维护服务端公共构建配置。
+`oAT-service` 是服务端 Maven 聚合模块，负责统一管理 `oAT-ai` 和 `oAT-service-web` 的构建。它本身不启动进程，入口在 `oAT-service-web`。
 
 ## 模块结构
 
 ```text
 oAT-service/
 ├── pom.xml
-├── oAT-ai/           # AI 分析能力，作为 jar 被 oAT-service-web 依赖
-└── oAT-service-web/  # 后端主服务，负责 API、版本、用例等能力
+├── oAT-ai/           # LLM 接入模块，jar
+└── oAT-service-web/  # 后端主服务，war
 ```
 
-## 构建
+## 构建方式
 
-可以在聚合模块中一次性构建两个服务端子模块：
+在聚合模块下构建全部服务端模块：
 
 ```bash
-cd ../oAT-service
-mvn clean install
+cd oAT-service
+./oAT-service-web/mvnw -f pom.xml clean install
 ```
 
-也可以按依赖顺序分别构建：
+只构建后端主服务时，先安装 `oAT-ai` 再打包 `oAT-service-web`：
 
 ```bash
-cd oAT-ai
-mvn clean install
+cd oAT-service/oAT-ai
+../oAT-service-web/mvnw clean install
 
 cd ../oAT-service-web
-mvn clean package
+./mvnw -f ../pom.xml package -DskipTests
 ```
 
-## 子模块职责
+## 依赖关系
 
-| 模块 | 打包 | 职责 |
-|---|---|---|
-| `oAT-ai` | jar | LangChain4j 集成、LLM 配置、AI 工具注册、语义缓存和对话记忆 |
-| `oAT-service-web` | war | 平台 API、版本中心、用例中心和 AI 对话入口 |
+| 模块 | 产物 | 作用 |
+| --- | --- | --- |
+| `oAT-ai` | `jar` | 封装 LLM 配置、Provider 适配和 `LLMService` |
+| `oAT-service-web` | `war` | 提供项目、版本、用例、验证基线、图谱和 AI 验证相关 API |
 
-## 运行
+## 运行入口
 
-`oAT-service` 不直接运行。服务端进程由 `oAT-service-web` 启动：
+`oAT-service` 不直接运行。启动后端主服务：
 
 ```bash
-cd oAT-service-web
+cd oAT-service/oAT-service-web
 ./start.sh
 ```
 
-如果必须手工执行 `java -jar`，需要带上 JDK native access 参数，避免新版 JDK 对 Tomcat Native/APR 的限制预警：
+如果要手动执行：
 
 ```bash
 java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
-详细数据库初始化、配置项和启动说明见：
+## 相关文档
 
-- [oAT-service-web README](oAT-service-web/README.md)
-- [oAT-ai README](oAT-ai/README.md)
-
-## 注意事项
-
-- 服务端统一使用 JDK 17+。
-- `oAT-ai` 必须先安装到本地 Maven 仓库，`oAT-service-web` 才能单独构建成功。
+- [oAT-service-web](oAT-service-web/README.md)
+- [oAT-ai](oAT-ai/README.md)

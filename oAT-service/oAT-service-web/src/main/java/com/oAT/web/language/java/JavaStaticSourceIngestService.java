@@ -2,9 +2,9 @@ package com.oAT.web.language.java;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.oAT.web.esDao.StaticInfoRepository;
-import com.oAT.web.esDao.entity.StaticSourceClassInfo;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.persistence.StaticInfoRepository;
+import com.oAT.web.persistence.entity.StaticSourceClassInfo;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;

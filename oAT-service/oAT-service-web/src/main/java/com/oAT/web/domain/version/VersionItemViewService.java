@@ -1,6 +1,6 @@
 package com.oAT.web.domain.version;
 
-import com.oAT.web.esDao.entity.VersionCenterIndex;
+import com.oAT.web.persistence.entity.VersionCenterIndex;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.VersionItemVo;
 import org.springframework.beans.BeanUtils;

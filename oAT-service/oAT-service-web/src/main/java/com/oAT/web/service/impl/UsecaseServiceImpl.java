@@ -2,8 +2,8 @@ package com.oAT.web.service.impl;
 
 import com.oAT.web.domain.usecase.UsecaseDirectoryDeletionService;
 import com.oAT.web.domain.usecase.UsecaseViewMapper;
-import com.oAT.web.esDao.CaseCenterRepository;
-import com.oAT.web.esDao.entity.*;
+import com.oAT.web.persistence.CaseCenterRepository;
+import com.oAT.web.persistence.entity.*;
 import com.oAT.web.exceptions.DirtyDataException;
 import com.oAT.web.service.UsecaseService;
 import com.oAT.web.service.entity.DirectoryDeleteResult;

@@ -5,7 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.verification.model.VerificationModels.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

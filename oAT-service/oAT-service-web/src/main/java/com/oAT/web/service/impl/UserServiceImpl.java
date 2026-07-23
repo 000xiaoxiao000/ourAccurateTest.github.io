@@ -1,8 +1,8 @@
 package com.oAT.web.service.impl;
 
-import com.oAT.web.esDao.SystemRepository;
-import com.oAT.web.esDao.entity.SystemIndex;
-import com.oAT.web.esDao.entity.User;
+import com.oAT.web.persistence.SystemRepository;
+import com.oAT.web.persistence.entity.SystemIndex;
+import com.oAT.web.persistence.entity.User;
 import com.oAT.web.exceptions.DirtyDataException;
 import com.oAT.web.exceptions.UserOperationException;
 import com.oAT.web.service.UserService;

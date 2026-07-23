@@ -5,7 +5,7 @@ import com.oAT.web.api.version.VersionCenterPayloadService;
 import com.oAT.web.api.version.VersionGitWorkflowService;
 import com.oAT.web.api.version.VersionReportDetailService;
 import com.oAT.web.control.entity.ResultNotified;
-import com.oAT.web.esDao.entity.SystemLog;
+import com.oAT.web.persistence.entity.SystemLog;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.GitService;

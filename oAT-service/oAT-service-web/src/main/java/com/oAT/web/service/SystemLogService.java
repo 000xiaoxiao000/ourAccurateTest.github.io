@@ -1,6 +1,6 @@
 package com.oAT.web.service;
 
-import com.oAT.web.esDao.entity.SystemLog;
+import com.oAT.web.persistence.entity.SystemLog;
 import com.oAT.web.service.entity.SystemLogVo;
 
 import java.util.List;

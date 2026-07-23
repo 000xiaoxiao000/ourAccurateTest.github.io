@@ -1,10 +1,10 @@
 package com.oAT.web.verification;
 
 import com.oAT.web.coverage.universal.CoverageReportService;
-import com.oAT.web.esDao.ClassCoverageIndexRepository;
-import com.oAT.web.esDao.StaticInfoRepository;
-import com.oAT.web.esDao.entity.ClassCoverageIndex;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.persistence.ClassCoverageIndexRepository;
+import com.oAT.web.persistence.StaticInfoRepository;
+import com.oAT.web.persistence.entity.ClassCoverageIndex;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.verification.model.VerificationModels;

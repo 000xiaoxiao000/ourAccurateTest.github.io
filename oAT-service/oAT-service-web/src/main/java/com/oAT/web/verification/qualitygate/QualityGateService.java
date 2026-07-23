@@ -1,7 +1,7 @@
 package com.oAT.web.verification.qualitygate;
 
-import com.oAT.web.esDao.ClassCoverageIndexRepository;
-import com.oAT.web.esDao.entity.ClassCoverageIndex;
+import com.oAT.web.persistence.ClassCoverageIndexRepository;
+import com.oAT.web.persistence.entity.ClassCoverageIndex;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.VerificationModels.*;
 import org.springframework.jdbc.core.JdbcTemplate;

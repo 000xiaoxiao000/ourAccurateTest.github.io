@@ -1,8 +1,8 @@
 package com.oAT.web.service.impl;
 
-import com.oAT.web.esDao.SystemRepository;
-import com.oAT.web.esDao.entity.SystemLog;
-import com.oAT.web.esDao.entity.SystemIndex;
+import com.oAT.web.persistence.SystemRepository;
+import com.oAT.web.persistence.entity.SystemLog;
+import com.oAT.web.persistence.entity.SystemIndex;
 import com.oAT.web.service.SystemLogService;
 import com.oAT.web.service.entity.SystemLogVo;
 import org.springframework.beans.BeanUtils;

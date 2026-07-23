@@ -55,7 +55,7 @@ class CoverageParserRegistryTest {
 
         assertEquals(1, files.size());
         assertEquals(1, files.get(0).getFunctions().size());
-        com.oAT.web.esDao.entity.ClassCoverageIndex index = files.get(0).toClassCoverageIndex("app");
+        com.oAT.web.persistence.entity.ClassCoverageIndex index = files.get(0).toClassCoverageIndex("app");
         assertEquals(1, index.getCoveredLines());
         assertEquals(List.of(7), index.getTotalLineNumbers());
         assertEquals(List.of(7), index.getCoveredLineNumbers());
@@ -77,9 +77,9 @@ class CoverageParserRegistryTest {
                 </package></report>
                 """.getBytes(StandardCharsets.UTF_8)).get(0);
 
-        com.oAT.web.esDao.entity.ClassCoverageIndex index = file.toClassCoverageIndex("app");
-        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail create = index.getMethods().get(0);
-        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail cancel = index.getMethods().get(1);
+        com.oAT.web.persistence.entity.ClassCoverageIndex index = file.toClassCoverageIndex("app");
+        com.oAT.web.persistence.entity.ClassCoverageIndex.MethodCoverageDetail create = index.getMethods().get(0);
+        com.oAT.web.persistence.entity.ClassCoverageIndex.MethodCoverageDetail cancel = index.getMethods().get(1);
         assertEquals("demo/Order", create.getClassName());
         assertEquals(7, create.getStartLine());
         assertEquals(List.of(7, 9), create.getTotalLineNumbers());
@@ -104,7 +104,7 @@ class CoverageParserRegistryTest {
         assertEquals(1, files.size());
         assertEquals("web3Server/controller/Web302Controller.java", files.get(0).getFilePath());
         assertEquals(2, files.get(0).getLines().size());
-        com.oAT.web.esDao.entity.ClassCoverageIndex index = files.get(0).toClassCoverageIndex("app");
+        com.oAT.web.persistence.entity.ClassCoverageIndex index = files.get(0).toClassCoverageIndex("app");
         assertEquals(2, index.getTotalLines());
         assertEquals(List.of(27, 29), index.getTotalLineNumbers());
         assertEquals(List.of(27, 29), index.getCoveredLineNumbers());
@@ -128,7 +128,7 @@ class CoverageParserRegistryTest {
                 </package></report>
                 """.getBytes(StandardCharsets.UTF_8)).get(0);
 
-        com.oAT.web.esDao.entity.ClassCoverageIndex.MethodCoverageDetail method =
+        com.oAT.web.persistence.entity.ClassCoverageIndex.MethodCoverageDetail method =
                 file.toClassCoverageIndex("app").getMethods().get(0);
         assertEquals(6, method.getTotalBranchTargets());
         assertEquals(3, method.getCoveredBranchTargets());

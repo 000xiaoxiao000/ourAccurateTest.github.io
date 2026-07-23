@@ -8,7 +8,7 @@ import com.oAT.web.api.version.VersionApiPayloads.EndpointLinkedUsecaseSummary;
 import com.oAT.web.api.version.VersionApiPayloads.MethodDifferenceSummary;
 import com.oAT.web.api.version.VersionApiPayloads.UsecaseImpactSummary;
 import com.oAT.web.api.version.VersionApiPayloads.VersionReportDetailPayload;
-import com.oAT.web.esDao.entity.VersionCompareReport;
+import com.oAT.web.persistence.entity.VersionCompareReport;
 import com.oAT.web.service.ApiEndpointAnalysisService;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.UsecaseService;

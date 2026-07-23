@@ -2,8 +2,8 @@ package com.oAT.web.service;
 
 import com.oAT.web.domain.apiendpoint.ApiEndpointArtifactScanner;
 import com.oAT.web.domain.apiendpoint.ApiEndpointPersistenceService;
-import com.oAT.web.esDao.ApiEndpointRepository;
-import com.oAT.web.esDao.entity.ApiEndpointIndex;
+import com.oAT.web.persistence.ApiEndpointRepository;
+import com.oAT.web.persistence.entity.ApiEndpointIndex;
 import com.oAT.web.service.entity.ApiEndpointViewVo;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;

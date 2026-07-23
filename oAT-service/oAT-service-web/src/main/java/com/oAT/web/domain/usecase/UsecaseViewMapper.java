@@ -1,7 +1,7 @@
 package com.oAT.web.domain.usecase;
 
 import com.oAT.web.common.DateUtil;
-import com.oAT.web.esDao.entity.CaseCenterIndex;
+import com.oAT.web.persistence.entity.CaseCenterIndex;
 import com.oAT.web.service.entity.UsecaseDetailVo;
 import com.oAT.web.service.entity.UsecaseDirectoryVo;
 import com.oAT.web.service.entity.UsecaseVo;

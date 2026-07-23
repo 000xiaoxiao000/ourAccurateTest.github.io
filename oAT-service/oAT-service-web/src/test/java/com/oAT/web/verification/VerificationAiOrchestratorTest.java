@@ -1,9 +1,9 @@
 package com.oAT.web.verification;
 
 import com.oAT.ai.service.LLMService;
-import com.oAT.web.esDao.entity.StaticSourceClassInfo;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
-import com.oAT.web.esDao.entity.StaticSourceMethodInfo;
+import com.oAT.web.persistence.entity.StaticSourceClassInfo;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
+import com.oAT.web.persistence.entity.StaticSourceMethodInfo;
 import com.oAT.web.verification.VerificationAiOrchestrator.AiVerificationInput;
 import com.oAT.web.verification.VerificationAiOrchestrator.AiVerificationResult;
 import com.oAT.web.verification.model.VerificationModels.TraceLink;

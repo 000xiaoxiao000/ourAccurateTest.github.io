@@ -1,8 +1,8 @@
 package com.oAT.web.domain.version;
 
-import com.oAT.web.esDao.VersionCenterRepository;
-import com.oAT.web.esDao.entity.VersionCenterIndex;
-import com.oAT.web.esDao.entity.VersionItem;
+import com.oAT.web.persistence.VersionCenterRepository;
+import com.oAT.web.persistence.entity.VersionCenterIndex;
+import com.oAT.web.persistence.entity.VersionItem;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.VersionItemVo;
 import org.slf4j.Logger;

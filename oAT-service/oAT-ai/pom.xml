@@ -12,7 +12,7 @@
 
     <artifactId>oAT-ai</artifactId>
     <packaging>jar</packaging>
-    <name>AI Requirement Verification LLM Module</name>
+    <name>ourAccurateTest LLM Module</name>
     <description>LLM integration module for requirement-to-testcase-to-code consistency analysis based on LangChain4j (requires Java 17+)</description>
 
     <properties>

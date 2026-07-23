@@ -2,8 +2,8 @@ package com.oAT.web.api.map;
 
 import com.oAT.web.domain.ImageData;
 import com.oAT.web.domain.ImageElement;
-import com.oAT.web.esDao.StaticInfoRepository;
-import com.oAT.web.esDao.entity.StaticSourceInfo;
+import com.oAT.web.persistence.StaticInfoRepository;
+import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.exceptions.BusinessException;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.entity.AppVo;

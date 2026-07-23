@@ -1,8 +1,8 @@
 package com.oAT.web.service.impl;
 
-import com.oAT.web.esDao.CaseCenterRepository;
-import com.oAT.web.esDao.entity.CaseCenterIndex;
-import com.oAT.web.esDao.entity.Usecase;
+import com.oAT.web.persistence.CaseCenterRepository;
+import com.oAT.web.persistence.entity.CaseCenterIndex;
+import com.oAT.web.persistence.entity.Usecase;
 import com.oAT.web.service.UsecaseSearchService;
 import com.oAT.web.service.entity.CaseSearchResult;
 import com.oAT.web.service.entity.SearchPage;

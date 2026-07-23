@@ -1,124 +1,162 @@
 # oAT-service-web
 
-`oAT-service-web` 是 oAccurateTest 的后端主服务。它负责管理项目和应用、处理版本和用例数据，并加载 `oAT-ai` 提供智能分析能力。
+`oAT-service-web` 是 ourAccurateTest 的后端主服务，基于 Spring Boot 构建，打包为可直接运行的 `war`。它提供项目、应用、版本、用例、仓库、代码图谱、验证基线、AI 分析和质量门禁等 API。
 
-## 模块结构
-
-```text
-oAT-service-web/src/main/java/com/oAT/web/
-├── control/          # Controller，包含 /api/* 前端接口
-├── service/          # 业务服务接口与实现
-├── esDao/            # 兼容保留的数据访问包
-├── config/           # Spring 配置、异步线程池
-├── security/         # 登录拦截与安全相关代码
-├── domain/           # 图谱和视图领域模型
-├── common/           # 通用工具
-├── dto/              # DTO
-└── exceptions/       # 业务异常
-
-src/main/resources/
-├── application.properties
-├── db/mysql/          # MySQL 初始化脚本
-```
-
-## 构建
-
-先构建 `oAT-ai`，再构建本模块：
-
-```bash
-cd ../oAT-service/oAT-ai
-mvn clean install
-
-cd ../oAT-service-web
-mvn clean package
-```
-
-产物：
+## 目录结构
 
 ```text
-target/oAT-service-web-1.0.0-SNAPSHOT.war
+oAT-service-web/
+├── mvnw
+├── pom.xml
+├── start.sh
+└── src/main/
+    ├── java/com/oAT/web/
+    │   ├── api/             # API 响应组装和页面 payload 服务
+    │   ├── collector/       # 采集源模型和健康状态
+    │   ├── common/          # 通用工具、源码解析、压缩包处理
+    │   ├── config/          # Spring、Tomcat、数据库和前端资源配置
+    │   ├── control/         # Controller 和拦截器
+    │   ├── coverage/        # 覆盖率报告解析
+    │   ├── domain/          # 版本、用例、API 端点等领域服务
+    │   ├── infra/           # Git 等基础设施适配
+    │   ├── language/        # Java 源码解析和静态信息抽取
+    │   ├── persistence/     # Repository 和持久化实体
+    │   ├── service/         # 业务服务接口与实现
+    │   └── verification/    # 需求一致性验证、图谱、质量门禁和影响分析
+    └── resources/
+        ├── application.properties
+        └── db/
+            ├── migration/   # Flyway 迁移脚本
+            ├── postgresql/  # PostgreSQL 手工脚本
+            └── mysql/       # 历史兼容脚本
 ```
+
+## 核心能力
+
+| 能力 | 说明 |
+| --- | --- |
+| 项目与应用 | 登录注册、项目列表、成员、标签、应用设置和仓库配置 |
+| 版本中心 | 分支、Commit、Git 拉取、版本创建、版本对比和报告详情 |
+| 用例中心 | 用例目录、用例详情、导入导出、缺陷/PRD 链接 |
+| API 端点分析 | 从源码包或 Git 缓存中识别 HTTP API 端点 |
+| 代码图谱 | 应用视图、源码树、代码关系、追溯图和影响图 |
+| 验证工作区 | 导入需求、用例、源码、执行报告、覆盖率等分析资产 |
+| AI 一致性分析 | 基于验证基线生成追溯边、AI 发现和结构化分析结果 |
+| 发现审核 | 人工审核 AI 发现、追溯边和外部回写链接 |
+| 质量门禁 | 配置门禁策略、评估基线、记录豁免和 stale 状态 |
+| Git 影响分析 | 基于 Git Diff 分析变更范围并辅助定位影响链路 |
+
+## 技术栈
+
+| 技术 | 用途 |
+| --- | --- |
+| Java 17 | 运行时和编译目标 |
+| Spring Boot 3.4.4 | Web 服务、配置、嵌入式 Tomcat |
+| Spring JDBC | 数据访问 |
+| PostgreSQL | 主数据库 |
+| Flyway 10 | 数据库迁移 |
+| JGit | Git 仓库访问 |
+| JavaParser / ASM | Java 源码和字节码分析 |
+| JaCoCo | 覆盖率解析 |
+| LangChain4j | 通过 `oAT-ai` 调用 LLM |
 
 ## 依赖服务
 
-| 服务 | 用途 |
-|---|---|
-| MySQL | 项目、应用、版本、用例、成员、配置等结构化数据 |
-| Git | 版本源码、Commit、Diff 和静态源码分析 |
+- PostgreSQL：保存结构化业务数据、验证结果和图谱数据。
+- Git：用于仓库拉取、Commit 查询、Diff 和源码快照分析。
+- LLM 服务：可选 OpenAI、DeepSeek、Ollama 或兼容 OpenAI 协议的服务。
+- 本地文件目录：保存 Git 缓存、大载荷和源码压缩包。
 
-## 数据库初始化
+## 配置
 
-首次部署时，按文件名顺序执行 `src/main/resources/db/mysql/` 下的 SQL：
-
-```text
-phase2_api_endpoint.sql
-phase2_version_center.sql
-phase3_case_center.sql
-phase4_static_source_info.sql
-phase5_normalized_core.sql
-phase6_ai_verification.sql
-```
-
-`phase6_ai_verification.sql` 提供联邦式 AI 需求一致性验证所需的轻量数据表，仅保存外部资产快照、分析基线、AC 投影、追溯边、AI 发现、人工审核状态和质量门禁结果；需求、用例、Bug、执行计划等事实源仍保留在外部平台。
-
-已有数据库升级时，如果曾执行过早期 `phase6_ai_verification.sql`，需按脚本顶部的 `Upgrade note` 为 `oat_verification_baseline` 补充执行证据和覆盖率证据列。
-
-## 关键配置
-
-配置文件：
+主配置文件：
 
 ```text
 src/main/resources/application.properties
 ```
 
-### 服务端口
+常用配置：
 
 ```properties
 server.port=8899
-```
 
-### PostgreSQL
-
-```properties
 spring.datasource.url=${OAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification}
-spring.datasource.username=${OAT_DB_USERNAME:postgres}
-spring.datasource.password=123456
+spring.datasource.username=${OAT_DB_USERNAME:traceiq}
+spring.datasource.password=${OAT_DB_PASSWORD:traceiq}
 spring.datasource.driver-class-name=org.postgresql.Driver
-oat.datasource.postgresql.create-database-if-missing=true
-```
 
-### 本地数据目录
+spring.flyway.enabled=true
+spring.flyway.locations=classpath:db/migration
+spring.flyway.baseline-on-migrate=true
+spring.flyway.baseline-version=1
 
-```properties
 oat.data.path=${user.home}/oAT/codeData/
+
+ai.llm.enabled=true
+ai.llm.provider=deepseek
+ai.llm.api-key=${AI_LLM_API_KEY:your-api-key}
+ai.llm.model=${AI_LLM_MODEL:deepseek-chat}
 ```
 
-该目录用于 Git 源码缓存、大载荷、静态源码压缩包等，服务进程需要读写权限。
+`oat.data.path` 需要有读写权限。上传限制默认是 `2048MB`，如果前面有 Nginx、网关或外部 Tomcat，也要同步调整请求体限制。
 
-### 上传大小
+## 数据库迁移
 
-```properties
-spring.servlet.multipart.max-file-size=2048MB
-spring.servlet.multipart.max-request-size=2048MB
+服务启动时会通过 Flyway 自动执行 `src/main/resources/db/migration/`：
+
+```text
+V2__api_endpoint.sql
+V5__normalized_core.sql
+V6__ai_verification.sql
+V7__traceability_gate.sql
+V8__graph_facts.sql
+V9__analysis_job_checkpoint.sql
+V10__baseline_graph_versions_and_runtime_execution.sql
+V11__partitioning_and_archive_markers.sql
+V12__gate_enforcement_mode_and_stale_commit_view.sql
 ```
 
-如果前面有 Nginx、网关或外部 Tomcat，也需要同步调整对应请求体限制。
+`src/main/resources/db/postgresql/` 和 `src/main/resources/db/mysql/` 保留为手工初始化或历史兼容脚本，默认运行路径以 Flyway `db/migration` 为准。
 
-### 用例链接模板
+## 构建
 
-```properties
-oat.usecase.defect-link-template=https://jira.example.com/browse/{id}
-oat.usecase.prd-link-template=https://prd.example.com/doc/{id}
+从服务端聚合模块构建：
+
+```bash
+cd oAT-service
+./oAT-service-web/mvnw -f pom.xml clean package
 ```
 
-### AI 配置
+在本模块目录构建：
 
-`ai.*` 配置写在本模块的 `application.properties`，具体说明见 [oAT-ai README](../oAT-ai/README.md)。
+```bash
+cd oAT-service/oAT-service-web
+./mvnw -f ../pom.xml package
+```
+
+跳过测试：
+
+```bash
+./mvnw -f ../pom.xml package -DskipTests
+```
+
+构建产物：
+
+```text
+target/oAT-service-web-1.0.0-SNAPSHOT.war
+```
 
 ## 启动
 
 ```bash
+cd oAT-service/oAT-service-web
 ./start.sh
+```
+
+`start.sh` 会执行：
+
+```bash
+java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
 后台启动示例：
@@ -127,31 +165,28 @@ oat.usecase.prd-link-template=https://prd.example.com/doc/{id}
 nohup ./start.sh > oat.log 2>&1 &
 ```
 
-如果必须手工执行 `java -jar`，需要带上 JDK native access 参数，避免新版 JDK 对 Tomcat Native/APR 的限制预警：
-
-```bash
-java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
-```
-
 外部 Tomcat 部署时需使用 Tomcat 10+，以匹配 Spring Boot 3.x 的 Servlet 版本要求。
 
-## 主要服务
+## API 前缀
 
-| Service | 职责 |
-|---|---|
-| `VersionService` | 版本、分支、Commit 和 Diff |
-| `UsecaseService` | 用例目录、详情和关联 |
-| `ApiEndpointAnalysisService` | API 端点识别 |
-| `VerificationService` | AI 需求一致性验证、快照基线、追溯矩阵、证据审核和质量门禁 |
+主要前端接口使用 `/api` 前缀：
 
-## AI 需求一致性验证接入
+| 前缀 | 说明 |
+| --- | --- |
+| `/api/auth` | 登录、注册、登出、当前用户 |
+| `/api/projects` | 项目列表、项目上下文 |
+| `/api/projects/{projectId}` | 项目设置、应用、成员、标签、版本、搜索 |
+| `/api/projects/{projectId}/verification` | 验证工作区、基线、分析任务、追溯矩阵、质量门禁、影响分析 |
+| `/api/projects/{projectId}/map` | 图谱首页、应用图谱、源码树和代码图 |
 
-验证平台支持三类轻量接入：
+历史页面和资源接口仍保留在 `/user`、`/p/{projectId}`、`/resource` 等路径。
 
-- 文件或粘贴：需求、用例、源码、执行报告和覆盖率报告都保存为一次性分析快照。
-- Git 源码快照：通过应用已有仓库配置或手填仓库地址，按分支/Commit 拉取源码并抽取 Java 文件摘要作为 SOURCE 证据。
-- 外部回写链接：在没有 Jira、禅道、TAPD 等真实连接器时，使用 `link-only` 模式记录外部 Bug、任务或评论链接，并保存回写审计。
+## 测试
 
-## 注意事项
+```bash
+cd oAT-service/oAT-service-web
+./mvnw -f ../pom.xml test
+```
 
-- `oat.data.path` 会自动创建，但磁盘空间和权限需要提前确认。
+当前测试覆盖验证图谱、质量门禁、影响分析、覆盖率解析和 AI 编排等后端逻辑。
+

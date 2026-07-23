@@ -2,9 +2,9 @@ package com.oAT.web.domain.version;
 
 import com.oAT.web.common.Job;
 import com.oAT.web.common.compare.CompareResult;
-import com.oAT.web.esDao.VersionCenterRepository;
-import com.oAT.web.esDao.entity.VersionCenterIndex;
-import com.oAT.web.esDao.entity.VersionCompareReport;
+import com.oAT.web.persistence.VersionCenterRepository;
+import com.oAT.web.persistence.entity.VersionCenterIndex;
+import com.oAT.web.persistence.entity.VersionCompareReport;
 import com.oAT.web.service.entity.CompareJobVo;
 import com.oAT.web.service.entity.VersionCompareReportVo;
 import org.slf4j.Logger;

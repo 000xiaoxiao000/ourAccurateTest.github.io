@@ -1,7 +1,7 @@
 package com.oAT.web.domain.apiendpoint;
 
-import com.oAT.web.esDao.ApiEndpointRepository;
-import com.oAT.web.esDao.entity.ApiEndpointIndex;
+import com.oAT.web.persistence.ApiEndpointRepository;
+import com.oAT.web.persistence.entity.ApiEndpointIndex;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
