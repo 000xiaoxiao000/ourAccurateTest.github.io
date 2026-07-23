@@ -48,7 +48,7 @@ Web 前端（Vue 3 / Vite）
 | 后端 | Java 17、Spring Boot 3.4.4、Spring JDBC |
 | AI | LangChain4j 1.12.2、OpenAI 兼容接口、Ollama |
 | 数据库 | PostgreSQL、Flyway |
-| 源码分析 | JGit、JavaParser、ASM、JaCoCo |
+| 源码与覆盖率分析 | JGit、JavaParser、ASM、JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
 | 前端 | Vue 3、TypeScript、Vite 7、Vue Router、Pinia |
 
 ## 环境要求

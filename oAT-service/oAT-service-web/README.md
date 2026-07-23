@@ -46,6 +46,18 @@ oAT-service-web/
 | 质量门禁 | 配置门禁策略、评估基线、记录豁免和 stale 状态 |
 | Git 影响分析 | 基于 Git Diff 分析变更范围并辅助定位影响链路 |
 
+## 覆盖率支持
+
+后端覆盖率解析位于 `coverage/universal/`，统一转换为 `UniversalCoverageFile`。
+
+| SourceType | 支持格式 |
+| --- | --- |
+| `JAVA` | JaCoCo XML、JaCoCo HTML |
+| `FRONTEND` | Istanbul JSON |
+| `CPP` | LCOV、gcov |
+| `GO` | go cover、LCOV |
+| `PYTHON` | coverage.py JSON、LCOV |
+
 ## 技术栈
 
 | 技术 | 用途 |
@@ -57,7 +69,7 @@ oAT-service-web/
 | Flyway 10 | 数据库迁移 |
 | JGit | Git 仓库访问 |
 | JavaParser / ASM | Java 源码和字节码分析 |
-| JaCoCo | 覆盖率解析 |
+| 多语言覆盖率解析 | JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
 | LangChain4j | 通过 `oAT-ai` 调用 LLM |
 
 ## 依赖服务
@@ -189,4 +201,3 @@ cd oAT-service/oAT-service-web
 ```
 
 当前测试覆盖验证图谱、质量门禁、影响分析、覆盖率解析和 AI 编排等后端逻辑。
-
