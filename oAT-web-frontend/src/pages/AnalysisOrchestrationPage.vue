@@ -33,7 +33,41 @@ const types:Array<{key:DiffChangeType;label:string}>=[{key:'CODE',label:'代码�
 onMounted(load);onBeforeUnmount(clearTimer)
 async function load(){loading.value=true;error.value='';try{const o=await fetchVerificationOverview(projectId.value);baselines.value=o.baselines;if(!baselineId.value&&o.baselines[0])baselineId.value=o.baselines[0].id;await loadState()}catch(e){error.value=msg(e)}finally{loading.value=false}}
 async function loadState(){clearTimer();job.value=null;graph.value=null;if(!baselineId.value)return;const [j,g]=await Promise.allSettled([fetchLatestAnalysisJob(projectId.value,baselineId.value),fetchGraphView(projectId.value,{baselineId:baselineId.value,maxNodes:1,maxEdges:1})]);if(j.status==='fulfilled'){job.value=j.value;if(['QUEUED','RUNNING'].includes(j.value.status))poll()}if(g.status==='fulfilled')graph.value=g.value.summary}
-async function fullBuild(){if(busy.value||!baselineId.value)return;busy.value=true;done.value=[];error.value='';const p=projectId.value,b=baselineId.value;const run:Record<string,()=>Promise<unknown>>={static:()=>projectStaticGraph(p,b),cfg:()=>projectControlFlowGraph(p,b),dependency:()=>projectStaticDependencyGraph(p,b),coverage:()=>projectRuntimeCoverageGraph(p,b),branch:()=>projectBranchCoverageGraph(p,b),execution:()=>projectTestExecutionGraph(p,b),trace:()=>projectTraceabilityGraph(p,b),read:()=>rebuildReadModels(p,b),ai:()=>analyzeBaseline(p,b)};try{for(const s of steps){running.value=s.key;const v=await run[s.key]();done.value.push(s.key);if(s.key==='ai')job.value=v as AnalysisJob}toast.success('全量构建已提交');await loadState()}catch(e){error.value=`全量构建在「${runningLabel.value}」失败：${msg(e)}`;toast.error(error.value)}finally{running.value='';busy.value=false}}
+async function fullBuild() {
+  if (busy.value || !baselineId.value) return
+  busy.value = true
+  done.value = []
+  error.value = ''
+  const p = projectId.value
+  const b = baselineId.value
+  const run: Record<string, () => Promise<unknown>> = {
+    static: () => projectStaticGraph(p, b),
+    cfg: () => projectControlFlowGraph(p, b),
+    dependency: () => projectStaticDependencyGraph(p, b),
+    coverage: () => projectRuntimeCoverageGraph(p, b),
+    branch: () => projectBranchCoverageGraph(p, b),
+    execution: () => projectTestExecutionGraph(p, b),
+    trace: () => projectTraceabilityGraph(p, b),
+    read: () => rebuildReadModels(p, b),
+    ai: () => analyzeBaseline(p, b),
+  }
+  try {
+    for (const s of steps) {
+      running.value = s.key
+      const v = await run[s.key]()
+      done.value.push(s.key)
+      if (s.key === 'ai') job.value = v as AnalysisJob
+    }
+    toast.success('全量构建已提交')
+    await loadState()
+  } catch (e) {
+    error.value = `全量构建在「${runningLabel.value}」失败：${msg(e)}`
+    toast.error(error.value)
+  } finally {
+    running.value = ''
+    busy.value = false
+  }
+}
 async function incremental(){if(busy.value||!baselineId.value)return;const list=symbols.value.split('\n').map(x=>x.trim()).filter(Boolean);if(changeType.value==='CODE'&&!list.length){toast.warning('代码变更请填写受影响符号');return}busy.value=true;result.value='';try{const d=await applyDiffInvalidation(projectId.value,baselineId.value,changeType.value);const r=list.length?await incrementalRecompute(projectId.value,baselineId.value,list):null;result.value=`${typeText(d.changeType)}：失效快照 ${d.invalidatedSnapshotKinds.join('、')||'无'}；${r?`受影响节点 ${r.affectedNodeCount}，AC ${r.affectedAcIds.length}，用例 ${r.affectedTestcaseIds.length}。`:'已完成失效传播。'}`;toast.success('增量分析完成');await loadState()}catch(e){error.value=msg(e);toast.error(error.value)}finally{busy.value=false}}
 function poll(){clearTimer();timer=setTimeout(async()=>{try{if(!baselineId.value)return;job.value=await fetchLatestAnalysisJob(projectId.value,baselineId.value);if(['QUEUED','RUNNING'].includes(job.value.status))poll()}catch{}},2500)}function clearTimer(){if(timer){clearTimeout(timer);timer=null}}function stepClass(k:string){return running.value===k?'running':done.value.includes(k)?'done':''}function stepHint(k:string){return running.value===k?'执行中':done.value.includes(k)?'完成':'待执行'}function statusText(v?:string){return ({CREATED:'待分析',ANALYZING:'分析中',COMPLETED:'已完成',FAILED:'失败',STALE:'已过期'}as Record<string,string>)[v||'']||v||'-'}function jobText(v?:string){return ({QUEUED:'排队中',RUNNING:'执行中',SUCCEEDED:'已完成',FAILED:'失败'}as Record<string,string>)[v||'']||'未运行'}function typeText(v:string){return types.find(x=>x.key===v)?.label||v}function commit(v?:string){return v?v.slice(0,10):'未绑定'}function time(v?:string){return v?new Date(v).toLocaleString('zh-CN',{hour12:false}):'-'}function msg(e:unknown){return e instanceof Error?e.message:'操作失败'}
 </script>
