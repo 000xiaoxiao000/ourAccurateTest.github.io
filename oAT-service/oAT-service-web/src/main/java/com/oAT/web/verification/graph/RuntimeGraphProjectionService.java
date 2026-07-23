@@ -2,13 +2,18 @@ package com.oAT.web.verification.graph;
 
 import com.oAT.web.esDao.ClassCoverageIndexRepository;
 import com.oAT.web.esDao.entity.ClassCoverageIndex;
+import com.oAT.web.coverage.universal.CoverageReportService;
+import com.oAT.web.service.AppService;
+import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.GraphModels;
 import com.oAT.web.verification.model.GraphModels.EvidenceKind;
 import com.oAT.web.verification.model.GraphModels.GraphEdgeType;
 import com.oAT.web.verification.model.GraphModels.GraphNodeKind;
 import com.oAT.web.verification.model.GraphModels.SnapshotKind;
+import com.oAT.web.verification.model.VerificationModels.AssetSnapshot;
 import com.oAT.web.verification.model.VerificationModels.Baseline;
+import com.oAT.web.verification.storage.AssetContentStore;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -23,12 +28,19 @@ public class RuntimeGraphProjectionService {
     private final GraphRepository graphRepository;
     private final ClassCoverageIndexRepository coverageRepository;
     private final VerificationRepository verificationRepository;
+    private final CoverageReportService coverageReportService;
+    private final AppService appService;
+    private final AssetContentStore assetContentStore;
 
     public RuntimeGraphProjectionService(GraphRepository graphRepository, ClassCoverageIndexRepository coverageRepository,
-                                         VerificationRepository verificationRepository) {
+                                         VerificationRepository verificationRepository, CoverageReportService coverageReportService,
+                                         AppService appService, AssetContentStore assetContentStore) {
         this.graphRepository = graphRepository;
         this.coverageRepository = coverageRepository;
         this.verificationRepository = verificationRepository;
+        this.coverageReportService = coverageReportService;
+        this.appService = appService;
+        this.assetContentStore = assetContentStore;
     }
 
     public ProjectionResult projectCoverage(String projectId, String baselineId) {
@@ -38,6 +50,9 @@ public class RuntimeGraphProjectionService {
             throw new IllegalArgumentException("当前基线没有覆盖率资产");
         }
         List<ClassCoverageIndex> coverage = coverageRepository.findByReportId(baseline.coverageAssetId());
+        if (coverage.isEmpty()) {
+            coverage = indexCoverageAsset(projectId, baseline);
+        }
         String inputHash = GraphModels.fingerprint(coverage.stream().map(ClassCoverageIndex::getId).sorted().reduce("", (a, b) -> a + "|" + b));
         graphRepository.invalidateSnapshots(baselineId, SnapshotKind.RUNTIME);
         GraphRepository.GraphSnapshot snapshot = new GraphRepository.GraphSnapshot(UUID.randomUUID().toString(), projectId, baselineId,
@@ -71,6 +86,22 @@ public class RuntimeGraphProjectionService {
             edges += methodCounts.edges();
         }
         return new ProjectionResult(snapshot.id(), executionId, nodes, edges);
+    }
+
+    private List<ClassCoverageIndex> indexCoverageAsset(String projectId, Baseline baseline) {
+        if (!StringUtils.hasText(baseline.sourceAppId())) {
+            throw new IllegalArgumentException("当前基线未绑定源码工程，无法解析覆盖率资产");
+        }
+        AssetSnapshot asset = verificationRepository.findAsset(projectId, baseline.coverageAssetId())
+                .orElseThrow(() -> new IllegalArgumentException("当前基线的覆盖率资产不存在"));
+        AppVo app = appService.getApp(baseline.sourceAppId());
+        if (app == null) throw new IllegalArgumentException("当前基线绑定的源码工程不存在");
+        String content = StringUtils.hasText(asset.content()) ? asset.content() : assetContentStore.load(asset.storageKey());
+        List<ClassCoverageIndex> parsed = coverageReportService.parse(app, value(content).getBytes(java.nio.charset.StandardCharsets.UTF_8)).stream()
+                .map(file -> file.toClassCoverageIndex(baseline.sourceAppId()))
+                .toList();
+        coverageRepository.replaceReport(asset.id(), parsed);
+        return parsed;
     }
 
     private ProjectionCounts projectMethodCoverage(GraphRepository.GraphSnapshot snapshot, String projectId, String baselineId,

@@ -39,7 +39,6 @@ public class FusionViewService {
         Set<String> executed = new HashSet<>(graphRepository.findDynamicallyEvidencedNodeIds(baselineId));
         List<CoveredMethod> coveredMethods = findCoveredMethods(projectId, baselineId);
         Set<String> reachable = new HashSet<>(graphRepository.findStaticallyReachableNodeIds(baselineId));
-        methods.forEach(method -> reachable.add(method.id()));
 
         List<FusionNode> nodes = new ArrayList<>();
         int executedConfirmed = 0;
@@ -81,10 +80,11 @@ public class FusionViewService {
         for (ClassCoverageIndex file : coverageRepository.findByReportId(baseline.coverageAssetId())) {
             if (file.getMethods() == null) continue;
             for (ClassCoverageIndex.MethodCoverageDetail method : file.getMethods()) {
-                if (method == null || (!method.isCovered() && method.getCoveredLines() <= 0)
+                if (method == null || (!method.isCovered() && method.getCoveredLines() <= 0
+                        && method.getCoveredBranches() <= 0 && method.getCoveredBranchTargets() <= 0)
                         || method.getMethodName() == null || method.getMethodName().isBlank()) continue;
                 methods.add(new CoveredMethod(value(method.getClassName(), file.getClassName()),
-                        method.getMethodName()));
+                        method.getMethodName(), file.getSourcePath(), method.getStartLine()));
             }
         }
         return methods;
@@ -105,20 +105,36 @@ public class FusionViewService {
         String owner = symbol.substring(0, hash);
         int symbolSeparator = owner.lastIndexOf(':');
         if (symbolSeparator >= 0) owner = owner.substring(symbolSeparator + 1);
-        return new MethodIdentity(owner, symbol.substring(hash + 1, memberEnd));
+        return new MethodIdentity(owner, symbol.substring(hash + 1, memberEnd), method.locator(), methodLine(method));
     }
 
     /**
      * Coverage reports use a binary class name while the graph stores a repository-qualified
      * symbol. Owner and method name are the stable cross-source join.
      */
-    private record CoveredMethod(String className, String methodName) {
+    private record CoveredMethod(String className, String methodName, String sourcePath, int startLine) {
         boolean matches(MethodIdentity method) {
-            return methodName.equalsIgnoreCase(method.name()) && sameOwner(className, method.owner());
+            if (!methodName.equalsIgnoreCase(method.name())) return false;
+            if (sameOwner(className, method.owner())) return true;
+            return samePath(sourcePath, method.locator())
+                    && (startLine <= 0 || method.line() <= 0 || startLine == method.line());
         }
     }
 
-    private record MethodIdentity(String owner, String name) {}
+    private record MethodIdentity(String owner, String name, String locator, int line) {}
+
+    private int methodLine(GraphRepository.GraphNode method) {
+        Object line = method.attributes() == null ? null : method.attributes().get("line");
+        if (line instanceof Number number) return number.intValue();
+        String locator = method.locator() == null ? "" : method.locator();
+        int separator = locator.lastIndexOf(':');
+        if (separator < 0) return 0;
+        try {
+            return Integer.parseInt(locator.substring(separator + 1));
+        } catch (NumberFormatException ignored) {
+            return 0;
+        }
+    }
 
     private static boolean sameOwner(String left, String right) {
         Set<String> leftVariants = ownerVariants(left);
@@ -136,6 +152,15 @@ public class FusionViewService {
         int packageSeparator = normalized.lastIndexOf('.');
         if (packageSeparator >= 0) variants.add(normalized.substring(packageSeparator + 1));
         return variants;
+    }
+
+    private static boolean samePath(String left, String right) {
+        if (left == null || right == null || left.isBlank() || right.isBlank()) return false;
+        String normalizedLeft = left.trim().toLowerCase(java.util.Locale.ROOT).replace('\\', '/');
+        String normalizedRight = right.trim().toLowerCase(java.util.Locale.ROOT).replace('\\', '/');
+        int lineSeparator = normalizedRight.lastIndexOf(':');
+        if (lineSeparator > normalizedRight.lastIndexOf('/')) normalizedRight = normalizedRight.substring(0, lineSeparator);
+        return normalizedLeft.endsWith(normalizedRight) || normalizedRight.endsWith(normalizedLeft);
     }
 
     private String value(String first, String fallback) {

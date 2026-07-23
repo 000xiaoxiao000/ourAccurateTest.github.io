@@ -214,7 +214,7 @@
           <div class="fusion-card total"><span class="num">{{ fusion.totalMethods }}</span><span>方法总数</span></div>
         </div>
         <div v-if="fusion.clipped" class="notice warn">{{ fusion.clipReason }}</div>
-        <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；如需区分“已执行确认”和“可达未执行”，还需投影覆盖率或测试执行数据。</span></div>
+        <div v-if="fusion.totalMethods === 0" class="empty-state"><strong>还没有可融合的方法数据</strong><span>请先投影静态图；融合会直接复用当前基线的覆盖率和测试执行证据。</span></div>
         <div v-else class="result-table-block">
           <div class="list-toolbar">
             <input v-model.trim="fusionKeyword" type="search" placeholder="搜索方法、符号或源码位置" @input="fusionNodePage = 1" />
@@ -445,6 +445,7 @@ import {
   projectTraceabilityGraph, rebuildReadModels,
   type AssertionConsistencyResult, type BaselineComparisonResult, type FusionStateDelta,
   type FusionView, type GraphAggregate, type GraphNode, type GraphView, type ReadModelKind,
+  type RuntimeProjectionResponse, type StaticProjectionResponse, type TraceabilityProjectionResponse,
 } from '@/api/graph'
 
 const route = useRoute()
@@ -471,6 +472,7 @@ const projections = [
   { key: 'traceability', label: '追溯图', hint: '将已生成的 AC、用例、实现和运行证据串成追溯关系。' },
 ] as const
 type ProjectionKey = (typeof projections)[number]['key']
+type ProjectionResponse = StaticProjectionResponse | RuntimeProjectionResponse | TraceabilityProjectionResponse
 const GRAPH_QUERY_MAX_NODES = 1000
 const GRAPH_QUERY_MAX_EDGES = 2000
 const FUSION_VIEW_MAX_NODES = 5000
@@ -482,8 +484,8 @@ const busyKey = ref('')
 const graph = ref<GraphView | null>(null)
 const focusId = ref('')
 const depth = ref(3)
-const maxNodes = ref(500)
-const maxEdges = ref(1000)
+const maxNodes = ref(GRAPH_QUERY_MAX_NODES)
+const maxEdges = ref(GRAPH_QUERY_MAX_EDGES)
 
 const fusion = ref<FusionView | null>(null)
 const fusionLoading = ref(false)
@@ -883,17 +885,37 @@ async function runProjection(key: ProjectionKey) {
   busyKey.value = key
   try {
     const pid = projectId.value, bid = baselineId.value
-    if (key === 'static') await projectStaticGraph(pid, bid)
-    else if (key === 'cfg') await projectControlFlowGraph(pid, bid)
-    else if (key === 'dependency') await projectStaticDependencyGraph(pid, bid)
-    else if (key === 'coverage') await projectRuntimeCoverageGraph(pid, bid)
-    else if (key === 'branch') await projectBranchCoverageGraph(pid, bid)
-    else if (key === 'testExec') await projectTestExecutionGraph(pid, bid)
-    else if (key === 'traceability') await projectTraceabilityGraph(pid, bid)
-    toast.success('投影完成')
+    let result: ProjectionResponse
+    if (key === 'static') result = await projectStaticGraph(pid, bid)
+    else if (key === 'cfg') result = await projectControlFlowGraph(pid, bid)
+    else if (key === 'dependency') result = await projectStaticDependencyGraph(pid, bid)
+    else if (key === 'coverage') result = await projectRuntimeCoverageGraph(pid, bid)
+    else if (key === 'branch') result = await projectBranchCoverageGraph(pid, bid)
+    else if (key === 'testExec') result = await projectTestExecutionGraph(pid, bid)
+    else result = await projectTraceabilityGraph(pid, bid)
+    showProjectionResultToast(key, result)
     await loadGraph()
   } catch (e) { toast.error(msg(e)) }
   finally { busyKey.value = '' }
+}
+
+function showProjectionResultToast(key: ProjectionKey, result: ProjectionResponse) {
+  const projection = projections.find((item) => item.key === key)
+  const label = projection?.label || '图谱'
+  const nodeCount = result.nodeCount ?? 0
+  const edgeCount = result.edgeCount ?? 0
+  const snapshot = shortId(result.snapshotId)
+  const execution = 'executionId' in result && result.executionId ? ` · 执行 ${shortId(result.executionId)}` : ''
+  const detail = `${label}投影完成：节点 ${nodeCount} · 边 ${edgeCount} · 快照 ${snapshot}${execution}`
+  if (nodeCount === 0 && edgeCount === 0) {
+    toast.warning(`${detail}。结果为空，请检查当前基线是否已绑定并导入对应数据。`, 7000)
+    return
+  }
+  toast.success(detail, 6000)
+}
+
+function shortId(value?: string) {
+  return value ? value.slice(0, 8) : '-'
 }
 
 async function loadFusion() {

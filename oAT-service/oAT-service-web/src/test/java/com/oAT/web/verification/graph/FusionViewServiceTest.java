@@ -51,14 +51,28 @@ class FusionViewServiceTest {
 
     @Test
     void classifies_static_entrypoint_without_call_edge_as_reachable_not_executed() {
-        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method("entrypoint", 12)));
+        GraphRepository.GraphNode entrypoint = method("entrypoint", 12);
+        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(entrypoint));
         when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of());
+        when(graphRepository.findStaticallyReachableNodeIds(BASELINE)).thenReturn(Set.of(entrypoint.id()));
 
         FusionViewService.FusionView view = service.build(PROJECT, BASELINE, 100);
 
         assertEquals(1, view.reachableNotExecuted());
         assertEquals(0, view.notObservable());
         assertEquals("REACHABLE_NOT_EXECUTED", view.nodes().get(0).fusionState());
+    }
+
+    @Test
+    void does_not_mark_every_static_method_as_reachable_without_a_static_edge() {
+        when(graphRepository.findActiveNodesByKind(BASELINE, GraphNodeKind.METHOD)).thenReturn(List.of(method("orphan", 12)));
+        when(coverageRepository.findByReportId(COVERAGE)).thenReturn(List.of());
+
+        FusionViewService.FusionView view = service.build(PROJECT, BASELINE, 100);
+
+        assertEquals(0, view.reachableNotExecuted());
+        assertEquals(1, view.notObservable());
+        assertEquals("NOT_OBSERVABLE", view.nodes().get(0).fusionState());
     }
 
     private GraphRepository.GraphNode method(String name, int line) {
