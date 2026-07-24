@@ -103,8 +103,8 @@ class CoverageParserRegistryTest {
         UniversalCoverageFile file = new JacocoCoverageParser().parse("""
                 <report><package name="demo">
                   <class name="demo/Order" sourcefilename="Order.java">
-                    <method name="create" desc="()V" line="7"><counter type="METHOD" missed="0" covered="1"/></method>
-                    <method name="cancel" desc="()V" line="12"><counter type="METHOD" missed="1" covered="0"/></method>
+                    <method name="create" desc="()V" line="7"><counter type="METHOD" missed="0" covered="1"/><counter type="COMPLEXITY" missed="0" covered="2"/></method>
+                    <method name="cancel" desc="()V" line="12"><counter type="METHOD" missed="1" covered="0"/><counter type="COMPLEXITY" missed="1" covered="0"/></method>
                   </class>
                   <sourcefile name="Order.java">
                     <line nr="7" ci="3"/><line nr="9" ci="0"/>
@@ -120,8 +120,12 @@ class CoverageParserRegistryTest {
         assertEquals(7, create.getStartLine());
         assertEquals(List.of(7, 9), create.getTotalLineNumbers());
         assertEquals(List.of(7), create.getCoveredLineNumbers());
+        assertEquals(2, create.getComplexity());
+        assertEquals(2, create.getCoveredComplexity());
         assertEquals(List.of(12, 14), cancel.getTotalLineNumbers());
         assertEquals(List.of(), cancel.getCoveredLineNumbers());
+        assertEquals(1, cancel.getComplexity());
+        assertEquals(0, cancel.getCoveredComplexity());
     }
 
     @Test

@@ -259,7 +259,11 @@ class TraceabilityMapServiceSourceParsingTest {
         ClassCoverageIndex index = new ClassCoverageIndex();
         index.setSourcePath(path);
         ClassCoverageIndex.MethodCoverageDetail covered = coverageMethod("demo/Example", "covered", 10, 1, 1);
+        covered.setComplexity(2);
+        covered.setCoveredComplexity(2);
         ClassCoverageIndex.MethodCoverageDetail missed = coverageMethod("demo/Example", "missed", 20, 0, 1);
+        missed.setComplexity(1);
+        missed.setCoveredComplexity(0);
         index.setMethods(List.of(covered, missed));
         Method applyMethodCoverage = codeIndexType.getDeclaredMethod("applyMethodCoverage", ClassCoverageIndex.class);
         applyMethodCoverage.setAccessible(true);
@@ -267,6 +271,14 @@ class TraceabilityMapServiceSourceParsingTest {
         @SuppressWarnings("unchecked")
         java.util.Set<String> coveredIds = (java.util.Set<String>) applyMethodCoverage.invoke(codeIndex, index);
         assertThat(coveredIds).containsExactly(coveredMethodId);
+
+        Field nodesField = codeIndexType.getDeclaredField("nodes");
+        nodesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, TraceabilityMapPayloads.TraceabilityNode> nodes =
+                (Map<String, TraceabilityMapPayloads.TraceabilityNode>) nodesField.get(codeIndex);
+        assertThat(nodes.get(coveredMethodId).metadata()).containsEntry("coverageCoveredComplexity", 2);
+        assertThat(nodes.get(missedMethodId).metadata()).containsEntry("coverageCoveredComplexity", 0);
     }
 
     @Test

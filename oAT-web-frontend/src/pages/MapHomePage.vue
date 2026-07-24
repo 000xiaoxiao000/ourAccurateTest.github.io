@@ -1390,7 +1390,8 @@ function toCoverageRow(node: TraceabilityNode) {
   const hasReport = Boolean(coverage && (totalLines > 0 || totalBranches > 0))
   const isCovered = coveredLines > 0 || coveredBranches > 0 || node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH'
   const complexity = coverageComplexity(metadata)
-  const coveredComplexity = isCovered ? complexity : 0
+  const coveredComplexity = coverageCoveredComplexity(metadata, complexity, isCovered)
+  const status = coverageStatus(node, hasReport, coveredLines, totalLines, coveredBranches, totalBranches, coveredComplexity, complexity)
   return {
     id: node.id,
     label: node.label || node.symbol || node.id,
@@ -1401,8 +1402,8 @@ function toCoverageRow(node: TraceabilityNode) {
     totalLines,
     coveredBranches,
     totalBranches,
-    stateText: coverageStateText(node, hasReport, isCovered),
-    tone: coverageStateTone(node, hasReport, isCovered),
+    stateText: coverageStateText(status),
+    tone: coverageStateTone(status),
     lineText: coverageRatioText(coveredLines, totalLines, coverage?.lineRate),
     branchText: coverageRatioText(coveredBranches, totalBranches, coverage?.branchRate),
     lineWidth: coverageWidth(coverage?.lineRate, coveredLines, totalLines),
@@ -1563,18 +1564,41 @@ function hasCoverageSummary(node: TraceabilityNode) {
   return Boolean(coverage && ((coverage.totalLines ?? 0) > 0 || (coverage.totalBranches ?? 0) > 0))
 }
 
-function coverageStateText(node: TraceabilityNode, hasReport: boolean, isCovered: boolean) {
-  if (hasReport && isCovered) return '已覆盖'
-  if (hasReport) return '未覆盖'
-  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return '运行记录'
+type CoverageStatus = 'covered' | 'partial' | 'missed' | 'dynamic' | 'none'
+
+function coverageStatus(
+  node: TraceabilityNode,
+  hasReport: boolean,
+  coveredLines: number,
+  totalLines: number,
+  coveredBranches: number,
+  totalBranches: number,
+  coveredComplexity: number,
+  totalComplexity: number,
+): CoverageStatus {
+  if (hasReport) {
+    const metrics = [
+      { covered: coveredLines, total: totalLines },
+      { covered: coveredBranches, total: totalBranches },
+      { covered: coveredComplexity, total: totalComplexity },
+    ].filter((metric) => metric.total > 0)
+    if (!metrics.some((metric) => metric.covered > 0)) return 'missed'
+    return metrics.every((metric) => metric.covered >= metric.total) ? 'covered' : 'partial'
+  }
+  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return 'dynamic'
+  return 'none'
+}
+
+function coverageStateText(status: CoverageStatus) {
+  if (status === 'covered') return '已覆盖'
+  if (status === 'partial') return '部分覆盖'
+  if (status === 'missed') return '未覆盖'
+  if (status === 'dynamic') return '运行记录'
   return '无报告'
 }
 
-function coverageStateTone(node: TraceabilityNode, hasReport: boolean, isCovered: boolean) {
-  if (hasReport && isCovered) return 'covered'
-  if (hasReport) return 'missed'
-  if (node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH') return 'dynamic'
-  return 'none'
+function coverageStateTone(status: CoverageStatus) {
+  return status
 }
 
 function coverageRatioText(covered: number, total: number, rate?: number) {
@@ -1640,6 +1664,12 @@ function coverageComplexity(metadata: Record<string, unknown>) {
     ?? numberMetadata(metadata.complexity)
     ?? numberMetadata(metadata.cyclomaticComplexity)
     ?? 0
+}
+
+function coverageCoveredComplexity(metadata: Record<string, unknown>, totalComplexity: number, isCovered: boolean) {
+  const explicit = numberMetadata(metadata.coverageCoveredComplexity)
+  if (explicit !== undefined) return Math.max(0, Math.min(explicit, totalComplexity))
+  return isCovered ? totalComplexity : 0
 }
 
 function stringMetadata(value: unknown) {
@@ -3033,6 +3063,7 @@ onBeforeUnmount(() => {
 .coverage-pill.both { background:#ccfbf1; color:#0f766e; }
 .coverage-pill.static { background:#dcfce7; color:#15803d; }
 .coverage-pill.covered { background:#dcfce7; color:#15803d; }
+.coverage-pill.partial { background:#fef3c7; color:#b45309; }
 .coverage-pill.missed { background:#fee2e2; color:#b91c1c; }
 .coverage-pill.none { background:#f1f5f9; color:#64748b; }
 .coverage-meter { display:grid; gap:5px; min-width:150px; }

@@ -286,9 +286,10 @@ public class JacocoCoverageParser implements CoverageParser {
             int covered = methodCounter == null ? 0 : integer(methodCounter.getAttribute("covered"));
             Element complexityCounter = directCounter(item.element(), "COMPLEXITY");
             int complexity = complexityCounter == null ? 0 : counterTotal(complexityCounter);
+            int coveredComplexity = complexityCounter == null ? (covered > 0 ? complexity : 0) : integer(complexityCounter.getAttribute("covered"));
             file.getFunctions().add(new UniversalCoverageFile.FunctionCoverage(
                     item.className(), item.element().getAttribute("name"), item.element().getAttribute("desc"),
-                    item.line(), Math.max(item.line(), nextLine - 1), covered, complexity));
+                    item.line(), Math.max(item.line(), nextLine - 1), covered, complexity, coveredComplexity));
         }
     }
 

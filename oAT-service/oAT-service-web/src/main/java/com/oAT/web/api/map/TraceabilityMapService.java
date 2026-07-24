@@ -1072,11 +1072,15 @@ public class TraceabilityMapService {
         if (index == null) return 0;
         if (index.getMethods() != null && !index.getMethods().isEmpty()) {
             return index.getMethods().stream()
-                    .filter(method -> method != null && (method.isCovered()
+                    .filter(method -> method != null)
+                    .mapToInt(method -> method.getCoveredComplexity() > 0
+                            ? method.getCoveredComplexity()
+                            : (method.isCovered()
                             || method.getCoveredLines() > 0
                             || method.getCoveredBranches() > 0
-                            || method.getCoveredBranchTargets() > 0))
-                    .mapToInt(ClassCoverageIndex.MethodCoverageDetail::getComplexity)
+                            || method.getCoveredBranchTargets() > 0
+                                    ? method.getComplexity()
+                                    : 0))
                     .sum();
         }
         return index.getCoveredLines() > 0 || index.getCoveredBranches() > 0 || index.getCoveredBranchTargets() > 0
@@ -1207,6 +1211,7 @@ public class TraceabilityMapService {
             }
         }
         metadata.put("coverageComplexity", index.getTotalComplexity());
+        metadata.put("coverageCoveredComplexity", coveredComplexity(index));
         metadata.put("coverageTotalLines", new ArrayList<>(totalLines));
         metadata.put("coverageCoveredLines", new ArrayList<>(coveredLines));
         metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines));
@@ -1698,6 +1703,7 @@ public class TraceabilityMapService {
                         method.getCoveredBranchTargets(), method.getTotalBranchTargets(), method.getBranchRate());
                 Map<String, Object> metadata = new LinkedHashMap<>();
                 metadata.put("coverageComplexity", method.getComplexity());
+                metadata.put("coverageCoveredComplexity", method.getCoveredComplexity());
                 metadata.put("coverageTotalLines", method.getTotalLineNumbers() == null ? List.of() : method.getTotalLineNumbers());
                 metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
                 metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines(method)));
@@ -1756,6 +1762,8 @@ public class TraceabilityMapService {
                 metadata.put("coverageTotalLines", methodTotal);
                 metadata.put("coverageCoveredLines", methodCovered);
                 metadata.put("coveragePartialBranchLines", partialBranches);
+                Integer complexity = metadataInteger((node.metadata() == null ? Map.of() : node.metadata()).get("coverageComplexity"));
+                metadata.put("coverageCoveredComplexity", methodCovered.isEmpty() && branch[0] <= 0 ? 0 : (complexity == null ? 0 : complexity));
                 applyCoverageSummary(node.id(), coverage, metadata);
                 if (!methodCovered.isEmpty() || branch[0] > 0) coveredMethodIds.add(node.id());
             }
