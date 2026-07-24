@@ -1,78 +1,78 @@
 # ourAccurateTest
 
-`ourAccurateTest` 是一个面向研发、测试和质量保障团队的需求一致性验证平台。平台将需求、测试用例、源码、Git 变更和运行证据组织为可追溯的数据关系，并通过静态分析与大语言模型辅助发现覆盖缺口、实现偏差和质量风险。
+`ourAccurateTest` 是面向研发、测试和质量保障团队的 AI 需求一致性验证平台。项目将需求、用例、源码、版本变更、运行证据和覆盖率数据组织为可追溯关系，并通过静态分析、运行证据投影和 LLM 辅助发现覆盖缺口、实现偏差和质量门禁风险。
 
-> 本项目仅供个人学习、技术研究与交流使用。请在使用前确认第三方组件、代码仓库和模型服务的授权，并不要将生产密钥直接提交到配置文件或代码仓库。
+> 本项目仅供个人学习、技术研究与交流使用。请在使用前确认第三方组件、代码仓库、流量采集对象和模型服务的授权，不要将生产密钥、证书或敏感流量提交到代码仓库。
 
-## 功能概览
-
-- **验证工作区**：导入需求、用例、源码、执行报告和覆盖率等分析资产。
-- **验证基线**：以一组外部资产快照建立分析基线，记录证据和分析结果。
-- **一致性分析**：结合静态源码分析和 LLM，检查需求、验收条件、用例与代码之间的关系。
-- **追溯矩阵**：查看需求、用例、源码和运行证据之间的追溯边。
-- **发现审核**：对 AI 发现进行人工确认、驳回和补充说明。
-- **质量门禁**：配置质量策略，评估基线结果并记录豁免。
-- **Git 变更影响**：拉取仓库、查看 Commit/Diff，并分析代码变更对验证范围的影响。
-- **代码关系图谱**：浏览应用、源码树、API 端点和影响关系。
-- **项目管理**：管理项目、应用、成员、标签、仓库配置和版本。
-
-## 项目结构
+## 模块总览
 
 ```text
 ourAccurateTest/
 ├── oAT-service/
-│   ├── oAT-ai/                 # LLM 配置与调用模块，打包为 jar
-│   ├── oAT-service-web/        # Spring Boot 后端主服务，打包为 war
+│   ├── oAT-ai/                 # LLM 接入模块，jar
+│   ├── oAT-service-web/        # Spring Boot 后端主服务，war
 │   └── pom.xml                 # 服务端 Maven 聚合构建
-├── oAT-web-frontend/           # Vue 3 + TypeScript Web 前端
-└── docs/                       # 项目文档与交流二维码等资源
+├── oAT-web-frontend/           # 平台 Web 前端
+├── oAT-traffic-capture/        # Electron 桌面流量采集器
+└── docs/                       # 文档图片和交流资源
 ```
 
 ## 系统组成
 
 ```text
-Web 前端（Vue 3 / Vite）
+oAT-web-frontend
         │ /api
         ▼
-后端主服务（Spring Boot）
-        ├── PostgreSQL：项目、应用、版本、验证基线和分析结果
+oAT-service-web
+        ├── PostgreSQL + Flyway：项目、应用、版本、用例、验证基线、追溯和门禁数据
         ├── Git：仓库、分支、Commit、Diff 和源码快照
-        ├── 本地文件目录：源码缓存和大载荷
-        └── oAT-ai：LLM 调用与 AI 分析
+        ├── 本地文件目录：源码缓存、大载荷和静态源码内容
+        └── oAT-ai：LLM 配置和文本生成能力
+
+oAT-traffic-capture
+        ├── 本地代理：HTTP/HTTPS/WS/WSS 流量采集
+        ├── SQLite：历史会话、记录和过滤规则
+        └── 插件：捕获后与保存前流量处理
 ```
+
+## 核心能力
+
+- 验证工作区：导入需求、用例、源码、执行报告、覆盖率和 Git 源码快照。
+- 验证基线：以一组资产快照建立分析基线，保存证据、状态和分析结果。
+- 一致性分析：结合 LLM 与结构化证据生成追溯边、风险发现和分析摘要。
+- 追溯矩阵与图谱：查看需求、用例、源码、运行证据、覆盖率和 AI 发现之间的关系。
+- 质量门禁：配置门禁策略、评估基线结果、记录豁免并识别 stale 状态。
+- Git 影响分析：基于 Commit/Diff 分析变更范围并联动图谱过期标记。
+- 代码与 API 分析：解析 Java 源码、字节码和接口端点，支撑版本对比与影响定位。
+- 多语言覆盖率解析：支持 JaCoCo、Istanbul、LCOV、gcov、go cover 和 coverage.py。
+- 桌面流量采集：采集、过滤、查看、重放和导出 HTTP/HTTPS、WebSocket、MQTT 等流量。
 
 ## 技术栈
 
 | 模块 | 技术 |
 | --- | --- |
-| 后端 | Java 17、Spring Boot 3.4.4、Spring JDBC |
-| AI | LangChain4j 1.12.2、OpenAI 兼容接口、Ollama |
+| 后端 | Java 17、Spring Boot 3.4.4、Spring JDBC、Druid |
+| AI | LangChain4j 1.12.2、OpenAI 兼容接口、DeepSeek、Ollama |
 | 数据库 | PostgreSQL、Flyway |
-| 源码与覆盖率分析 | JGit、JavaParser、ASM、JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
-| 前端 | Vue 3、TypeScript、Vite 7、Vue Router、Pinia |
+| 源码与覆盖率 | JGit、JavaParser、ASM、JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
+| Web 前端 | Vue 3、TypeScript、Vite 7、Vue Router、Pinia |
+| 流量采集器 | Electron 30、Vue 3、Vite 5、http-mitm-proxy、better-sqlite3、ws、mqtt、ExcelJS |
 
 ## 环境要求
 
 - JDK 17+
-- Maven 3.8+
 - Node.js 18+
-- PostgreSQL 12+（建议使用受支持的较新版本）
+- PostgreSQL 12+，建议使用仍在维护的版本
 - 可访问的 Git 仓库
-- 可选：OpenAI、DeepSeek 或其他 OpenAI 兼容模型服务；也可以使用本地 Ollama
+- 可选：Maven 3.8+；仓库内提供 `oAT-service/oAT-service-web/mvnw`
+- 可选：OpenAI、DeepSeek、Ollama 或兼容 OpenAI 协议的模型服务
+- 可选：macOS 证书信任权限，用于桌面采集器解密 HTTPS/WSS
 
 ## 快速开始
 
-### 1. 配置数据库和模型
+### 1. 配置后端
 
-后端默认监听 `8899`，默认数据库配置如下：
-
-```properties
-spring.datasource.url=jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification
-spring.datasource.username=traceiq
-spring.datasource.password=traceiq
-```
-
-建议通过环境变量覆盖默认值：
+后端默认端口是 `8899`，默认数据库是 PostgreSQL：
 
 ```bash
 export OAT_DB_URL='jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification'
@@ -82,47 +82,35 @@ export AI_LLM_API_KEY='your-api-key'
 export AI_LLM_MODEL='deepseek-chat'
 ```
 
-数据库迁移由 Flyway 自动执行，迁移文件位于：
+数据库迁移由 Flyway 自动执行：
 
 ```text
 oAT-service/oAT-service-web/src/main/resources/db/migration/
 ```
 
-后端运行时会在 `oat.data.path` 指定的位置保存 Git 源码缓存和大载荷，默认路径为：
+后端本地数据目录默认是：
 
 ```text
 ${user.home}/oAT/codeData/
 ```
 
-### 2. 构建后端
-
-推荐从服务端聚合模块构建：
+### 2. 构建并启动后端
 
 ```bash
 cd oAT-service
-mvn clean install
-```
+./oAT-service-web/mvnw -f pom.xml clean package -DskipTests
 
-仅构建后端主服务时：
-
-```bash
-cd oAT-service/oAT-service-web
-./mvnw -f ../pom.xml package -DskipTests
-```
-
-启动后端：
-
-```bash
+cd oAT-service-web
 ./start.sh
 ```
 
-构建产物为：
+后端启动后监听：
 
 ```text
-oAT-service/oAT-service-web/target/oAT-service-web-1.0.0-SNAPSHOT.war
+http://localhost:8899
 ```
 
-### 3. 启动前端
+### 3. 启动平台 Web 前端
 
 ```bash
 cd oAT-web-frontend
@@ -136,53 +124,50 @@ npm run dev
 http://localhost:5176
 ```
 
-开发服务器会将 `/api` 等请求代理到 `http://localhost:8899`。如需修改后端地址：
+前端开发服务器默认代理到 `http://localhost:8899`。如需修改：
 
 ```bash
 OAT_BACKEND_TARGET='http://127.0.0.1:8899' npm run dev
 ```
 
-登录后即可从项目列表进入验证工作区、版本中心和代码关系图谱。
-
-## 前端命令
+### 4. 启动桌面流量采集器
 
 ```bash
-npm run dev        # 启动开发服务器
-npm run typecheck  # 执行 Vue/TypeScript 类型检查
-npm run build      # 类型检查并构建生产资源
-npm run preview    # 预览生产构建
+cd oAT-traffic-capture
+npm install
+npm run dev
 ```
 
-生产构建产物位于 `oAT-web-frontend/dist/`，可由 Nginx 等 Web 服务器托管，并将 API 请求反向代理到后端 `8899` 端口。
+采集器渲染进程开发端口是 `5173`，本地代理默认端口是 `8888`，代理端口可在应用内调整。
 
-## 配置参考
+## 常用命令
 
-后端主配置文件：
+| 目录 | 命令 | 说明 |
+| --- | --- | --- |
+| `oAT-service` | `./oAT-service-web/mvnw -f pom.xml test` | 运行服务端测试 |
+| `oAT-service` | `./oAT-service-web/mvnw -f pom.xml clean package -DskipTests` | 打包服务端 |
+| `oAT-web-frontend` | `npm run dev` | 启动平台 Web 前端 |
+| `oAT-web-frontend` | `npm run build` | 类型检查并构建 Web 前端 |
+| `oAT-traffic-capture` | `npm run dev` | 启动 Electron 采集器开发模式 |
+| `oAT-traffic-capture` | `npm run build` | 构建采集器前端和主进程 |
+| `oAT-traffic-capture` | `npm run dist` | 生成桌面安装包 |
 
-```text
-oAT-service/oAT-service-web/src/main/resources/application.properties
-```
+## 配置入口
 
-常用配置：
-
-| 配置 | 说明 |
+| 配置 | 文件 |
 | --- | --- |
-| `server.port` | 后端端口，默认 `8899` |
-| `OAT_DB_URL` | PostgreSQL JDBC 地址 |
-| `OAT_DB_USERNAME` / `OAT_DB_PASSWORD` | 数据库账号和密码 |
-| `oat.data.path` | Git 源码缓存和文件存储目录 |
-| `AI_LLM_API_KEY` | 模型服务 API Key |
-| `AI_LLM_MODEL` | 模型名称 |
-| `ai.llm.provider` | `openai`、`deepseek`、`ollama` 或 `custom` |
-
-上传请求默认允许单文件和单次请求最大 `2048MB`。如果使用 Nginx、网关或外部 Tomcat，需要同步调整请求体大小限制。
+| 后端端口、数据库、Flyway、LLM、本地存储 | `oAT-service/oAT-service-web/src/main/resources/application.properties` |
+| Web 前端代理和端口 | `oAT-web-frontend/vite.config.ts` |
+| 流量采集器 Electron 打包 | `oAT-traffic-capture/package.json` |
+| 流量采集器 Vite 端口 | `oAT-traffic-capture/vite.config.ts` |
 
 ## 模块文档
 
 - [服务端聚合模块](oAT-service/README.md)
 - [后端主服务](oAT-service/oAT-service-web/README.md)
 - [LLM 模块](oAT-service/oAT-ai/README.md)
-- [Web 前端](oAT-web-frontend/README.md)
+- [平台 Web 前端](oAT-web-frontend/README.md)
+- [桌面流量采集器](oAT-traffic-capture/README.md)
 
 ## 交流与反馈
 
