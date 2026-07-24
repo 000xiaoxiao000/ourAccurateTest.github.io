@@ -29,6 +29,7 @@ public class UniversalCoverageFile implements Serializable {
     private int reportTotalLines;
     private int reportCoveredLines;
     private int reportTotalComplexity;
+    private int reportCoveredComplexity;
     private Map<Integer, List<ClassCoverageIndex.CoverageFootprintRecord>> lineFootprints = new LinkedHashMap<>();
     private Map<String, List<ClassCoverageIndex.CoverageFootprintRecord>> branchFootprints = new LinkedHashMap<>();
 
@@ -217,6 +218,8 @@ public class UniversalCoverageFile implements Serializable {
     public void setReportCoveredLines(int reportCoveredLines) { this.reportCoveredLines = reportCoveredLines; }
     public int getReportTotalComplexity() { return reportTotalComplexity; }
     public void setReportTotalComplexity(int reportTotalComplexity) { this.reportTotalComplexity = reportTotalComplexity; }
+    public int getReportCoveredComplexity() { return reportCoveredComplexity; }
+    public void setReportCoveredComplexity(int reportCoveredComplexity) { this.reportCoveredComplexity = reportCoveredComplexity; }
 
     interface Merger<T> { T merge(T left, T right); }
 

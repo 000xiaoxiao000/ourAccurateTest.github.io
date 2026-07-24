@@ -103,6 +103,7 @@ public class JacocoCoverageParser implements CoverageParser {
         int[] branches = missedAndTotal(cells.get(3));
         summary.setReportCoveredBranches(Math.max(branches[1] - branches[0], 0));
         summary.setReportTotalBranches(branches[1]);
+        summary.setReportCoveredComplexity(Math.max(number(cells.get(6)) - number(cells.get(5)), 0));
         summary.setReportTotalComplexity(number(cells.get(6)));
         summary.setReportCoveredLines(Math.max(number(cells.get(8)) - number(cells.get(7)), 0));
         summary.setReportTotalLines(number(cells.get(8)));
@@ -164,6 +165,7 @@ public class JacocoCoverageParser implements CoverageParser {
         int[] branches = missedAndTotal(cells.get(3));
         summary.setReportCoveredBranches(Math.max(branches[1] - branches[0], 0));
         summary.setReportTotalBranches(branches[1]);
+        summary.setReportCoveredComplexity(Math.max(number(cells.get(6)) - number(cells.get(5)), 0));
         summary.setReportTotalComplexity(number(cells.get(6)));
         summary.setReportCoveredLines(Math.max(number(cells.get(8)) - number(cells.get(7)), 0));
         summary.setReportTotalLines(number(cells.get(8)));
@@ -294,6 +296,7 @@ public class JacocoCoverageParser implements CoverageParser {
         int coveredClasses = 0;
         int totalMethods = 0;
         int coveredMethods = 0;
+        int coveredComplexity = 0;
         int totalComplexity = 0;
         for (int classIndex = 0; classIndex < classes.getLength(); classIndex++) {
             Element classNode = (Element) classes.item(classIndex);
@@ -321,12 +324,16 @@ public class JacocoCoverageParser implements CoverageParser {
                 }
             }
             Element complexityCounter = directCounter(classNode, "COMPLEXITY");
-            if (complexityCounter != null) totalComplexity += counterTotal(complexityCounter);
+            if (complexityCounter != null) {
+                totalComplexity += counterTotal(complexityCounter);
+                coveredComplexity += integer(complexityCounter.getAttribute("covered"));
+            }
         }
         file.setReportTotalClasses(totalClasses);
         file.setReportCoveredClasses(coveredClasses);
         file.setReportTotalMethods(totalMethods);
         file.setReportCoveredMethods(coveredMethods);
+        file.setReportCoveredComplexity(coveredComplexity);
         file.setReportTotalComplexity(totalComplexity);
     }
 

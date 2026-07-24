@@ -59,6 +59,7 @@ export interface CoverageReportOverview {
   totalBranches: number
   coveredLines: number
   totalLines: number
+  coveredComplexity: number
   totalComplexity: number
 }
 

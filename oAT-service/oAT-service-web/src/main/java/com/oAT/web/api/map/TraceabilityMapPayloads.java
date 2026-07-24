@@ -112,6 +112,7 @@ public final class TraceabilityMapPayloads {
             int totalBranches,
             int coveredLines,
             int totalLines,
+            int coveredComplexity,
             int totalComplexity) {
     }
 

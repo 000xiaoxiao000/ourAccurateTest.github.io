@@ -1027,6 +1027,7 @@ public class TraceabilityMapService {
         int totalBranches = 0;
         int coveredLines = 0;
         int totalLines = 0;
+        int coveredComplexity = 0;
         int totalComplexity = 0;
         Set<String> seenCoverageIndexes = new HashSet<>();
         for (ClassCoverageIndex index : indexes) {
@@ -1040,7 +1041,7 @@ public class TraceabilityMapService {
             totalComplexity += index.getTotalComplexity();
         }
         return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
-                coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
+                coveredBranches, totalBranches, coveredLines, totalLines, coveredComplexity, totalComplexity);
     }
 
     private boolean hasCoveredMeasurements(TraceabilityNode node) {
@@ -1089,6 +1090,7 @@ public class TraceabilityMapService {
         int totalBranches = 0;
         int coveredLines = 0;
         int totalLines = 0;
+        int coveredComplexity = 0;
         int totalComplexity = 0;
         boolean hasGlobalReportTotals = files.stream().anyMatch(file -> file != null && file.getReportTotalLines() > 0);
         for (UniversalCoverageFile file : files) {
@@ -1107,6 +1109,7 @@ public class TraceabilityMapService {
             coveredLines += file.getReportTotalLines() > 0 ? file.getReportCoveredLines()
                     : file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count();
             totalLines += file.getReportTotalLines() > 0 ? file.getReportTotalLines() : file.getLines().size();
+            coveredComplexity += file.getReportCoveredComplexity();
             totalComplexity += file.getReportTotalComplexity();
         }
         if (hasGlobalReportTotals) {
@@ -1127,11 +1130,12 @@ public class TraceabilityMapService {
                     coveredLines = summary.getReportCoveredLines();
                     totalLines = summary.getReportTotalLines();
                 }
+                coveredComplexity = summary.getReportCoveredComplexity();
                 totalComplexity = summary.getReportTotalComplexity();
             }
         }
         return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
-                coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
+                coveredBranches, totalBranches, coveredLines, totalLines, coveredComplexity, totalComplexity);
     }
 
     private List<ClassCoverageIndex> loadCoverageIndexes(String projectId, Baseline baseline, List<String> warnings) {

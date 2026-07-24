@@ -474,6 +474,7 @@
             <span>{{ codeTreeSummaryText }}</span>
           </div>
           <div class="tree-actions">
+            <button type="button" :disabled="!map.focusId.value" @click="showGlobalCoverageOverview">全局概览</button>
             <button type="button" @click="expandTree">展开</button>
             <button type="button" @click="collapseTree">折叠</button>
           </div>
@@ -730,7 +731,9 @@ const callViewMeta = computed(() => {
     const mapped = `已匹配 ${coverageFileRows.value.length} / ${totalFiles} 个源码文件`
     return {
       title: '覆盖率数据',
-      description: '概览按 JaCoCo 报表原始总计；文件和方法明细仅展示与当前源码基线匹配的覆盖数据',
+      description: hasCoverageScope.value
+        ? `当前范围：${coverageScopeNode.value?.label || '已选代码节点'}；概览与下方明细均按此范围汇总`
+        : '当前基线全局概览；文件和方法明细展示与当前源码基线匹配的覆盖数据',
       count: mapped,
     }
   }
@@ -777,6 +780,9 @@ const coverageMethodRows = computed(() => coverageRows.value.filter((row) => map
 const coverageListRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
 const coverageAggregateRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
 const rawCoverageOverview = computed(() => map.response.value?.coverageOverview)
+const coverageScopeNode = computed(() => map.focusId.value ? map.nodeById.value.get(map.focusId.value) : undefined)
+const hasCoverageScope = computed(() => Boolean(coverageScopeNode.value?.kind.startsWith('CODE_')))
+const coverageScopeIsMethod = computed(() => coverageScopeNode.value?.kind === 'CODE_METHOD')
 const hasCoverageData = computed(() => coverageRows.value.length > 0 || coverageReportHasData())
 const selectedCoverageFileId = computed(() => {
   const row = selectedCoverageRow.value
@@ -822,33 +828,35 @@ const coverageOverview = computed(() => {
 })
 const coverageClassMetric = computed(() => {
   const raw = rawCoverageOverview.value
-  return raw && raw.totalClasses > 0
+  return !hasCoverageScope.value && raw && raw.totalClasses > 0
     ? { covered: raw.coveredClasses, total: raw.totalClasses }
     : coverageNodeMetric('CODE_CLASS')
 })
 const coverageMethodMetric = computed(() => {
   const raw = rawCoverageOverview.value
-  return raw && raw.totalMethods > 0
+  return !hasCoverageScope.value && raw && raw.totalMethods > 0
     ? { covered: raw.coveredMethods, total: raw.totalMethods }
     : coverageNodeMetric('CODE_METHOD')
 })
 const coverageBranchMetric = computed(() => {
   const raw = rawCoverageOverview.value
-  return raw && raw.totalBranches > 0
+  return !hasCoverageScope.value && raw && raw.totalBranches > 0
     ? { covered: raw.coveredBranches, total: raw.totalBranches }
     : { covered: coverageOverview.value.coveredBranches, total: coverageOverview.value.totalBranches }
 })
 const coverageLineMetric = computed(() => {
   const raw = rawCoverageOverview.value
-  return raw && raw.totalLines > 0
+  return !hasCoverageScope.value && raw && raw.totalLines > 0
     ? { covered: raw.coveredLines, total: raw.totalLines }
     : { covered: coverageOverview.value.coveredLines, total: coverageOverview.value.totalLines }
 })
-const coverageComplexityTotal = computed(() => {
+const coverageComplexityMetric = computed(() => {
   const raw = rawCoverageOverview.value
-  if (raw && raw.totalComplexity > 0) return raw.totalComplexity
+  if (!hasCoverageScope.value && raw && raw.totalComplexity > 0) {
+    return { covered: raw.coveredComplexity ?? 0, total: raw.totalComplexity }
+  }
   const total = coverageAggregateRows.value.reduce((sum, row) => sum + row.complexity, 0)
-  return total > 0 ? total : undefined
+  return { covered: 0, total }
 })
 const coverageMetricCards = computed(() => [
   coverageCountCard('class', '类覆盖率', coverageClassMetric.value.covered, coverageClassMetric.value.total, 'class'),
@@ -858,9 +866,11 @@ const coverageMetricCards = computed(() => [
   {
     key: 'complexity',
     label: '圈复杂度',
-    value: coverageComplexityTotal.value === undefined ? '-' : String(coverageComplexityTotal.value),
-    missedText: '',
-    detailText: '',
+    value: coverageComplexityMetric.value.total
+      ? coveragePercent(coverageComplexityMetric.value.covered / coverageComplexityMetric.value.total)
+      : '-',
+    missedText: `未覆盖数 ${Math.max(coverageComplexityMetric.value.total - coverageComplexityMetric.value.covered, 0)}`,
+    detailText: `覆盖数/总数 ${coverageComplexityMetric.value.covered} / ${coverageComplexityMetric.value.total}`,
     tone: 'complexity',
   },
 ])
@@ -1198,6 +1208,19 @@ function scrollToCoverageLine(id: string) {
   if (!line || !coverageSourceScroll.value) return
   const target = coverageSourceScroll.value.querySelector<HTMLElement>(`[data-line="${line}"]`)
   target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+async function showGlobalCoverageOverview() {
+  if (!map.focusId.value) return
+  map.focusId.value = ''
+  selectedCallGraphId.value = ''
+  selectedMiniGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = false
+  callGraphGlobalEnabled.value = false
+  coverageMethodKeyword.value = ''
+  loadedCodeDataKey.value = ''
+  loadingCodeDataKey.value = ''
+  await loadCodeData()
 }
 
 function showGlobalCallGraph() {
@@ -1543,6 +1566,9 @@ function coverageReportHasData() {
 }
 
 function coverageNodeMetric(kind: 'CODE_CLASS' | 'CODE_METHOD') {
+  if (coverageScopeIsMethod.value && kind === 'CODE_METHOD') {
+    return { total: 1, covered: codeNodeHasDynamicCoverage(coverageScopeNode.value!) ? 1 : 0 }
+  }
   const nodes = map.nodes.value
     .filter((node) => node.kind === kind)
     .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
