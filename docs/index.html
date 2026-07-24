@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="ourAccurateTest 是面向研发、测试和质量保障团队的 AI 需求一致性验证平台。"
+    >
+    <title>ourAccurateTest | AI 精准测试平台</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="ourAccurateTest 首页">
+        <span class="brand-mark">oAT</span>
+        <span>ourAccurateTest</span>
+      </a>
+      <nav class="site-nav" aria-label="站点导航">
+        <a href="#features">能力</a>
+        <a href="#architecture">架构</a>
+        <a href="#start">启动</a>
+        <a href="#contact">交流</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero-section">
+        <div class="hero-copy">
+          <p class="eyebrow">AI Requirement Verification</p>
+          <h1>ourAccurateTest</h1>
+          <p class="hero-summary">
+            面向研发、测试和质量保障团队的 AI 需求一致性验证平台，将需求、用例、源码、版本变更、
+            运行证据和覆盖率数据组织成可追溯关系。
+          </p>
+          <div class="hero-actions" aria-label="主要操作">
+            <a class="primary-link" href="https://github.com/000xiaoxiao000/ourAccurateTest.github.io" rel="noreferrer">
+              查看源码
+            </a>
+            <a class="secondary-link" href="#start">本地启动</a>
+          </div>
+        </div>
+
+        <div class="hero-board" aria-label="平台能力总览">
+          <div class="board-toolbar">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="board-grid">
+            <div class="board-panel wide">
+              <span class="panel-label">Traceability Graph</span>
+              <strong>需求 -> 用例 -> 源码 -> 证据</strong>
+              <div class="flow-line">
+                <span>REQ</span>
+                <i></i>
+                <span>CASE</span>
+                <i></i>
+                <span>CODE</span>
+                <i></i>
+                <span>RUN</span>
+              </div>
+            </div>
+            <div class="board-panel">
+              <span class="panel-label">Quality Gate</span>
+              <strong>84%</strong>
+              <small>通过率</small>
+            </div>
+            <div class="board-panel">
+              <span class="panel-label">AI Findings</span>
+              <strong>12</strong>
+              <small>待复核风险</small>
+            </div>
+            <div class="board-panel wide">
+              <span class="panel-label">Impact Analysis</span>
+              <div class="change-list">
+                <span>commit diff</span>
+                <span>coverage drift</span>
+                <span>stale links</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="content-section">
+        <div class="section-head">
+          <p class="eyebrow">Core Capabilities</p>
+          <h2>核心能力</h2>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>验证工作区</h3>
+            <p>导入需求、用例、源码、执行报告、覆盖率和 Git 源码快照，沉淀可复核的验证基线。</p>
+          </article>
+          <article class="feature-card">
+            <h3>一致性分析</h3>
+            <p>结合 LLM 与结构化证据生成追溯边、风险发现和分析摘要，辅助识别实现偏差。</p>
+          </article>
+          <article class="feature-card">
+            <h3>追溯矩阵与图谱</h3>
+            <p>查看需求、用例、源码、运行证据、覆盖率和 AI 发现之间的关联关系。</p>
+          </article>
+          <article class="feature-card">
+            <h3>质量门禁</h3>
+            <p>配置门禁策略、评估基线结果、记录豁免并识别 stale 状态。</p>
+          </article>
+          <article class="feature-card">
+            <h3>Git 影响分析</h3>
+            <p>基于 Commit、Diff 和源码快照分析变更范围，并联动图谱过期标记。</p>
+          </article>
+          <article class="feature-card">
+            <h3>桌面流量采集</h3>
+            <p>采集、过滤、查看、重放和导出 HTTP、HTTPS、WebSocket、MQTT 等流量。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="architecture" class="content-section split-section">
+        <div class="section-head">
+          <p class="eyebrow">Architecture</p>
+          <h2>系统组成</h2>
+          <p>
+            项目由平台 Web 前端、Spring Boot 后端服务、AI 接入模块和 Electron 桌面流量采集器组成。
+          </p>
+        </div>
+        <div class="module-list">
+          <article>
+            <h3>oAT-web-frontend</h3>
+            <p>Vue 3、TypeScript、Vite、Vue Router、Pinia，承载项目、版本、图谱和验证工作台。</p>
+          </article>
+          <article>
+            <h3>oAT-service</h3>
+            <p>Java 17、Spring Boot 3、PostgreSQL、Flyway，负责项目数据、源码分析和质量门禁。</p>
+          </article>
+          <article>
+            <h3>oAT-ai</h3>
+            <p>基于 LangChain4j 接入 OpenAI 兼容接口、DeepSeek、Ollama 等模型服务。</p>
+          </article>
+          <article>
+            <h3>oAT-traffic-capture</h3>
+            <p>Electron 桌面应用，提供本地代理、SQLite 会话记录、过滤规则和插件处理能力。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="start" class="content-section">
+        <div class="section-head">
+          <p class="eyebrow">Quick Start</p>
+          <h2>本地启动</h2>
+        </div>
+        <div class="command-grid">
+          <article class="command-card">
+            <h3>后端服务</h3>
+            <pre><code>cd oAT-service
+./oAT-service-web/mvnw -f pom.xml clean package -DskipTests
+cd oAT-service-web
+./start.sh</code></pre>
+          </article>
+          <article class="command-card">
+            <h3>平台 Web 前端</h3>
+            <pre><code>cd oAT-web-frontend
+npm install
+npm run dev</code></pre>
+          </article>
+          <article class="command-card">
+            <h3>桌面流量采集器</h3>
+            <pre><code>cd oAT-traffic-capture
+npm install
+npm run dev</code></pre>
+          </article>
+        </div>
+      </section>
+
+      <section id="contact" class="content-section">
+        <div class="section-head">
+          <p class="eyebrow">Contact</p>
+          <h2>交流与反馈</h2>
+        </div>
+        <div class="qr-grid">
+          <article class="qr-card">
+            <img src="./assets/wechat-friend.png" alt="添加作者微信二维码" loading="lazy">
+            <h3>添加作者微信</h3>
+          </article>
+          <article class="qr-card">
+            <img src="./assets/wechat-contact.jpg" alt="微信交流二维码" loading="lazy">
+            <h3>微信交流入口</h3>
+          </article>
+          <article class="qr-card">
+            <img src="./assets/ai-testing-group.png" alt="AI + 精准测试实战交流群二维码" loading="lazy">
+            <h3>AI + 精准测试实战交流群</h3>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>ourAccurateTest</span>
+      <span>仅供个人学习、技术研究与交流使用。</span>
+    </footer>
+  </body>
+</html>

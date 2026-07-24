@@ -169,6 +169,22 @@ npm run dev
 - [平台 Web 前端](oAT-web-frontend/README.md)
 - [桌面流量采集器](oAT-traffic-capture/README.md)
 
+## GitHub Pages
+
+项目站点位于 `docs/`，通过 `.github/workflows/pages.yml` 在推送到 `master` 或 `main` 分支时自动部署。
+
+仓库地址：
+
+```text
+https://github.com/000xiaoxiao000/ourAccurateTest.github.io.git
+```
+
+在 GitHub 仓库的 `Settings -> Pages` 中，将发布来源设置为 `GitHub Actions`。部署完成后，项目站点通常访问：
+
+```text
+https://000xiaoxiao000.github.io/ourAccurateTest.github.io/
+```
+
 ## 交流与反馈
 
 项目交流资源位于 `docs/assets/`：
