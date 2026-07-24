@@ -57,7 +57,9 @@ class Builder:
         end = self.node("END", "continue", "", self.method.get("line"), 0, True)
         for source in tail["open"]:
             self.edge(source, end, "NEXT", "continue", True)
-        exits = tail["terminal"] or [end]
+        for source in tail["terminal"]:
+            self.edge(source, end, "NEXT", "end", True)
+        exits = [end]
         return {
             "parseStatus": "PARTIAL" if self.partial else "PRECISE",
             "message": "执行路径已完整生成" if not self.partial else "部分语句暂未识别",

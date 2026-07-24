@@ -111,10 +111,10 @@ func (b *builder) build(fn *ast.FuncDecl) method {
 	for _, source := range bodyTail.open {
 		b.addEdge(source, end, "NEXT", "continue", true)
 	}
-	exits := bodyTail.terminal
-	if len(exits) == 0 {
-		exits = []string{end}
+	for _, source := range bodyTail.terminal {
+		b.addEdge(source, end, "NEXT", "end", true)
 	}
+	exits := []string{end}
 	status := "PRECISE"
 	msg := "执行路径已完整生成"
 	if b.partial {

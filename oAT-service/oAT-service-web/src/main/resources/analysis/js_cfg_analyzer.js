@@ -50,7 +50,8 @@ class Builder {
     const tail = this.block([start], body?.body || [], 0)
     const end = this.addNode('END', 'continue', '', body, 0, true)
     for (const source of tail.open) this.addEdge(source, end, 'NEXT', 'continue', true)
-    const exits = tail.terminal.length ? tail.terminal : [end]
+    for (const source of tail.terminal) this.addEdge(source, end, 'NEXT', 'end', true)
+    const exits = [end]
     return {
       parseStatus: this.partial ? 'PARTIAL' : 'PRECISE',
       message: this.partial ? '部分语句暂未识别' : '执行路径已完整生成',

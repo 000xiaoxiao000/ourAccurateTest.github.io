@@ -35,7 +35,7 @@ import static org.mockito.Mockito.when;
 class TraceabilityMapServiceSourceParsingTest {
 
     @Test
-    void buildsPreciseJavaCfgWithoutConnectingReturnToContinuation() throws Exception {
+    void buildsPreciseJavaCfgConnectingReturnToEnd() throws Exception {
         TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
         BlockStmt body = StaticJavaParser.parseBlock("""
                 {
@@ -76,7 +76,10 @@ class TraceabilityMapServiceSourceParsingTest {
                 .orElseThrow()
                 .id();
         assertThat(graph.edges())
-                .noneMatch(edge -> edge.source().equals(returnNodeId) && edge.target().equals(endNodeId));
+                .anyMatch(edge -> edge.source().equals(returnNodeId)
+                        && edge.target().equals(endNodeId)
+                        && "结束".equals(edge.label()));
+        assertThat(graph.exitNodeIds()).containsExactly(endNodeId);
     }
 
     @Test

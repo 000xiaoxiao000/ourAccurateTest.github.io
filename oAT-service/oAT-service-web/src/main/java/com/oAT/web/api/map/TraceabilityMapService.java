@@ -1027,6 +1027,7 @@ public class TraceabilityMapService {
             case "finally" -> "finally";
             case "break" -> "跳出";
             case "loop" -> "循环";
+            case "end" -> "结束";
             default -> "continue".equals(label) ? "下一步" : label;
         };
     }
@@ -1098,7 +1099,10 @@ public class TraceabilityMapService {
             for (String tail : bodyTail.open()) {
                 edge(tail, end.id(), ControlFlowEdgeType.NEXT, "下一步", true);
             }
-            List<String> exits = bodyTail.terminal().isEmpty() ? List.of(end.id()) : bodyTail.terminal();
+            for (String terminal : bodyTail.terminal()) {
+                edge(terminal, end.id(), ControlFlowEdgeType.NEXT, "结束", true);
+            }
+            List<String> exits = List.of(end.id());
             return new ControlFlowGraph(methodId, methodLabel, CodeSymbolNormalizer.DEFAULT_LANGUAGE,
                     partial ? ControlFlowParseStatus.PARTIAL : ControlFlowParseStatus.PRECISE,
                     partial ? "部分语句暂未识别，已在图中标出" : "执行路径已完整生成",
@@ -2484,10 +2488,10 @@ public class TraceabilityMapService {
                 if (totalLines.isEmpty() && coveredLines.isEmpty() && partialBranchLines.isEmpty() && branchCoverageByLine.isEmpty()) {
                     continue;
                 }
-                List<ControlFlowNode> cfgNodes = graph.nodes().stream()
+                List<ControlFlowNode> cfgNodes = new ArrayList<>(graph.nodes().stream()
                         .map(node -> new ControlFlowNode(node.id(), node.type(), node.label(), node.expression(), node.line(),
                                 node.order(), node.depth(), node.precise(), coverageState(node.line(), totalLines, coveredLines, partialBranchLines)))
-                        .toList();
+                        .toList());
                 Map<String, Integer> branchNodeLines = graph.nodes().stream()
                         .filter(node -> isBranchCoverageNode(node.type()))
                         .filter(node -> node.line() != null && node.line() > 0)
@@ -2501,9 +2505,42 @@ public class TraceabilityMapService {
                             return new ControlFlowEdge(edge.id(), edge.source(), edge.target(), edge.type(), edge.label(), edge.precise(), state);
                         })
                         .toList();
+                applyEndNodeCoverage(cfgNodes, graph.edges());
                 controlFlowGraphs.set(index, new ControlFlowGraph(graph.methodId(), graph.methodLabel(), graph.language(),
                         graph.parseStatus(), graph.message(), cfgNodes, cfgEdges, graph.entryNodeId(), graph.exitNodeIds()));
             }
+        }
+
+        private void applyEndNodeCoverage(List<ControlFlowNode> nodes, List<ControlFlowEdge> edges) {
+            Map<String, String> coverageByNode = nodes.stream()
+                    .collect(Collectors.toMap(ControlFlowNode::id, ControlFlowNode::coverageState, (left, right) -> left, LinkedHashMap::new));
+            for (int index = 0; index < nodes.size(); index++) {
+                ControlFlowNode node = nodes.get(index);
+                if (node.type() != ControlFlowNodeType.END) {
+                    continue;
+                }
+                List<String> incomingStates = edges.stream()
+                        .filter(edge -> node.id().equals(edge.target()))
+                        .map(edge -> coverageByNode.getOrDefault(edge.source(), "UNKNOWN"))
+                        .toList();
+                String state = aggregateCoverageStates(incomingStates);
+                nodes.set(index, new ControlFlowNode(node.id(), node.type(), node.label(), node.expression(), node.line(),
+                        node.order(), node.depth(), node.precise(), state));
+            }
+        }
+
+        private String aggregateCoverageStates(List<String> states) {
+            List<String> known = states.stream()
+                    .filter(state -> !"UNKNOWN".equals(state))
+                    .toList();
+            if (known.isEmpty()) return "UNKNOWN";
+            if (known.stream().anyMatch("PARTIAL"::equals)) return "PARTIAL";
+            boolean covered = known.stream().anyMatch("COVERED"::equals);
+            boolean uncovered = known.stream().anyMatch("UNCOVERED"::equals);
+            if (covered && uncovered) return "PARTIAL";
+            if (covered) return "COVERED";
+            if (uncovered) return "UNCOVERED";
+            return "UNKNOWN";
         }
 
         private String coverageState(Integer line, Set<Integer> totalLines, Set<Integer> coveredLines, Set<Integer> partialBranchLines) {
