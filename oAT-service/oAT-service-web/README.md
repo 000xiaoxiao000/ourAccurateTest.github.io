@@ -62,7 +62,7 @@ oAT-service-web/
 
 | 技术 | 用途 |
 | --- | --- |
-| Java 17 | 运行时和编译目标 |
+| Java 21 | 运行时和编译目标 |
 | Spring Boot 3.4.4 | Web 服务、配置、嵌入式 Tomcat |
 | Spring JDBC | 数据访问 |
 | PostgreSQL | 主数据库 |
@@ -195,7 +195,7 @@ cd oAT-service/oAT-service-web
 `start.sh` 会执行：
 
 ```bash
-java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
+java --enable-native-access=ALL-UNNAMED -Dio.netty.noUnsafe=true -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
 后台启动示例：

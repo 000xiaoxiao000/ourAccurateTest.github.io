@@ -13,5 +13,6 @@ fi
 
 exec java \
   --enable-native-access=ALL-UNNAMED \
+  -Dio.netty.noUnsafe=true \
   ${JAVA_OPTS:-} \
   -jar "$WAR_PATH" "$@"

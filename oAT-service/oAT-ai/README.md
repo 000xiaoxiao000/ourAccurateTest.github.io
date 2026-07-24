@@ -20,7 +20,7 @@ oAT-ai/src/main/java/com/oAT/ai/
 
 | 技术 | 用途 |
 | --- | --- |
-| Java 17 | 编译和运行基础 |
+| Java 21 | 编译和运行基础 |
 | Spring Boot Autoconfigure | 配置属性绑定和自动装配 |
 | LangChain4j 1.12.2 | LLM 客户端抽象 |
 | OpenAI 兼容接口 | OpenAI、DeepSeek、自定义模型服务 |

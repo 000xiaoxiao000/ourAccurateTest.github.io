@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
+@SuppressWarnings("SqlResolve")
 public class GitImpactLlmReviewRepository {
     private static final TypeReference<List<LlmJudgement>> JUDGEMENTS = new TypeReference<>() { };
     private final JdbcTemplate jdbc;

@@ -53,7 +53,7 @@ cd oAT-service/oAT-service-web
 `start.sh` 会运行：
 
 ```bash
-java --enable-native-access=ALL-UNNAMED -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
+java --enable-native-access=ALL-UNNAMED -Dio.netty.noUnsafe=true -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
 ```
 
 ## 相关文档

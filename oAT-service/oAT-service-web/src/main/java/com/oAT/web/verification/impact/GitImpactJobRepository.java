@@ -8,6 +8,7 @@ import java.time.LocalDateTime;
 import java.util.Optional;
 
 @Repository
+@SuppressWarnings("SqlResolve")
 public class GitImpactJobRepository {
     private final JdbcTemplate jdbc;
 

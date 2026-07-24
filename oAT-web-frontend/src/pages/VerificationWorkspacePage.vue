@@ -94,11 +94,77 @@
                 <div class="inline-grid">
                   <label>
                     <span>分支</span>
-                    <input v-model.trim="gitForm.branch" type="text" placeholder="留空取默认分支最新" />
+                    <div class="input-action">
+                      <input
+                        v-model.trim="gitForm.branch"
+                        type="text"
+                        list="gitSourceBranchOptions"
+                        placeholder="留空取默认分支最新"
+                        :disabled="gitImporting"
+                        @focus="loadGitBranches(false)"
+                        @change="handleGitBranchChange"
+                      />
+                      <datalist id="gitSourceBranchOptions">
+                        <option v-for="branch in gitBranchOptions" :key="branch" :value="branch" />
+                      </datalist>
+                      <button type="button" class="secondary-button small" :disabled="gitImporting || gitBranchesLoading || !gitForm.appId" @click="loadGitBranches(true)">
+                        {{ gitBranchesLoading ? '读取中' : '选择' }}
+                      </button>
+                    </div>
+                    <div v-if="gitBranchOptions.length" class="branch-suggestions" aria-label="分支建议">
+                      <button
+                        v-for="branch in gitBranchOptions.slice(0, 6)"
+                        :key="branch"
+                        type="button"
+                        class="branch-chip"
+                        :class="{ active: branch === gitForm.branch }"
+                        :disabled="gitImporting"
+                        @click="selectGitBranch(branch)"
+                      >
+                        {{ branch }}
+                      </button>
+                    </div>
                   </label>
                   <label>
                     <span>Commit</span>
-                    <input v-model.trim="gitForm.commit" type="text" placeholder="留空取分支最新" />
+                    <div class="input-action">
+                      <input
+                        v-model.trim="gitForm.commit"
+                        type="text"
+                        list="gitSourceCommitOptions"
+                        placeholder="留空取分支最新"
+                        :disabled="gitImporting"
+                        @focus="loadGitCommits(false)"
+                      />
+                      <datalist id="gitSourceCommitOptions">
+                        <option
+                          v-for="commit in gitCommitOptions"
+                          :key="commit.commitId"
+                          :value="commit.commitId"
+                          :label="formatCommitOption(commit)"
+                        />
+                      </datalist>
+                      <button type="button" class="secondary-button small" :disabled="gitImporting || gitCommitsLoading || !gitForm.appId || !gitForm.branch" @click="loadGitCommits(true)">
+                        {{ gitCommitsLoading ? '读取中' : '选择' }}
+                      </button>
+                      <button type="button" class="secondary-button small" :disabled="gitImporting || gitLatestCommitLoading || !gitForm.appId || !gitForm.branch" @click="fillGitLatestCommit">
+                        {{ gitLatestCommitLoading ? '读取中' : '最新' }}
+                      </button>
+                    </div>
+                    <div v-if="gitCommitOptions.length" class="commit-suggestions" aria-label="Commit 建议">
+                      <button
+                        v-for="commit in gitCommitOptions.slice(0, 5)"
+                        :key="commit.commitId"
+                        type="button"
+                        class="commit-chip"
+                        :class="{ active: commit.commitId === gitForm.commit }"
+                        :disabled="gitImporting"
+                        @click="gitForm.commit = commit.commitId"
+                      >
+                        <strong>{{ commit.shortCommitId || commit.commitId.slice(0, 10) }}</strong>
+                        <span>{{ commit.message || '无提交说明' }}</span>
+                      </button>
+                    </div>
                   </label>
                   <label>
                     <span>AI 摘要文件数</span>
@@ -652,6 +718,9 @@ import {
   type Verdict,
   type WriteBackAction,
 } from '@/api/verification'
+import { fetchRepositoryBranches } from '@/api/bootstrap'
+import { fetchGitLatestCommit, fetchGitRecentCommits } from '@/api/version'
+import type { GitCommitOption } from '@/api/types'
 import { useDialog } from '@/composables/useDialog'
 import { useToast } from '@/composables/useToast'
 import { useProjectStore } from '@/stores/project'
@@ -681,6 +750,7 @@ const projectStore = useProjectStore()
 const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
 const selectedBaselineApp = computed(() => apps.value.find(app => app.id === baselineForm.sourceAppId))
+const selectedGitApp = computed(() => apps.value.find(app => app.id === gitForm.appId))
 
 const emptyOverview: VerificationOverview = { requirements: [], testcases: [], sources: [], executions: [], coverages: [], defects: [], baselines: [] }
 const overview = ref<VerificationOverview>(emptyOverview)
@@ -718,6 +788,9 @@ const analyzing = ref(false)
 const creatingBaseline = ref(false)
 const importing = ref<AssetType | ''>('')
 const gitImporting = ref(false)
+const gitBranchesLoading = ref(false)
+const gitCommitsLoading = ref(false)
+const gitLatestCommitLoading = ref(false)
 const assetUpdating = ref(false)
 const expandedImportTypes = ref<AssetType[]>(['REQUIREMENT', 'TESTCASE'])
 const editingAsset = ref<VerificationAsset | null>(null)
@@ -762,6 +835,10 @@ const gitForm = reactive({
   commit: '',
   maxFiles: 1000,
 })
+const gitBranches = ref<string[]>([])
+const gitCommitOptions = ref<GitCommitOption[]>([])
+let gitBranchRequestSeq = 0
+let gitCommitRequestSeq = 0
 const helpTooltipRef = ref<HTMLElement | null>(null)
 const helpTooltip = reactive({
   visible: false,
@@ -789,6 +866,18 @@ watch(() => baselineForm.sourceAssetId, () => {
   applySelectedSourceAssetGitInfo()
 })
 
+watch(() => gitForm.appId, async () => {
+  gitBranches.value = []
+  gitCommitOptions.value = []
+  gitForm.branch = selectedGitApp.value?.currentBranch || ''
+  gitForm.commit = selectedGitApp.value?.currentCommitId || ''
+  if (gitForm.appId) await loadGitBranches(false)
+})
+
+watch(() => gitForm.branch, () => {
+  gitCommitOptions.value = []
+})
+
 const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeholder: string }> = [
   { type: 'REQUIREMENT', label: '需求', hint: 'Word / Markdown / Excel / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },
   { type: 'TESTCASE', label: '测试用例', hint: 'XMind脑图 / Excel / CSV / JSON / 文本', placeholder: '粘贴用例ID、步骤、预期结果...' },
@@ -811,6 +900,11 @@ const matrixVerdictOptions: Verdict[] = ['NOT_SATISFIED', 'AMBIGUOUS', 'NOT_VERI
 const evidenceLevelOptions: EvidenceLevel[] = ['E0', 'E1', 'E2', 'E3', 'E4']
 const traceTargetTypeOptions = ['TESTCASE', 'SOURCE_SYMBOL', 'EXECUTION', 'COVERAGE', 'DEFECT'] as const
 const traceReviewStatusOptions: ReviewStatus[] = ['PENDING', 'CONFIRMED', 'REJECTED', 'STALE', 'EXEMPTED']
+const gitBranchOptions = computed(() => uniqueStrings([
+  selectedGitApp.value?.currentBranch,
+  gitForm.branch,
+  ...gitBranches.value,
+]))
 
 const helpText = {
   ac: 'AC 是 Acceptance Criteria，指需求中的可验收标准。平台会按这些标准检查用例和代码是否覆盖。',
@@ -1600,6 +1694,76 @@ async function importGitSource() {
   } finally {
     gitImporting.value = false
   }
+}
+
+async function loadGitBranches(showToast = true) {
+  if (!gitForm.appId || gitBranchesLoading.value) return
+  const requestSeq = ++gitBranchRequestSeq
+  gitBranchesLoading.value = true
+  try {
+    const branches = await fetchRepositoryBranches(projectId.value, gitForm.appId)
+    if (requestSeq !== gitBranchRequestSeq) return
+    gitBranches.value = branches.map(normalizeBranchName).filter(Boolean)
+    if (!gitForm.branch) {
+      gitForm.branch = selectedGitApp.value?.currentBranch || gitBranches.value[0] || ''
+    }
+  } catch (err) {
+    if (showToast) toast.error(messageOf(err) || '读取分支失败')
+  } finally {
+    if (requestSeq === gitBranchRequestSeq) gitBranchesLoading.value = false
+  }
+}
+
+async function loadGitCommits(showToast = true) {
+  if (!gitForm.appId || !gitForm.branch || gitCommitsLoading.value) return
+  const requestSeq = ++gitCommitRequestSeq
+  gitCommitsLoading.value = true
+  try {
+    const commits = await fetchGitRecentCommits(projectId.value, gitForm.appId, gitForm.branch, 20)
+    if (requestSeq !== gitCommitRequestSeq) return
+    gitCommitOptions.value = commits
+  } catch (err) {
+    if (showToast) toast.error(messageOf(err) || '读取 Commit 失败')
+  } finally {
+    if (requestSeq === gitCommitRequestSeq) gitCommitsLoading.value = false
+  }
+}
+
+async function fillGitLatestCommit() {
+  if (!gitForm.appId || !gitForm.branch || gitLatestCommitLoading.value) return
+  gitLatestCommitLoading.value = true
+  try {
+    gitForm.commit = await fetchGitLatestCommit(projectId.value, gitForm.appId, gitForm.branch)
+  } catch (err) {
+    toast.error(messageOf(err) || '获取最新 Commit 失败')
+  } finally {
+    gitLatestCommitLoading.value = false
+  }
+}
+
+function handleGitBranchChange() {
+  gitForm.commit = ''
+  gitCommitOptions.value = []
+}
+
+function selectGitBranch(branch: string) {
+  if (gitForm.branch === branch) return
+  gitForm.branch = branch
+  handleGitBranchChange()
+  void loadGitCommits(false)
+}
+
+function normalizeBranchName(branch: string) {
+  return branch.replace(/^refs\/heads\//, '').replace(/^origin\//, '').trim()
+}
+
+function uniqueStrings(values: Array<string | undefined>) {
+  return Array.from(new Set(values.map(value => (value || '').trim()).filter(Boolean)))
+}
+
+function formatCommitOption(commit: GitCommitOption) {
+  const shortCommit = commit.shortCommitId || commit.commitId.slice(0, 10)
+  return [shortCommit, commit.message, commit.author].filter(Boolean).join(' · ')
 }
 
 async function openBaseline(id: string) {
@@ -2626,6 +2790,57 @@ label span {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.input-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.input-action .small {
+  min-height: 34px;
+  padding: 6px 9px;
+  white-space: nowrap;
+}
+
+.branch-suggestions,
+.commit-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.branch-chip,
+.commit-chip {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-color: rgba(var(--oat-primary-rgb), .22);
+  background: rgba(255, 255, 255, .88);
+  color: var(--oat-text-secondary);
+  font-size: 12px;
+}
+
+.branch-chip.active,
+.commit-chip.active {
+  border-color: var(--oat-primary);
+  color: var(--oat-primary-dark);
+}
+
+.commit-chip {
+  max-width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.commit-chip span {
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--oat-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 button,
