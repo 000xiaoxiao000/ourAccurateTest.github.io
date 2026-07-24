@@ -416,10 +416,6 @@
             >
               <title v-if="controlFlowEdgeCoverageText(edge.coverageState)">{{ controlFlowEdgeCoverageText(edge.coverageState) }}</title>
               <path :d="edge.path" :marker-end="`url(#${controlFlowMarkerId(edge.coverageState)})`" />
-              <template v-if="edge.label">
-                <rect class="mini-edge-label-bg" :x="(edge.labelX || 0) - 18" :y="(edge.labelY || 0) - 14" width="36" height="20" rx="3" />
-                <text class="mini-edge-label" :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
-              </template>
             </g>
             <g
               v-for="node in controlFlowGraph.nodes"
@@ -435,8 +431,16 @@
                 :points="`${node.x + node.width / 2},${node.y} ${node.x + node.width},${node.y + node.height / 2} ${node.x + node.width / 2},${node.y + node.height} ${node.x},${node.y + node.height / 2}`"
               />
               <rect v-else :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
-              <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
-              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
+              <text :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 34 : 27)">{{ node.label }}</text>
+              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 57 : 50)">{{ node.subtitle }}</text>
+            </g>
+            <g
+              v-for="edge in controlFlowGraph.edges.filter((item) => item.label)"
+              :key="`label:${edge.id}`"
+              :class="['mini-graph-edge-label', { dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
+            >
+              <rect class="mini-edge-label-bg" :x="(edge.labelX || 0) - (edge.labelWidth || 42) / 2" :y="(edge.labelY || 0) - 16" :width="edge.labelWidth || 42" height="24" rx="4" />
+              <text class="mini-edge-label" :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
             </g>
           </svg>
           </template>
@@ -591,7 +595,7 @@ interface SvgEdge {
   raw: TraceabilityEdge
 }
 interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean; shape?: 'rect' | 'diamond'; precise?: boolean; coverageState?: string }
-interface MiniGraphEdge { id: string; source: string; target: string; path: string; label?: string; labelX?: number; labelY?: number; precise?: boolean; coverageState?: string }
+interface MiniGraphEdge { id: string; source: string; target: string; path: string; label?: string; labelX?: number; labelY?: number; labelWidth?: number; precise?: boolean; coverageState?: string }
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId || ''))
@@ -2044,11 +2048,11 @@ function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Ar
     if (visibleGraphs.length) {
       const graphNodes: MiniGraphNode[] = visibleGraphs.map((graph, index) => ({
         id: `cfg-method:${graph.methodId}`,
-        x: 70 + (index % 2) * 390,
-        y: 42 + Math.floor(index / 2) * 76,
-        width: 320,
-        height: 50,
-        label: shorten(graph.methodLabel || graph.methodId, 28),
+        x: 70 + (index % 2) * 440,
+        y: 52 + Math.floor(index / 2) * 110,
+        width: 360,
+        height: 78,
+        label: shorten(graph.methodLabel || graph.methodId, 30),
         subtitle: controlFlowStatusText(graph),
         fullLabel: graph.methodLabel || graph.methodId,
         fullSubtitle: `${controlFlowStatusText(graph)}${graph.message ? `\n${graph.message}` : ''}`,
@@ -2057,7 +2061,7 @@ function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Ar
         executed: codeNodeHasDynamicCoverageById(allNodes, graph.methodId),
         precise: graph.parseStatus === 'PRECISE',
       }))
-      return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 76 + 84), nodes: graphNodes, edges: [] as MiniGraphEdge[] }
+      return { width: 960, height: Math.max(520, Math.ceil(graphNodes.length / 2) * 110 + 110), nodes: graphNodes, edges: [] as MiniGraphEdge[] }
     }
     return emptyMiniGraph()
   }
@@ -2069,12 +2073,12 @@ function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Ar
     .slice(0, 80)
   const graphNodes: MiniGraphNode[] = visible.map((step, index) => ({
     id: `${step.methodId}:${step.order}`,
-    x: 100 + (index % 2) * 390,
-    y: 42 + Math.floor(index / 2) * 78,
-    width: 320,
-    height: 50,
+    x: 90 + (index % 2) * 440,
+    y: 52 + Math.floor(index / 2) * 110,
+    width: 360,
+    height: 78,
     label: `${step.kind} · ${shorten(step.methodLabel, 22)}`,
-    subtitle: shorten(step.expression || '代码块', 38),
+    subtitle: shorten(readableCodeText(step.expression || '代码块'), 34),
     fullLabel: `${step.kind} · ${step.methodLabel}`,
     fullSubtitle: step.expression || '代码块',
     tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
@@ -2087,7 +2091,7 @@ function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Ar
     const target = graphNodes[index]
     edges.push({ id: `control:${index}`, source: source.id, target: target.id, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
   }
-  return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
+  return { width: 960, height: Math.max(520, Math.ceil(graphNodes.length / 2) * 110 + 110), nodes: graphNodes, edges }
 }
 
 function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: TraceabilityNode[]) {
@@ -2114,27 +2118,27 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
     }
     return { width: 860, height: 420, nodes: [placeholder], edges: [] as MiniGraphEdge[] }
   }
-  const nodeWidth = 260
-  const nodeHeight = 58
-  const verticalGap = 92
-  const centerX = 430
+  const nodeWidth = 320
+  const nodeHeight = 74
+  const verticalGap = 190
+  const centerX = 500
   const sorted = [...graph.nodes].sort((left, right) => left.order - right.order)
   const positioned = new Map<string, MiniGraphNode>()
   sorted.forEach((node, index) => {
-    const depthOffset = Math.max(-2, Math.min(2, node.depth || 0)) * 72
-    const width = controlFlowDiamondNode(node.type) ? 230 : nodeWidth
-    const height = controlFlowDiamondNode(node.type) ? 86 : nodeHeight
+    const depthOffset = Math.max(-2, Math.min(2, node.depth || 0)) * 92
+    const width = controlFlowDiamondNode(node.type) ? 300 : nodeWidth
+    const height = controlFlowDiamondNode(node.type) ? 118 : nodeHeight
     positioned.set(node.id, {
       id: node.id,
       x: centerX - width / 2 + depthOffset,
-      y: 36 + index * verticalGap,
+      y: 56 + index * verticalGap,
       width,
       height,
       label: controlFlowNodeLabel(node.type, node.label),
-      subtitle: shorten(node.expression || '', controlFlowDiamondNode(node.type) ? 26 : 34),
+      subtitle: shorten(readableCodeText(node.expression || ''), controlFlowDiamondNode(node.type) ? 26 : 34),
       fullLabel: `${controlFlowNodeLabel(node.type, node.label)} · ${graph.methodLabel}`,
       fullSubtitle: [
-        node.expression || '',
+        readableCodeText(node.expression || ''),
         controlFlowNodeHelp(node.type, node.label),
         node.line ? `行号：${node.line}` : '',
         node.precise ? '来源：源码结构识别' : '来源：暂未识别的语句',
@@ -2159,21 +2163,28 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
       const endX = target.x + target.width / 2
       const endY = target.y
       const midY = (startY + endY) / 2
+      const gap = endY - startY
+      const labelOffsetX = edge.type === 'TRUE' ? -58 : edge.type === 'FALSE' ? 58 : 0
+      const labelY = edge.type === 'TRUE' || edge.type === 'FALSE'
+        ? startY + Math.max(30, Math.min(48, gap / 2))
+        : midY - 8
+      const label = edge.label && !['继续', '下一步'].includes(edge.label) ? edge.label : ''
       return {
         id: edge.id,
         source: edge.source,
         target: edge.target,
         path: `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`,
-        label: edge.label && !['继续', '下一步'].includes(edge.label) ? edge.label : '',
-        labelX: (startX + endX) / 2,
-        labelY: midY - 6,
+        label,
+        labelX: (startX + endX) / 2 + labelOffsetX,
+        labelY,
+        labelWidth: label ? Math.max(42, edgeLabelWidth(label) - 16) : 0,
         precise: edge.precise,
         coverageState: edge.coverageState || 'UNKNOWN',
       }
     })
   return {
-    width: 860,
-    height: Math.max(420, sorted.length * verticalGap + 80),
+    width: 1000,
+    height: Math.max(560, sorted.length * verticalGap + 120),
     nodes: [...positioned.values()],
     edges,
   }
@@ -2930,8 +2941,17 @@ function handleCallGraphKeydown(event: KeyboardEvent) {
   }
 }
 
+function readableCodeText(value: string) {
+  return String(value || '')
+    .replace(/\\(["'`])/g, '$1')
+    .replace(/\\n/g, ' ')
+    .replace(/\\t/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function shorten(value: string, max: number) {
-  const normalized = String(value || '').trim()
+  const normalized = readableCodeText(value)
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized
 }
 
@@ -3376,6 +3396,7 @@ onBeforeUnmount(() => {
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
 .mini-edge-label-bg { fill:#fff; stroke:#e2e8f0; stroke-width:1; }
 .mini-edge-label { fill:#334155; font-size:11px; font-weight:900; text-anchor:middle; pointer-events:none; }
+.mini-graph-edge-label.dimmed { opacity:.26; }
 .coverage-source-view { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }
