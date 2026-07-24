@@ -139,6 +139,12 @@ class CoverageParserRegistryTest {
                 <span id="L28" class="nc">not code</span>
                 <span id="L29" class="pc bpc">partial</span>
                 </pre></body></html>
+
+                // COVERAGE_FILE: web3Server.controller/Web302Controller.html
+                <html><body><table><tbody>
+                <tr><td><a href="Web302Controller.java.html#L27" class="el_method">login(LoginBody)</a></td>
+                <td>...</td><td>0%</td><td></td><td>n/a</td><td>1</td><td>1</td><td>2</td><td>2</td><td>1</td><td>1</td></tr>
+                </tbody></table></body></html>
                 """.getBytes(StandardCharsets.UTF_8));
 
         assertEquals(1, files.size());
@@ -148,6 +154,12 @@ class CoverageParserRegistryTest {
         assertEquals(3, index.getTotalLines());
         assertEquals(List.of(27, 28, 29), index.getTotalLineNumbers());
         assertEquals(List.of(27, 29), index.getCoveredLineNumbers());
+        assertEquals(1, index.getMethods().size());
+        assertEquals("login", index.getMethods().get(0).getMethodName());
+        assertEquals(2, index.getMethods().get(0).getTotalLines());
+        assertEquals(0, index.getMethods().get(0).getCoveredLines());
+        assertEquals(1, index.getMethods().get(0).getComplexity());
+        assertEquals(0, index.getMethods().get(0).getCoveredComplexity());
     }
 
     @Test

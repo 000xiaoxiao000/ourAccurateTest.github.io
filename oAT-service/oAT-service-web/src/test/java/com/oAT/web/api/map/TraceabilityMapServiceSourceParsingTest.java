@@ -210,7 +210,7 @@ class TraceabilityMapServiceSourceParsingTest {
         loginException.setClassName("web3Server/controller/Web302Controller");
         loginException.setMethodName("loginException");
         loginException.setMethodDesc("(Ljava/lang/String;Ljava/lang/String;I)Lweb3Server/domain/R;");
-        loginException.setStartLine(34);
+        loginException.setStartLine(37);
         loginException.setTotalLineNumbers(List.of(34, 35, 36, 37, 38, 40, 42, 43, 44, 45, 48, 51, 52, 55, 56, 59, 60));
         loginException.setCoveredLineNumbers(List.of());
         loginException.setTotalLines(17);

@@ -790,7 +790,9 @@ public class TraceabilityMapService {
     private boolean requiresMethodCoverageRefresh(List<ClassCoverageIndex> indexes) {
         for (ClassCoverageIndex index : indexes) {
             if (index == null || index.getMethods() == null) continue;
+            boolean hasMethodDetail = false;
             for (ClassCoverageIndex.MethodCoverageDetail method : index.getMethods()) {
+                if (method != null && !"file".equals(method.getMethodDesc())) hasMethodDetail = true;
                 if (method != null && !"file".equals(method.getMethodDesc())
                         && (method.getStartLine() <= 0 || !StringUtils.hasText(method.getClassName()))) {
                     return true;
@@ -807,6 +809,10 @@ public class TraceabilityMapService {
                         && method.getComplexity() <= 0) {
                     return true;
                 }
+            }
+            if (!index.getMethods().isEmpty() && !hasMethodDetail
+                    && (index.getTotalLines() > 0 || index.getTotalBranchTargets() > 0)) {
+                return true;
             }
         }
         return false;
@@ -1862,7 +1868,6 @@ public class TraceabilityMapService {
                     .min(Comparator
                             .comparingInt((TraceabilityNode node) -> methodLineDistance(node, startLine))
                             .thenComparing(TraceabilityNode::id))
-                    .filter(node -> startLine <= 0 || methodLineDistance(node, startLine) <= 2)
                     .map(TraceabilityNode::id)
                     .orElse(null);
         }

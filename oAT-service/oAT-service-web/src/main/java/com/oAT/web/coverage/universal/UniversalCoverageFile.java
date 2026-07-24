@@ -248,6 +248,8 @@ public class UniversalCoverageFile implements Serializable {
         private int coveredCount;
         private int complexity;
         private int coveredComplexity;
+        private Integer reportTotalLines;
+        private Integer reportCoveredLines;
         public FunctionCoverage() {}
         public FunctionCoverage(String name, int startLine, int endLine, int coveredCount) {
             this(name, startLine, endLine, coveredCount, 0);
@@ -285,9 +287,9 @@ public class UniversalCoverageFile implements Serializable {
                     .filter(line -> line.line >= startLine && line.line <= endLine && line.coveredCount > 0)
                     .map(LineCoverage::getLine).distinct().sorted().toList();
             detail.setTotalLineNumbers(total);
-            detail.setTotalLines(total.size());
+            detail.setTotalLines(reportTotalLines == null ? total.size() : reportTotalLines);
             detail.setCoveredLineNumbers(covered);
-            detail.setCoveredLines(covered.size());
+            detail.setCoveredLines(reportCoveredLines == null ? covered.size() : reportCoveredLines);
             detail.setComplexity(complexity);
             detail.setCoveredComplexity(coveredComplexity);
             detail.setCovered(!covered.isEmpty() || coveredCount > 0);
@@ -310,6 +312,10 @@ public class UniversalCoverageFile implements Serializable {
         public void setComplexity(int complexity) { this.complexity = complexity; }
         public int getCoveredComplexity() { return coveredComplexity; }
         public void setCoveredComplexity(int coveredComplexity) { this.coveredComplexity = coveredComplexity; }
+        public void setReportLineCoverage(int coveredLines, int totalLines) {
+            this.reportCoveredLines = coveredLines;
+            this.reportTotalLines = totalLines;
+        }
     }
 
     public static class BranchCoverage implements Serializable {

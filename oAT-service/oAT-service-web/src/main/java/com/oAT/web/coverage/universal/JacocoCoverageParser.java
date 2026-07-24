@@ -30,7 +30,10 @@ public class JacocoCoverageParser implements CoverageParser {
     private static final Pattern BRANCH_TITLE_PATTERN = Pattern.compile("\\btitle=\"(\\d+)\\s+of\\s+(\\d+)\\s+branches?\\s+missed\\.?\"", Pattern.CASE_INSENSITIVE);
     private static final Pattern ALL_BRANCHES_PATTERN = Pattern.compile("\\btitle=\"All\\s+(\\d+)\\s+branches?\\s+(missed|covered)\\.?\"", Pattern.CASE_INSENSITIVE);
     private static final Pattern TFOOT_PATTERN = Pattern.compile("<tfoot>\\s*<tr>(.*?)</tr>\\s*</tfoot>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern TBODY_PATTERN = Pattern.compile("<tbody[^>]*>(.*?)</tbody>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern ROW_PATTERN = Pattern.compile("<tr[^>]*>(.*?)</tr>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern CELL_PATTERN = Pattern.compile("<td(?:\\s[^>]*)?>(.*?)</td>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+    private static final Pattern METHOD_LINK_PATTERN = Pattern.compile("<a\\b[^>]*\\bhref=\"[^\"]*\\.java\\.html#L(\\d+)\"[^>]*\\bclass=\"[^\"]*\\bel_method\\b[^\"]*\"[^>]*>(.*?)</a>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern MISSED_OF_TOTAL_PATTERN = Pattern.compile("([\\d,]+)\\s+of\\s+([\\d,]+)", Pattern.CASE_INSENSITIVE);
 
     @Override
@@ -145,9 +148,73 @@ public class JacocoCoverageParser implements CoverageParser {
             }
             if (!file.getLines().isEmpty()) result.add(file);
         });
+        applyHtmlMethodCoverage(files, result);
         applyHtmlReportTotals(files, result);
         return result;
     }
+
+    private void applyHtmlMethodCoverage(Map<String, String> files, List<UniversalCoverageFile> result) {
+        Map<String, UniversalCoverageFile> sourceFiles = new LinkedHashMap<>();
+        for (UniversalCoverageFile file : result) sourceFiles.put(file.getFilePath(), file);
+        files.forEach((path, content) -> {
+            if (!path.toLowerCase().endsWith(".html") || path.toLowerCase().endsWith(".java.html")) return;
+            UniversalCoverageFile file = sourceFiles.get(sourcePathFromHtml(path) + ".java");
+            if (file == null) return;
+            List<HtmlMethod> methods = htmlMethods(content);
+            if (methods.isEmpty()) return;
+            int lastLine = file.getLines().stream().mapToInt(UniversalCoverageFile.LineCoverage::getLine).max().orElse(0);
+            for (int index = 0; index < methods.size(); index++) {
+                HtmlMethod method = methods.get(index);
+                int nextLine = index + 1 < methods.size() ? methods.get(index + 1).line() : lastLine + 1;
+                UniversalCoverageFile.FunctionCoverage function = new UniversalCoverageFile.FunctionCoverage(
+                        sourcePathFromHtml(path).replace('.', '/'), method.name(), null, method.line(),
+                        Math.max(method.line(), nextLine - 1), method.coveredLines() > 0 ? 1 : 0,
+                        method.totalComplexity(), method.coveredComplexity());
+                function.setReportLineCoverage(method.coveredLines(), method.totalLines());
+                file.getFunctions().add(function);
+            }
+        });
+    }
+
+    private List<HtmlMethod> htmlMethods(String html) {
+        Matcher body = TBODY_PATTERN.matcher(html);
+        if (!body.find()) return List.of();
+        List<HtmlMethod> result = new ArrayList<>();
+        Matcher row = ROW_PATTERN.matcher(body.group(1));
+        while (row.find()) {
+            List<String> cells = tableCells(row.group(1));
+            if (cells.size() < 9) continue;
+            Matcher link = METHOD_LINK_PATTERN.matcher(cells.get(0));
+            if (!link.find()) continue;
+            int line = integer(link.group(1));
+            String name = stripHtml(link.group(2));
+            int totalComplexity = number(stripHtml(cells.get(6)));
+            int coveredComplexity = Math.max(totalComplexity - number(stripHtml(cells.get(5))), 0);
+            int totalLines = number(stripHtml(cells.get(8)));
+            int coveredLines = Math.max(totalLines - number(stripHtml(cells.get(7))), 0);
+            result.add(new HtmlMethod(nameBeforeParameters(name), line, coveredLines, totalLines, totalComplexity, coveredComplexity));
+        }
+        result.sort(Comparator.comparingInt(HtmlMethod::line));
+        return result;
+    }
+
+    private List<String> tableCells(String html) {
+        List<String> result = new ArrayList<>();
+        Matcher cell = CELL_PATTERN.matcher(html);
+        while (cell.find()) result.add(cell.group(1));
+        return result;
+    }
+
+    private String nameBeforeParameters(String value) {
+        int separator = value.indexOf('(');
+        return separator < 0 ? value : value.substring(0, separator);
+    }
+
+    private String stripHtml(String value) {
+        return value.replaceAll("<[^>]+>", "").replace("&lt;", "<").replace("&gt;", ">").trim();
+    }
+
+    private record HtmlMethod(String name, int line, int coveredLines, int totalLines, int totalComplexity, int coveredComplexity) {}
 
     private void applyHtmlReportTotals(Map<String, String> files, List<UniversalCoverageFile> result) {
         if (result.isEmpty()) return;
