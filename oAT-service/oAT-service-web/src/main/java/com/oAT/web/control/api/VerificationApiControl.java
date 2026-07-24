@@ -3,6 +3,7 @@ package com.oAT.web.control.api;
 import com.alibaba.excel.EasyExcel;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.coverage.universal.JacocoExecToXmlConverter;
+import com.oAT.web.concurrency.MultiUserRequestCoordinator;
 import com.oAT.web.logging.AuditLogger;
 import com.oAT.web.logging.LogContext;
 import com.oAT.web.logging.LogFields;
@@ -27,6 +28,7 @@ import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
 import com.oAT.web.verification.graph.GraphService;
 import com.oAT.web.verification.impact.GitImpactAnalysisService;
+import com.oAT.web.verification.impact.GitImpactJobRepository;
 import com.oAT.web.verification.impact.ImpactTraceabilityMapper;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
@@ -35,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.util.Assert;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -47,6 +50,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.SessionAttribute;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.scheduling.annotation.Scheduled;
 
 import java.io.IOException;
 import java.io.File;
@@ -55,6 +59,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -63,8 +68,6 @@ import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
@@ -87,8 +90,6 @@ public class VerificationApiControl {
     private static final String SOURCE_TREE_BEGIN = "// SOURCE_TREE_BEGIN";
     private static final String SOURCE_TREE_END = "// SOURCE_TREE_END";
     private static final String SOURCE_FILE_PREFIX = "// SOURCE_FILE: ";
-    private final ConcurrentHashMap<String, GitImpactAnalysisJob> gitImpactJobs = new ConcurrentHashMap<>();
-
     private final VerificationService verificationService;
     private final ProjectService projectService;
     private final AppService appService;
@@ -96,6 +97,8 @@ public class VerificationApiControl {
     private final QualityGateService qualityGateService;
     private final ChangeImpactService changeImpactService;
     private final GitImpactAnalysisService gitImpactAnalysisService;
+    private final GitImpactJobRepository gitImpactJobRepository;
+    private final MultiUserRequestCoordinator requestCoordinator;
     private final ImpactTraceabilityMapper impactTraceabilityMapper;
     private final GraphService graphService;
     private final ConnectorRegistry connectorRegistry;
@@ -108,6 +111,8 @@ public class VerificationApiControl {
                                   QualityGateService qualityGateService,
                                   ChangeImpactService changeImpactService,
                                   GitImpactAnalysisService gitImpactAnalysisService,
+                                  GitImpactJobRepository gitImpactJobRepository,
+                                  MultiUserRequestCoordinator requestCoordinator,
                                   ImpactTraceabilityMapper impactTraceabilityMapper,
                                   GraphService graphService,
                                   ConnectorRegistry connectorRegistry,
@@ -121,6 +126,8 @@ public class VerificationApiControl {
         this.qualityGateService = qualityGateService;
         this.changeImpactService = changeImpactService;
         this.gitImpactAnalysisService = gitImpactAnalysisService;
+        this.gitImpactJobRepository = gitImpactJobRepository;
+        this.requestCoordinator = requestCoordinator;
         this.impactTraceabilityMapper = impactTraceabilityMapper;
         this.graphService = graphService;
         this.connectorRegistry = connectorRegistry;
@@ -593,11 +600,37 @@ public class VerificationApiControl {
         Assert.hasText(request.appId(), "appId 不能为空");
         Assert.hasText(request.baseCommit(), "baseCommit 不能为空");
         Assert.hasText(request.headCommit(), "headCommit 不能为空");
-        AppVo app = resolveSourceApp(projectId, request.appId());
+        String rateLimitKey = "oat:rate:git-impact:" + projectId + ':' + user.getId();
+        Assert.isTrue(requestCoordinator.allow(rateLimitKey, 10, Duration.ofMinutes(1)), "Git 影响分析提交过于频繁，请稍后再试");
+        var activeJob = gitImpactJobRepository.findActive(projectId, baselineId, request.appId(), request.baseCommit(), request.headCommit());
+        if (activeJob.isPresent()) {
+            return ok("Git 影响分析任务已在处理中", toGitImpactJob(activeJob.get()));
+        }
+        String requestHash = com.oAT.web.verification.model.GraphModels.fingerprint(
+                projectId + '|' + baselineId + '|' + request.appId() + '|' + request.baseCommit() + '|' + request.headCommit());
+        String idempotencyKey = "oat:idem:git-impact:" + user.getId() + ':' + requestHash;
+        if (!requestCoordinator.acquireIdempotency(idempotencyKey, Duration.ofSeconds(30))) {
+            return gitImpactJobRepository.findActive(projectId, baselineId, request.appId(), request.baseCommit(), request.headCommit())
+                    .map(this::toGitImpactJob)
+                    .map(job -> ok("Git 影响分析任务已在处理中", job))
+                    .orElseThrow(() -> new IllegalStateException("重复请求正在处理中，请稍后重试"));
+        }
         String jobId = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
-        updateGitImpactJob(new GitImpactAnalysisJob(jobId, projectId, baselineId, GitImpactJobStatus.PENDING,
-                "PENDING", 1, "分析任务已创建", null, null, now, now));
+        try {
+            gitImpactJobRepository.create(new GitImpactJobRepository.GitImpactJob(jobId, projectId, baselineId,
+                    request.appId(), request.baseCommit(), request.headCommit(), user.getId(), "PENDING", "PENDING", 1,
+                    "分析任务已创建", null, null, now, now, null));
+        } catch (DataIntegrityViolationException exception) {
+            requestCoordinator.releaseIdempotency(idempotencyKey);
+            return gitImpactJobRepository.findActive(projectId, baselineId, request.appId(), request.baseCommit(), request.headCommit())
+                    .map(this::toGitImpactJob)
+                    .map(job -> ok("Git 影响分析任务已在处理中", job))
+                    .orElseThrow(() -> exception);
+        } catch (RuntimeException exception) {
+            requestCoordinator.releaseIdempotency(idempotencyKey);
+            throw exception;
+        }
         LogContext.putProjectId(projectId);
         auditLogger.business("verification.git_change_impact.job.start", LogFields.map(
                 "project_id", projectId,
@@ -607,8 +640,8 @@ public class VerificationApiControl {
                 "base_commit", abbreviateCommit(request.baseCommit()),
                 "head_commit", abbreviateCommit(request.headCommit()),
                 "user_id", user.getId()));
-        CompletableFuture.runAsync(() -> runGitImpactJob(jobId, projectId, baselineId, app, request), verificationAiExecutor);
-        return ok("Git 变更影响分析任务已创建", gitImpactJobs.get(jobId));
+        return ok("Git 变更影响分析任务已创建", gitImpactJobRepository.find(projectId, jobId)
+                .map(this::toGitImpactJob).orElseThrow());
     }
 
     @GetMapping("/git-change-impact-jobs/{jobId}")
@@ -616,10 +649,9 @@ public class VerificationApiControl {
                                                                 @PathVariable String jobId,
                                                                 @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
-        GitImpactAnalysisJob job = gitImpactJobs.get(jobId);
-        Assert.notNull(job, "Git 影响分析任务不存在或已过期");
-        Assert.isTrue(projectId.equals(job.projectId()), "无权访问该分析任务");
-        return ok("获取 Git 影响分析进度成功", job);
+        GitImpactJobRepository.GitImpactJob job = gitImpactJobRepository.find(projectId, jobId)
+                .orElseThrow(() -> new IllegalArgumentException("Git 影响分析任务不存在或已过期"));
+        return ok("获取 Git 影响分析进度成功", toGitImpactJob(job));
     }
 
     @GetMapping("/git-change-impact/{reportId}/llm-review")
@@ -630,22 +662,40 @@ public class VerificationApiControl {
         return ok("获取 Git 影响 LLM 审阅进度成功", gitImpactAnalysisService.llmReview(reportId));
     }
 
-    private void runGitImpactJob(String jobId, String projectId, String baselineId, AppVo app, GitChangeImpactRequest request) {
+    @Scheduled(fixedDelayString = "${oat.git-impact.worker-delay-ms:1000}")
+    public void dispatchGitImpactJob() {
+        gitImpactJobRepository.requeueStaleRunningJobs(LocalDateTime.now().minusMinutes(30));
+        gitImpactJobRepository.claimNext().ifPresent(job -> {
+            try {
+                verificationAiExecutor.execute(() -> runGitImpactJob(job));
+            } catch (RuntimeException exception) {
+                gitImpactJobRepository.updateProgress(job.id(), "PENDING", "QUEUED", 1,
+                        "执行队列繁忙，等待重试", null, null, null);
+            }
+        });
+    }
+
+    private void runGitImpactJob(GitImpactJobRepository.GitImpactJob job) {
+        String jobId = job.id();
+        String projectId = job.projectId();
+        String baselineId = job.baselineId();
+        GitChangeImpactRequest request = new GitChangeImpactRequest(job.appId(), job.baseCommit(), job.headCommit());
         LogContext.putProjectId(projectId);
         long started = System.nanoTime();
         try {
+            AppVo app = resolveSourceApp(projectId, request.appId());
             logger.info("event=verification.git_change_impact.job.running {}", LogFields.of(LogFields.map(
                     "project_id", projectId,
                     "baseline_id", baselineId,
                     "app_id", request.appId(),
                     "job_id", jobId)));
-            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "STARTING", 3, "正在启动 Git 影响分析", null, null));
             var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit(), progress ->
-                    updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, progress.stage(), progress.percent(), progress.message(), null, null)));
-            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "MAPPING_TRACEABILITY", 96, "正在映射验收标准和回归用例", null, null));
+                    updateGitImpactJob(jobId, "RUNNING", progress.stage(), progress.percent(), progress.message(), null, null, null));
+            updateGitImpactJob(jobId, "RUNNING", "MAPPING_TRACEABILITY", 96, "正在映射验收标准和回归用例", null, null, null);
             var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
             var invalidation = graphService.applyGitChangeImpact(projectId, baselineId, report, traceability);
-            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.COMPLETED, "COMPLETED", 100, "Git 影响分析完成，当前基线图谱已标记过期", new GitChangeImpactResponse(report, traceability, invalidation), null));
+            updateGitImpactJob(jobId, "COMPLETED", "COMPLETED", 100, "Git 影响分析完成，当前基线图谱已标记过期",
+                    new GitChangeImpactResponse(report, traceability, invalidation), null, LocalDateTime.now());
             auditLogger.performance("verification.git_change_impact.job", (System.nanoTime() - started) / 1_000_000,
                     LogFields.map(
                             "project_id", projectId,
@@ -656,7 +706,7 @@ public class VerificationApiControl {
                             "candidate_count", report.candidates().size()),
                     true);
         } catch (RuntimeException exception) {
-            updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.FAILED, "FAILED", 100, "Git 影响分析失败", null, exception.getMessage()));
+            updateGitImpactJob(jobId, "FAILED", "FAILED", 100, "Git 影响分析失败", null, exception.getMessage(), LocalDateTime.now());
             logger.error("event=verification.git_change_impact.job.failed {}", LogFields.of(LogFields.map(
                     "project_id", projectId,
                     "baseline_id", baselineId,
@@ -666,20 +716,23 @@ public class VerificationApiControl {
         }
     }
 
-    private GitImpactAnalysisJob progressJob(String jobId, GitImpactJobStatus status, String stage, int percent, String message,
-                                             GitChangeImpactResponse result, String error) {
-        GitImpactAnalysisJob existing = gitImpactJobs.get(jobId);
-        LocalDateTime createdAt = existing == null ? LocalDateTime.now() : existing.createdAt();
-        return new GitImpactAnalysisJob(jobId,
-                existing == null ? "" : existing.projectId(),
-                existing == null ? "" : existing.baselineId(),
-                status, stage, Math.max(0, Math.min(100, percent)), message,
-                result == null && existing != null ? existing.result() : result,
-                error, createdAt, LocalDateTime.now());
+    private void updateGitImpactJob(String jobId, String status, String stage, int percent, String message,
+                                    GitChangeImpactResponse result, String error, LocalDateTime finishedAt) {
+        gitImpactJobRepository.updateProgress(jobId, status, stage, Math.max(0, Math.min(100, percent)), message,
+                result == null ? null : com.oAT.web.common.UtilJson.writeValueAsString(result), error, finishedAt);
     }
 
-    private void updateGitImpactJob(GitImpactAnalysisJob job) {
-        gitImpactJobs.put(job.jobId(), job);
+    private GitImpactAnalysisJob toGitImpactJob(GitImpactJobRepository.GitImpactJob job) {
+        try {
+            GitChangeImpactResponse result = StringUtils.hasText(job.resultJson())
+                    ? com.oAT.web.common.UtilJson.getObjectMapper().readValue(job.resultJson(), GitChangeImpactResponse.class)
+                    : null;
+            return new GitImpactAnalysisJob(job.id(), job.projectId(), job.baselineId(),
+                    GitImpactJobStatus.valueOf(job.status()), job.stage(), job.percent(), job.message(), result,
+                    job.error(), job.createdAt(), job.updatedAt());
+        } catch (IOException e) {
+            throw new IllegalStateException("Git 影响分析任务结果无法读取: " + job.id(), e);
+        }
     }
 
     // ── Connector types ───────────────────────────────────────────────────────

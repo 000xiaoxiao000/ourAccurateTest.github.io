@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.databind.util.StdDateFormat;
 import org.springframework.util.ObjectUtils;
 
@@ -34,6 +35,7 @@ public class UtilJson {
         SimpleModule dateModule = new SimpleModule();
         dateModule.addDeserializer(Date.class, new CompatibleDateDeserializer());
         result.registerModule(dateModule);
+        result.registerModule(new JavaTimeModule());
 
         return result;
     }

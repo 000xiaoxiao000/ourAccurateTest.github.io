@@ -156,7 +156,7 @@ npm run dev
 
 | 配置 | 文件 |
 | --- | --- |
-| 后端端口、数据库、Flyway、LLM、本地存储 | `oAT-service/oAT-service-web/src/main/resources/application.properties` |
+| 后端端口、数据库、Flyway、LLM、本地存储 | `oAT-service/oAT-service-web/src/main/resources/application.yml` |
 | Web 前端代理和端口 | `oAT-web-frontend/vite.config.ts` |
 | 流量采集器 Electron 打包 | `oAT-traffic-capture/package.json` |
 | 流量采集器 Vite 端口 | `oAT-traffic-capture/vite.config.ts` |

@@ -4,7 +4,10 @@
       <div class="page-shell shell-header-inner">
         <RouterLink class="brand-block" :to="projectId ? `/p/${projectId}/home` : '/projects'" aria-label="oAccurateTest" @click="closeMenus">
           <img class="brand-emblem" src="/favicon.png" alt="" aria-hidden="true" />
-          <img class="brand-logo-image" src="/images/logo.png" alt="oAccurateTest" />
+          <span class="brand-title" :title="contextualTitle">
+            <strong>{{ titlePrimary }}</strong>
+            <small v-if="titleSecondary">{{ titleSecondary }}</small>
+          </span>
         </RouterLink>
         <nav class="shell-nav" aria-label="主导航">
           <RouterLink v-if="projectId" :to="`/p/${projectId}/verification`">AI 验证</RouterLink>
@@ -98,6 +101,37 @@ const routeAppId = computed(() => typeof route.params.appId === 'string' ? route
 const context = computed(() => projectId.value ? projectStore.contextByProjectId[projectId.value] : undefined)
 const apps = computed(() => context.value?.apps || projectStore.appsByProjectId[projectId.value] || [])
 const currentProjectName = computed(() => context.value?.project.name || projects.value.find((project) => project.id === projectId.value)?.name || '项目列表')
+const routeTitleMap: Record<string, string> = {
+  projects: '项目列表',
+  'account-settings': '用户设置',
+  'project-home': '项目概览',
+  'verification-workspace': '需求验证',
+  'git-impact': 'Git 影响',
+  'data-connections': '数据连接',
+  'traceability-matrix': '追溯矩阵',
+  'finding-review': '问题评审',
+  'coverage-execution': '覆盖执行',
+  'quality-gate': '质量门禁',
+  'graph-explorer': '验证图谱',
+  'project-apps': '源码工程',
+  'app-settings': '工程设置',
+  'app-repository': '仓库配置',
+  'app-api-endpoints': 'API 端点',
+  'version-apps': '版本工程',
+  'version-list': '版本列表',
+  'version-create': '创建版本',
+  'version-compare': '版本对比',
+  'version-report-detail': '版本报告',
+  'map-home': '链路地图',
+  'map-app': '工程链路',
+  'map-code': '代码链路',
+  'project-members': '项目成员',
+  'project-labels': '标签管理',
+}
+const currentRouteTitle = computed(() => routeTitleMap[String(route.name || '')] || '工作区')
+const titlePrimary = computed(() => projectId.value ? currentProjectName.value : currentRouteTitle.value)
+const titleSecondary = computed(() => projectId.value ? currentRouteTitle.value : '')
+const contextualTitle = computed(() => titleSecondary.value ? `${titlePrimary.value} / ${titleSecondary.value}` : titlePrimary.value)
 const filteredProjects = computed(() => {
   const keyword = projectKeyword.value.toLowerCase()
   return projects.value.filter((project) => !keyword || `${project.name} ${project.describe || ''}`.toLowerCase().includes(keyword))
@@ -126,6 +160,10 @@ watch(() => route.fullPath, () => {
   closeMenus()
   requestAnimationFrame(updateBackTopVisibility)
 })
+
+watch(contextualTitle, (value) => {
+  document.title = value ? `${value} | ourAccurateTest` : 'ourAccurateTest'
+}, { immediate: true })
 
 function toggleMenu(name: typeof openMenu.value) {
   openMenu.value = openMenu.value === name ? '' : name
@@ -213,6 +251,7 @@ async function handleLogout() {
   flex: 0 0 auto;
   gap: 10px;
   min-width: 188px;
+  max-width: min(380px, 42vw);
   min-height: var(--oat-min-target);
   border-radius: 14px;
   padding: 4px 12px 4px 0;
@@ -230,12 +269,39 @@ async function handleLogout() {
   object-fit: contain;
 }
 
-.brand-logo-image {
-  display: block;
-  width: 145px;
-  max-width: 145px;
-  height: 26px;
-  object-fit: contain;
+.brand-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  color: var(--oat-text);
+  line-height: 1.1;
+}
+
+.brand-title strong,
+.brand-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-title strong {
+  max-width: 220px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.brand-title small {
+  max-width: 120px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.brand-title small::before {
+  content: "/";
+  margin-right: 8px;
+  color: #94a3b8;
 }
 
 .shell-nav {
@@ -566,6 +632,18 @@ async function handleLogout() {
 
   .shell-nav::-webkit-scrollbar {
     display: none;
+  }
+
+  .brand-block {
+    max-width: 100%;
+  }
+
+  .brand-title strong {
+    max-width: 58vw;
+  }
+
+  .brand-title small {
+    max-width: 28vw;
   }
 
   .nav-dropdown {

@@ -1,0 +1,127 @@
+server:
+  port: 8899
+  max-http-request-header-size: 102400
+  servlet:
+    encoding:
+      force: true
+      charset: UTF-8
+    session:
+      timeout: "${OAT_SESSION_TIMEOUT:8h}"
+
+spring:
+  application:
+    name: oAT-service-web
+  servlet:
+    multipart:
+      max-file-size: 2048MB
+      max-request-size: 2048MB
+  datasource:
+    url: "${OAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification}"
+    username: "${OAT_DB_USERNAME:traceiq}"
+    password: "${OAT_DB_PASSWORD:traceiq}"
+    driver-class-name: org.postgresql.Driver
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      initial-size: 2
+      min-idle: 2
+      max-active: 20
+      max-wait: 60000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
+    out-of-order: false
+    validate-on-migrate: true
+  session:
+    redis:
+      namespace: "${OAT_REDIS_SESSION_NAMESPACE:oat:prod:session}"
+  data:
+    redis:
+      host: "${OAT_REDIS_HOST:127.0.0.1}"
+      port: "${OAT_REDIS_PORT:6379}"
+      password: "${OAT_REDIS_PASSWORD:}"
+      timeout: "${OAT_REDIS_TIMEOUT:2s}"
+      sentinel:
+        master: "${OAT_REDIS_SENTINEL_MASTER:}"
+        nodes: "${OAT_REDIS_SENTINEL_NODES:}"
+
+logging:
+  level:
+    root: "${OAT_LOG_LEVEL:INFO}"
+    com:
+      oAT: "${OAT_APP_LOG_LEVEL:INFO}"
+    audit:
+      security: "${OAT_SECURITY_LOG_LEVEL:INFO}"
+      business: "${OAT_BUSINESS_LOG_LEVEL:INFO}"
+    monitor:
+      performance: "${OAT_PERFORMANCE_LOG_LEVEL:INFO}"
+    org:
+      springframework:
+        web: "${OAT_SPRING_WEB_LOG_LEVEL:WARN}"
+        jdbc:
+          core: "${OAT_SQL_LOG_LEVEL:WARN}"
+  structured:
+    format:
+      console: "${OAT_CONSOLE_LOG_FORMAT:logstash}"
+      file: "${OAT_FILE_LOG_FORMAT:logstash}"
+  file:
+    path: "${OAT_LOG_PATH:${user.home}/oAT/logs}"
+    name: "${OAT_LOG_FILE:${logging.file.path}/oAT-service-web.log}"
+  logback:
+    rollingpolicy:
+      file-name-pattern: "${OAT_LOG_FILE_PATTERN:${logging.file.path}/archive/oAT-service-web.%d{yyyy-MM-dd}.%i.log.gz}"
+      max-file-size: "${OAT_LOG_MAX_FILE_SIZE:50MB}"
+      max-history: "${OAT_LOG_MAX_HISTORY:30}"
+      total-size-cap: "${OAT_LOG_TOTAL_SIZE_CAP:2GB}"
+      clean-history-on-start: "${OAT_LOG_CLEAN_HISTORY_ON_START:false}"
+
+oat:
+  logging:
+    request:
+      enabled: "${OAT_REQUEST_LOG_ENABLED:true}"
+      success-sample-rate: "${OAT_REQUEST_SUCCESS_SAMPLE_RATE:10}"
+      slow-threshold-ms: "${OAT_REQUEST_SLOW_MS:1000}"
+      warn-threshold-ms: "${OAT_REQUEST_WARN_MS:3000}"
+      max-field-length: "${OAT_LOG_FIELD_MAX_LENGTH:256}"
+      excluded-path-prefixes:
+        - /favicon
+        - /assets/
+        - /static/
+        - /webjars/
+        - /r/
+        - /images/
+  datasource:
+    postgresql:
+      create-database-if-missing: true
+  data:
+    path: "${user.home}/oAT/codeData/"
+  storage:
+    large-payload:
+      path: "${oat.data.path}large-payload/"
+    static-source:
+      inline-threshold-bytes: 8192
+  redis:
+    # Redis is opt-in so a local single-node deployment remains self-contained.
+    # Production should set OAT_REDIS_ENABLED=true.
+    enabled: "${OAT_REDIS_ENABLED:false}"
+
+ai:
+  llm:
+    enabled: true
+    provider: deepseek
+    base-url: https://api.deepseek.com
+    api-key: "${AI_LLM_API_KEY:}"
+    model: "${AI_LLM_MODEL:deepseek-chat}"
+    max-tokens: 8192
+    temperature: 0.7
+    timeout: 300
+    log-requests: false
+    log-responses: false
+    system-prompt-prefix: 你是一个专业的软件需求一致性分析服务，专注于需求、用例、源码和运行证据的结构化分析。
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,loggers

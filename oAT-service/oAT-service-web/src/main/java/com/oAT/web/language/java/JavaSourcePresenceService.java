@@ -9,6 +9,8 @@ import com.oAT.web.persistence.entity.VersionItem;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.AppVo;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,9 +23,8 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Duration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -31,7 +32,13 @@ import java.util.zip.ZipFile;
 public class JavaSourcePresenceService {
     private static final Logger logger = LoggerFactory.getLogger(JavaSourcePresenceService.class);
 
-    private final Map<String, List<String>> zipEntryCache = new ConcurrentHashMap<>();
+    private final Cache<String, List<String>> zipEntryCache = Caffeine.newBuilder()
+            .maximumWeight(64L * 1024 * 1024)
+            .weigher((String key, List<String> entries) -> Math.max(1, entries.stream()
+                    .mapToInt(String::length).sum()))
+            .expireAfterAccess(Duration.ofHours(2))
+            .recordStats()
+            .build();
     private final VersionCenterRepository versionCenterRepository;
     private final ResourceService resourceService;
     private final GitService gitService;
@@ -45,7 +52,7 @@ public class JavaSourcePresenceService {
     }
 
     public void clearCache() {
-        zipEntryCache.clear();
+        zipEntryCache.invalidateAll();
     }
 
     public SourcePresenceFilterResult filterExistingClasses(AppVo app,
@@ -130,8 +137,9 @@ public class JavaSourcePresenceService {
             return null;
         }
 
-        String cacheKey = codeFile.getAbsolutePath();
-        return zipEntryCache.computeIfAbsent(cacheKey, this::readZipEntries);
+        String sourcePath = codeFile.getAbsolutePath();
+        String cacheKey = sourcePath + ':' + codeFile.length() + ':' + codeFile.lastModified();
+        return zipEntryCache.get(cacheKey, ignored -> readZipEntries(sourcePath));
     }
 
     private List<String> readZipEntries(String path) {

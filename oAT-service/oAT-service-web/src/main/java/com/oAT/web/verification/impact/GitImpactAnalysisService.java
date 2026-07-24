@@ -38,17 +38,20 @@ public class GitImpactAnalysisService {
     private final ImpactPropagationEngine propagationEngine;
     private final LLMService llmService;
     private final Executor verificationAiExecutor;
+    private final GitImpactLlmReviewRepository llmReviewRepository;
     private final ConcurrentHashMap<String, LlmReviewProgress> llmReviews = new ConcurrentHashMap<>();
 
     public GitImpactAnalysisService(GitService gitService, List<LanguageAnalyzer> languageAnalyzers,
                                     StructuralDiffEngine structuralDiffEngine, ImpactPropagationEngine propagationEngine,
                                     LLMService llmService,
+                                    GitImpactLlmReviewRepository llmReviewRepository,
                                     @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.gitService = gitService;
         this.languageAnalyzers = List.copyOf(languageAnalyzers);
         this.structuralDiffEngine = structuralDiffEngine;
         this.propagationEngine = propagationEngine;
         this.llmService = llmService;
+        this.llmReviewRepository = llmReviewRepository;
         this.verificationAiExecutor = verificationAiExecutor;
     }
 
@@ -105,7 +108,10 @@ public class GitImpactAnalysisService {
     }
 
     public LlmReviewProgress llmReview(String reportId) {
-        return llmReviews.getOrDefault(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.NOT_FOUND, 0, 0, List.of(), "LLM 审阅任务不存在或已过期"));
+        LlmReviewProgress inMemory = llmReviews.get(reportId);
+        if (inMemory != null) return inMemory;
+        return llmReviewRepository.find(reportId)
+                .orElseGet(() -> new LlmReviewProgress(reportId, LlmReviewStatus.NOT_FOUND, 0, 0, List.of(), "LLM 审阅任务不存在或已过期"));
     }
 
     private void scheduleLlmReview(String reportId, List<ImpactCandidate> candidates) {
@@ -114,28 +120,28 @@ public class GitImpactAnalysisService {
                 .sorted((left, right) -> Double.compare(right.confidence(), left.confidence()))
                 .toList();
         if (reviewTargets.isEmpty()) {
-            llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, 0, 0, List.of(), "没有需要 LLM 辅助确认的传播候选"));
+            saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, 0, 0, List.of(), "没有需要 LLM 辅助确认的传播候选"));
             return;
         }
         if (!llmService.isAvailable()) {
-            llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.UNAVAILABLE, reviewTargets.size(), 0, List.of(), "LLM 服务不可用，已跳过辅助确认"));
+            saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.UNAVAILABLE, reviewTargets.size(), 0, List.of(), "LLM 服务不可用，已跳过辅助确认"));
             return;
         }
-        llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.PENDING, reviewTargets.size(), 0, List.of(), ""));
+        saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.PENDING, reviewTargets.size(), 0, List.of(), ""));
         CompletableFuture.runAsync(() -> runLlmReview(reportId, reviewTargets), verificationAiExecutor);
     }
 
     private void runLlmReview(String reportId, List<ImpactCandidate> candidates) {
         List<LlmJudgement> result = new ArrayList<>();
         long started = System.nanoTime();
-        llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.RUNNING, candidates.size(), 0, List.of(), ""));
+        saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.RUNNING, candidates.size(), 0, List.of(), ""));
         try {
             for (ImpactCandidate candidate : candidates) {
                 LlmJudgement judgement = judge(candidate);
                 result.add(judgement);
-                llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.RUNNING, candidates.size(), result.size(), List.copyOf(result), ""));
+                saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.RUNNING, candidates.size(), result.size(), List.copyOf(result), ""));
             }
-            llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, candidates.size(), result.size(), List.copyOf(result), ""));
+            saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, candidates.size(), result.size(), List.copyOf(result), ""));
         } catch (RuntimeException exception) {
             logger.warn("event=git_impact.llm_review.failed {}", LogFields.of(LogFields.map(
                     "report_id", reportId,
@@ -143,8 +149,13 @@ public class GitImpactAnalysisService {
                     "completed_count", result.size(),
                     "duration_ms", (System.nanoTime() - started) / 1_000_000,
                     "reason", exception.getMessage())));
-            llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.FAILED, candidates.size(), result.size(), List.copyOf(result), exception.getMessage()));
+            saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.FAILED, candidates.size(), result.size(), List.copyOf(result), exception.getMessage()));
         }
+    }
+
+    private void saveLlmReview(LlmReviewProgress progress) {
+        llmReviews.put(progress.reportId(), progress);
+        llmReviewRepository.save(progress);
     }
 
     private LlmJudgement judge(ImpactCandidate candidate) {

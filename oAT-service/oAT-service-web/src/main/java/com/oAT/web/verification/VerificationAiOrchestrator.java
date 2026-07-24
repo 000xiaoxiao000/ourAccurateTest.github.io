@@ -8,6 +8,8 @@ import com.oAT.web.common.UtilJson;
 import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.verification.model.VerificationModels.*;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -20,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.time.Duration;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -128,13 +131,12 @@ public class VerificationAiOrchestrator {
             """;
 
     private final LLMService llmService;
-    /** Bounded LRU cache: promptHash → raw LLM response. Avoids identical re-calls within the same process lifetime. */
-    private final java.util.Map<String, String> promptCache = java.util.Collections.synchronizedMap(
-            new java.util.LinkedHashMap<>(PROMPT_CACHE_MAX_SIZE, 0.75f, true) {
-                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> eldest) {
-                    return size() > PROMPT_CACHE_MAX_SIZE;
-                }
-            });
+    /** Short-lived local L1 cache. Cross-node sharing is intentionally handled by the persisted job/result layer. */
+    private final Cache<String, String> promptCache = Caffeine.newBuilder()
+            .maximumSize(PROMPT_CACHE_MAX_SIZE)
+            .expireAfterWrite(Duration.ofHours(1))
+            .recordStats()
+            .build();
 
     public VerificationAiOrchestrator(LLMService llmService) {
         this.llmService = llmService;
@@ -150,7 +152,7 @@ public class VerificationAiOrchestrator {
         }
         String userMessage = buildUserMessage(input);
         String promptHash = com.oAT.web.verification.model.GraphModels.fingerprint(SYSTEM_PROMPT + userMessage);
-        String cachedResponse = promptCache.get(promptHash);
+        String cachedResponse = promptCache.getIfPresent(promptHash);
         if (cachedResponse != null) {
             progress.accept("命中 Prompt 缓存，跳过 LLM 调用，直接解析已有结果");
             logger.debug("event=verification_ai.prompt_cache.hit {}", LogFields.of(LogFields.map(

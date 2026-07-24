@@ -24,7 +24,7 @@ oAT-service-web/
     │   ├── service/         # 业务服务接口与实现
     │   └── verification/    # 需求一致性验证、图谱、质量门禁和影响分析
     └── resources/
-        ├── application.properties
+        ├── application.yml
         └── db/
             ├── migration/   # Flyway 迁移脚本
             ├── postgresql/  # PostgreSQL 手工脚本
@@ -84,33 +84,60 @@ oAT-service-web/
 主配置文件：
 
 ```text
-src/main/resources/application.properties
+src/main/resources/application.yml
 ```
 
 常用配置：
 
-```properties
-server.port=8899
+```yaml
+server:
+  port: 8899
 
-spring.datasource.url=${OAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification}
-spring.datasource.username=${OAT_DB_USERNAME:traceiq}
-spring.datasource.password=${OAT_DB_PASSWORD:traceiq}
-spring.datasource.driver-class-name=org.postgresql.Driver
+spring:
+  datasource:
+    url: "${OAT_DB_URL:jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification}"
+    username: "${OAT_DB_USERNAME:traceiq}"
+    password: "${OAT_DB_PASSWORD:traceiq}"
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 1
 
-spring.flyway.enabled=true
-spring.flyway.locations=classpath:db/migration
-spring.flyway.baseline-on-migrate=true
-spring.flyway.baseline-version=1
+oat:
+  data:
+    path: "${user.home}/oAT/codeData/"
 
-oat.data.path=${user.home}/oAT/codeData/
-
-ai.llm.enabled=true
-ai.llm.provider=deepseek
-ai.llm.api-key=${AI_LLM_API_KEY:your-api-key}
-ai.llm.model=${AI_LLM_MODEL:deepseek-chat}
+ai:
+  llm:
+    enabled: true
+    provider: deepseek
+    api-key: "${AI_LLM_API_KEY:your-api-key}"
+    model: "${AI_LLM_MODEL:deepseek-chat}"
 ```
 
 `oat.data.path` 需要有读写权限。上传限制默认是 `2048MB`，如果前面有 Nginx、网关或外部 Tomcat，也要同步调整请求体限制。
+
+### 运行时日志级别
+
+服务暴露 Spring Boot Actuator 的 `loggers` 端点，可在不停服的情况下调整当前进程日志级别：
+
+```bash
+curl -X POST http://localhost:8899/actuator/loggers/com.oAT \
+  -H 'Content-Type: application/json' \
+  -d '{"configuredLevel":"DEBUG"}'
+```
+
+恢复为继承上级 logger：
+
+```bash
+curl -X POST http://localhost:8899/actuator/loggers/com.oAT \
+  -H 'Content-Type: application/json' \
+  -d '{"configuredLevel":null}'
+```
+
+该调整只对当前进程生效，服务重启后会回到 `application.yml` 或环境变量中的配置。
 
 ## 数据库迁移
 
@@ -191,8 +218,6 @@ nohup ./start.sh > oat.log 2>&1 &
 | `/api/projects/{projectId}` | 项目设置、应用、成员、标签、版本、搜索 |
 | `/api/projects/{projectId}/verification` | 验证工作区、基线、分析任务、追溯矩阵、质量门禁、影响分析 |
 | `/api/projects/{projectId}/map` | 图谱首页、应用图谱、源码树和代码图 |
-
-旧版 MVC 页面入口已下线，登录、项目、应用、版本、图谱和验证工作区统一使用 `/api` 接口配合前端路由。资源文件仍通过 `/r/**` 暴露。
 
 ## 测试
 

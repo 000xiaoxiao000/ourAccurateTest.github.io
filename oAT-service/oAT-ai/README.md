@@ -49,22 +49,24 @@ cd oAT-service/oAT-ai
 `oAT-ai` 不维护独立运行配置。实际配置写在：
 
 ```text
-oAT-service/oAT-service-web/src/main/resources/application.properties
+oAT-service/oAT-service-web/src/main/resources/application.yml
 ```
 
 常用配置：
 
-```properties
-ai.llm.enabled=true
-ai.llm.provider=deepseek
-ai.llm.base-url=https://api.deepseek.com
-ai.llm.api-key=${AI_LLM_API_KEY:your-api-key}
-ai.llm.model=${AI_LLM_MODEL:deepseek-chat}
-ai.llm.max-tokens=8192
-ai.llm.temperature=0.7
-ai.llm.timeout=300
-ai.llm.log-requests=false
-ai.llm.log-responses=false
+```yaml
+ai:
+  llm:
+    enabled: true
+    provider: deepseek
+    base-url: https://api.deepseek.com
+    api-key: "${AI_LLM_API_KEY:your-api-key}"
+    model: "${AI_LLM_MODEL:deepseek-chat}"
+    max-tokens: 8192
+    temperature: 0.7
+    timeout: 300
+    log-requests: false
+    log-responses: false
 ```
 
 支持的 `provider`：

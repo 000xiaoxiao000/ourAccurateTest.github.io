@@ -21,10 +21,14 @@ import org.eclipse.jgit.util.io.DisabledOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import javax.sql.DataSource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.File;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -44,7 +48,10 @@ public class GitRepositoryContentService {
     @Autowired
     private ResourceService resourceService;
 
-    private final Map<String, ReentrantLock> repoLocks = new ConcurrentHashMap<>();
+    private final Map<String, ReentrantLock> fallbackRepoLocks = new ConcurrentHashMap<>();
+
+    @Autowired
+    private DataSource dataSource;
 
     @Autowired
     private GitRemoteSupportService gitRemoteSupportService;
@@ -54,7 +61,7 @@ public class GitRepositoryContentService {
         if (!StringUtils.hasText(newCommit)) return diffList;
 
         String normalizedRepoUrl = gitRemoteSupportService.normalizeRemoteUrl(repoUrl);
-        ReentrantLock lock = getRepoLock(normalizedRepoUrl);
+        RepositoryLock lock = getRepoLock(normalizedRepoUrl);
         lock.lock();
         try {
             File gitCacheDir = getGitCacheDir(normalizedRepoUrl);
@@ -128,7 +135,7 @@ public class GitRepositoryContentService {
                 .toList();
         if (normalizedPaths.isEmpty()) return result;
         String normalizedRepoUrl = gitRemoteSupportService.normalizeRemoteUrl(repoUrl);
-        ReentrantLock lock = getRepoLock(normalizedRepoUrl);
+        RepositoryLock lock = getRepoLock(normalizedRepoUrl);
         lock.lock();
         try {
             File gitCacheDir = getGitCacheDir(normalizedRepoUrl);
@@ -314,9 +321,66 @@ public class GitRepositoryContentService {
         return new File(resourceService.getGitCacheRoot(), repoHash);
     }
 
-    private ReentrantLock getRepoLock(String repoUrl) {
+    private RepositoryLock getRepoLock(String repoUrl) {
         String lockKey = "oAT:lock:repo:" + com.oAT.web.common.EncryptUtil.MD5(repoUrl);
-        return repoLocks.computeIfAbsent(lockKey, key -> new ReentrantLock());
+        return new RepositoryLock(lockKey);
+    }
+
+    /**
+     * PostgreSQL advisory locks are connection-scoped, so they remain valid for
+     * the full Git operation and are released even when the process exits.
+     */
+    private final class RepositoryLock {
+        private final String key;
+        private Connection connection;
+        private ReentrantLock fallback;
+
+        private RepositoryLock(String key) {
+            this.key = key;
+        }
+
+        private void lock() {
+            try {
+                connection = dataSource.getConnection();
+                try (PreparedStatement statement = connection.prepareStatement("SELECT pg_advisory_lock(hashtext(?))")) {
+                    statement.setString(1, key);
+                    statement.execute();
+                }
+            } catch (SQLException exception) {
+                closeConnection();
+                fallback = fallbackRepoLocks.computeIfAbsent(key, ignored -> new ReentrantLock());
+                fallback.lock();
+                logger.warn("event=git.repo_lock.local_fallback {}", LogFields.of(LogFields.map(
+                        "repo_lock_hash", hash(key), "reason", exception.getMessage())));
+            }
+        }
+
+        private void unlock() {
+            if (connection != null) {
+                try (PreparedStatement statement = connection.prepareStatement("SELECT pg_advisory_unlock(hashtext(?))")) {
+                    statement.setString(1, key);
+                    statement.execute();
+                } catch (SQLException exception) {
+                    logger.warn("event=git.repo_lock.release_failed {}", LogFields.of(LogFields.map(
+                            "repo_lock_hash", hash(key), "reason", exception.getMessage())));
+                } finally {
+                    closeConnection();
+                }
+            } else if (fallback != null) {
+                fallback.unlock();
+            }
+        }
+
+        private void closeConnection() {
+            if (connection == null) return;
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+                // The JDBC pool will discard a connection it cannot close cleanly.
+            } finally {
+                connection = null;
+            }
+        }
     }
 
     private String normalizePath(String path) {
