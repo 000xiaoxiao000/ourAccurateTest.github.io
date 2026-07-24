@@ -52,10 +52,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.regex.Matcher;
@@ -753,7 +755,9 @@ public class TraceabilityMapService {
                     String nodeId = codeIndex.resolveCoverageNode(index);
                     if (nodeId != null) {
                         codeIndex.applyCoverageSummaryWithParents(nodeId, coverageSummary(index), coverageMetadata(index));
-                        covered.addAll(codeIndex.applyMethodCoverage(index));
+                        Set<String> matchedMethods = codeIndex.applyMethodCoverage(index);
+                        covered.addAll(matchedMethods);
+                        covered.addAll(codeIndex.applyDerivedMethodCoverage(nodeId, index, matchedMethods));
                     }
                     if (index.getCoveredLines() <= 0 && index.getCoveredBranchTargets() <= 0 && index.getCoveredMethods() <= 0) {
                         continue;
@@ -1703,6 +1707,131 @@ public class TraceabilityMapService {
                 }
             }
             return coveredMethodIds;
+        }
+
+        // JaCoCo HTML source reports (and any report whose per-method detail could not be
+        // matched to a parsed source method) only carry file-level line/branch data. Without
+        // this fallback the "当前文件方法" tooltip renders every method as 无报告 with empty
+        // line/branch/complexity fields even though the file clearly has coverage. Here we
+        // slice the file's line/branch coverage into each method using its declaration span.
+        Set<String> applyDerivedMethodCoverage(String containerNodeId, ClassCoverageIndex index, Set<String> matchedMethodIds) {
+            Set<String> coveredMethodIds = new LinkedHashSet<>();
+            if (!StringUtils.hasText(containerNodeId) || index == null) return coveredMethodIds;
+            String fileId = nearestFileId(containerNodeId);
+            if (fileId == null) return coveredMethodIds;
+
+            NavigableSet<Integer> totalLines = new TreeSet<>();
+            NavigableSet<Integer> coveredLines = new TreeSet<>();
+            Map<String, List<Integer>> totalBranchProbes = new LinkedHashMap<>();
+            Map<String, List<Integer>> coveredBranchProbes = new LinkedHashMap<>();
+            collectLineCoverage(index, totalLines, coveredLines, totalBranchProbes, coveredBranchProbes);
+            if (totalLines.isEmpty()) return coveredMethodIds;
+
+            List<TraceabilityNode> methodNodes = nodes.values().stream()
+                    .filter(node -> node.kind() == NodeKind.CODE_METHOD)
+                    .filter(node -> node.coverage() == null)
+                    .filter(node -> matchedMethodIds == null || !matchedMethodIds.contains(node.id()))
+                    .filter(node -> fileId.equals(nearestFileId(node.id())))
+                    .filter(node -> methodDeclarationLine(node) > 0)
+                    .sorted(Comparator.comparingInt(this::methodDeclarationLine).thenComparing(TraceabilityNode::id))
+                    .collect(Collectors.toList());
+            if (methodNodes.isEmpty()) return coveredMethodIds;
+
+            int lastLine = totalLines.last();
+            for (int position = 0; position < methodNodes.size(); position++) {
+                TraceabilityNode node = methodNodes.get(position);
+                int startLine = methodDeclarationLine(node);
+                int nextStart = position + 1 < methodNodes.size()
+                        ? methodDeclarationLine(methodNodes.get(position + 1))
+                        : lastLine + 1;
+                int endLine = Math.max(startLine, nextStart - 1);
+                List<Integer> methodTotal = new ArrayList<>(totalLines.subSet(startLine, true, endLine, true));
+                if (methodTotal.isEmpty()) continue;
+                List<Integer> methodCovered = new ArrayList<>(coveredLines.subSet(startLine, true, endLine, true));
+                List<Integer> partialBranches = derivedPartialBranchLines(totalBranchProbes, coveredBranchProbes, startLine, endLine);
+                int[] branch = branchTargetCounts(totalBranchProbes, coveredBranchProbes, startLine, endLine);
+                CoverageSummary coverage = new CoverageSummary(methodCovered.size(), methodTotal.size(),
+                        rate(methodCovered.size(), methodTotal.size()), branch[0], branch[1], rate(branch[0], branch[1]));
+                Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("coverageTotalLines", methodTotal);
+                metadata.put("coverageCoveredLines", methodCovered);
+                metadata.put("coveragePartialBranchLines", partialBranches);
+                applyCoverageSummary(node.id(), coverage, metadata);
+                if (!methodCovered.isEmpty() || branch[0] > 0) coveredMethodIds.add(node.id());
+            }
+            return coveredMethodIds;
+        }
+
+        private void collectLineCoverage(ClassCoverageIndex index, NavigableSet<Integer> totalLines,
+                                         NavigableSet<Integer> coveredLines, Map<String, List<Integer>> totalBranchProbes,
+                                         Map<String, List<Integer>> coveredBranchProbes) {
+            if (index.getTotalLineNumbers() != null) totalLines.addAll(index.getTotalLineNumbers());
+            if (index.getCoveredLineNumbers() != null) coveredLines.addAll(index.getCoveredLineNumbers());
+            if (index.getMethods() == null) return;
+            for (ClassCoverageIndex.MethodCoverageDetail method : index.getMethods()) {
+                if (method == null) continue;
+                if (method.getTotalLineNumbers() != null) totalLines.addAll(method.getTotalLineNumbers());
+                if (method.getCoveredLineNumbers() != null) coveredLines.addAll(method.getCoveredLineNumbers());
+                if (method.getTotalBranchTargetProbeMap() != null) totalBranchProbes.putAll(method.getTotalBranchTargetProbeMap());
+                if (method.getCoveredBranchTargetProbeMap() != null) coveredBranchProbes.putAll(method.getCoveredBranchTargetProbeMap());
+            }
+        }
+
+        private int[] branchTargetCounts(Map<String, List<Integer>> totalProbes, Map<String, List<Integer>> coveredProbes,
+                                         int startLine, int endLine) {
+            int covered = 0;
+            int total = 0;
+            for (Map.Entry<String, List<Integer>> entry : totalProbes.entrySet()) {
+                int line = branchLine(entry.getKey());
+                if (line < startLine || line > endLine) continue;
+                total += entry.getValue() == null ? 0 : entry.getValue().size();
+                List<Integer> coveredTargets = coveredProbes.get(entry.getKey());
+                covered += coveredTargets == null ? 0 : coveredTargets.size();
+            }
+            return new int[]{covered, total};
+        }
+
+        private List<Integer> derivedPartialBranchLines(Map<String, List<Integer>> totalProbes,
+                                                        Map<String, List<Integer>> coveredProbes, int startLine, int endLine) {
+            NavigableSet<Integer> result = new TreeSet<>();
+            for (Map.Entry<String, List<Integer>> entry : totalProbes.entrySet()) {
+                int line = branchLine(entry.getKey());
+                if (line < startLine || line > endLine) continue;
+                int total = entry.getValue() == null ? 0 : entry.getValue().size();
+                List<Integer> coveredTargets = coveredProbes.get(entry.getKey());
+                int covered = coveredTargets == null ? 0 : coveredTargets.size();
+                if (covered > 0 && covered < total) result.add(line);
+            }
+            return new ArrayList<>(result);
+        }
+
+        private int branchLine(String probeKey) {
+            int separator = probeKey == null ? -1 : probeKey.indexOf(':');
+            if (separator <= 0) return -1;
+            try {
+                return Integer.parseInt(probeKey.substring(0, separator));
+            } catch (NumberFormatException ignored) {
+                return -1;
+            }
+        }
+
+        private String nearestFileId(String nodeId) {
+            String currentId = nodeId;
+            Set<String> visited = new HashSet<>();
+            while (StringUtils.hasText(currentId) && visited.add(currentId)) {
+                TraceabilityNode current = nodes.get(currentId);
+                if (current == null) return null;
+                if (current.kind() == NodeKind.CODE_FILE) return current.id();
+                currentId = current.parentId();
+            }
+            return null;
+        }
+
+        private int methodDeclarationLine(TraceabilityNode node) {
+            Integer line = node.metadata() == null ? null : metadataInteger(node.metadata().get("line"));
+            if (line != null && line > 0) return line;
+            Matcher matcher = Pattern.compile(":(\\d+)$").matcher(value(node.locator()));
+            return matcher.find() ? Integer.parseInt(matcher.group(1)) : 0;
         }
 
         String resolveCoverageMethod(ClassCoverageIndex index, ClassCoverageIndex.MethodCoverageDetail method) {

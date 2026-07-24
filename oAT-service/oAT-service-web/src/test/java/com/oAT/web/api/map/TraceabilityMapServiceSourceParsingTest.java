@@ -269,6 +269,64 @@ class TraceabilityMapServiceSourceParsingTest {
         assertThat(coveredIds).containsExactly(coveredMethodId);
     }
 
+    @Test
+    void derivesPerMethodCoverageFromFileLinesWhenReportHasNoMatchedMethodDetail() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        Method putCodeNode = codeIndexType.getDeclaredMethod("putCodeNode", TraceabilityMapPayloads.TraceabilityNode.class);
+        putCodeNode.setAccessible(true);
+
+        String path = "web3/src/main/java/web3Server/controller/Web302Controller.java";
+        String fileId = "code:java:" + path;
+        String classId = fileId + "#web3Server.controller.Web302Controller";
+        String loginId = classId + ".login(LoginBody)";
+        String processFieldId = classId + ".processField(String)";
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(
+                fileId, CODE_FILE, "Web302Controller", path, path, "CODE", "java", path,
+                null, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(
+                classId, CODE_CLASS, "Web302Controller", "web3Server.controller.Web302Controller", path,
+                "CODE", "java", "web3Server.controller.Web302Controller", fileId, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(
+                loginId, CODE_METHOD, "login", "login(LoginBody)", path + ":24",
+                "CODE", "java", "web3Server.controller.Web302Controller#login", classId, STATIC, null, Map.of("line", 24)));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(
+                processFieldId, CODE_METHOD, "processField", "processField(String)", path + ":30",
+                "CODE", "java", "web3Server.controller.Web302Controller#processField", classId, STATIC, null, Map.of("line", 30)));
+
+        ClassCoverageIndex index = new ClassCoverageIndex();
+        index.setSourcePath(path);
+        index.setTotalLineNumbers(List.of(24, 25, 30, 31));
+        index.setCoveredLineNumbers(List.of(24, 25));
+
+        Method applyDerivedMethodCoverage = codeIndexType.getDeclaredMethod(
+                "applyDerivedMethodCoverage", String.class, ClassCoverageIndex.class, java.util.Set.class);
+        applyDerivedMethodCoverage.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> coveredIds = (java.util.Set<String>) applyDerivedMethodCoverage.invoke(
+                codeIndex, fileId, index, java.util.Set.of());
+
+        Field nodesField = codeIndexType.getDeclaredField("nodes");
+        nodesField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, TraceabilityMapPayloads.TraceabilityNode> nodes =
+                (Map<String, TraceabilityMapPayloads.TraceabilityNode>) nodesField.get(codeIndex);
+
+        assertThat(nodes.get(loginId).coverage()).isNotNull();
+        assertThat(nodes.get(loginId).coverage().coveredLines()).isEqualTo(2);
+        assertThat(nodes.get(loginId).coverage().totalLines()).isEqualTo(2);
+        assertThat(nodes.get(processFieldId).coverage()).isNotNull();
+        assertThat(nodes.get(processFieldId).coverage().coveredLines()).isZero();
+        assertThat(nodes.get(processFieldId).coverage().totalLines()).isEqualTo(2);
+        assertThat(coveredIds).containsExactly(loginId);
+    }
+
     private static ClassCoverageIndex.MethodCoverageDetail coverageMethod(String className, String name, int line, int coveredLines, int totalLines) {
         ClassCoverageIndex.MethodCoverageDetail method = new ClassCoverageIndex.MethodCoverageDetail();
         method.setClassName(className);
