@@ -9,7 +9,7 @@
     <header class="page-header plain-header verification-header">
       <div>
         <div class="eyebrow">ourAccurateTest</div>
-        <h1>AI 需求一致性验证</h1>
+        <h1>智溯平台</h1>
         <p class="subtext">围绕需求、测试用例、源码和依据建立可追溯的 AI 分析闭环。</p>
       </div>
       <div class="header-actions">

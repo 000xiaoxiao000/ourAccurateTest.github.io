@@ -51,7 +51,7 @@
         <section class="panel ai-panel">
           <div class="panel-head ai-panel-head">
             <div>
-              <h2>AI 需求一致性验证</h2>
+              <h2>智溯平台</h2>
               <p class="panel-desc">冻结需求、用例、Bug、源码和运行依据，输出 AI 生成的追溯矩阵和问题清单</p>
             </div>
             <RouterLink class="ai-entry primary" :to="`/p/${projectId}/verification`">

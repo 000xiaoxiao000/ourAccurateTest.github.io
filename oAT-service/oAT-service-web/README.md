@@ -22,7 +22,7 @@ oAT-service-web/
     │   ├── language/        # Java 源码解析和静态信息抽取
     │   ├── persistence/     # Repository 和持久化实体
     │   ├── service/         # 业务服务接口与实现
-    │   └── verification/    # 需求一致性验证、图谱、质量门禁和影响分析
+    │   └── verification/    # 智溯分析、图谱、质量门禁和影响分析
     └── resources/
         ├── application.yml
         └── db/
