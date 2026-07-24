@@ -188,8 +188,12 @@ public class TraceabilityMapService {
 
         GraphView clipped = graph.focus(focusId, direction, depth, MAX_NODES, MAX_EDGES, warnings);
         List<CodeTreeNode> codeTree = includeCodeTree ? buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes) : List.of();
-        TraceabilitySummary summary = summarize(criteria, testcases, clipped.nodes(), clipped.edges(), graph.dynamicNodes, warnings);
-        CoverageReportOverview coverageOverview = buildCoverageOverview(projectId, baseline, warnings);
+        // The graph viewport may be narrowed to a focused node, while the summary, code tree,
+        // and coverage report all describe the selected baseline.  Keep the summary on that
+        // same baseline-wide scope so selecting a node cannot change its totals.
+        TraceabilitySummary summary = summarize(criteria, testcases, new ArrayList<>(graph.nodes.values()),
+                new ArrayList<>(graph.edges.values()), graph.dynamicNodes, warnings);
+        CoverageReportOverview coverageOverview = buildCoverageOverview(projectId, baseline, codeIndex, warnings);
 
         return new TraceabilityMapResponse(
                 new TraceabilityMapPayloads.BaselineInfo(
@@ -997,33 +1001,33 @@ public class TraceabilityMapService {
                 index.getCoveredBranchTargets(), index.getTotalBranchTargets(), index.getBranchRate());
     }
 
-    private CoverageReportOverview buildCoverageOverview(String projectId, Baseline baseline, List<String> warnings) {
-        List<UniversalCoverageFile> reportFiles = loadCoverageFiles(projectId, baseline, warnings);
-        if (!reportFiles.isEmpty()) {
-            return summarizeCoverageReport(reportFiles);
-        }
+    private CoverageReportOverview buildCoverageOverview(String projectId, Baseline baseline, CodeIndex codeIndex,
+                                                         List<String> warnings) {
         List<ClassCoverageIndex> indexes = loadCoverageIndexes(projectId, baseline, warnings);
-        if (indexes.isEmpty()) {
-            return new CoverageReportOverview(0, 0, 0, 0, 0, 0, 0, 0, 0);
-        }
-        int coveredClasses = 0;
-        int totalClasses = 0;
-        int coveredMethods = 0;
-        int totalMethods = 0;
+        int totalClasses = (int) codeIndex.nodes.values().stream()
+                .filter(node -> node.kind() == NodeKind.CODE_CLASS)
+                .count();
+        int coveredClasses = (int) codeIndex.nodes.values().stream()
+                .filter(node -> node.kind() == NodeKind.CODE_CLASS)
+                .filter(node -> hasCoveredMethodDescendant(codeIndex, node.id()))
+                .count();
+        int totalMethods = (int) codeIndex.nodes.values().stream()
+                .filter(node -> node.kind() == NodeKind.CODE_METHOD)
+                .count();
+        int coveredMethods = (int) codeIndex.nodes.values().stream()
+                .filter(node -> node.kind() == NodeKind.CODE_METHOD)
+                .filter(this::hasCoveredMeasurements)
+                .count();
         int coveredBranches = 0;
         int totalBranches = 0;
         int coveredLines = 0;
         int totalLines = 0;
         int totalComplexity = 0;
+        Set<String> seenCoverageIndexes = new HashSet<>();
         for (ClassCoverageIndex index : indexes) {
             if (index == null) continue;
-            totalClasses += 1;
-            if (index.getCoveredLines() > 0 || index.getCoveredMethods() > 0 || index.getCoveredBranches() > 0
-                    || index.getCoveredBranchTargets() > 0) {
-                coveredClasses += 1;
-            }
-            coveredMethods += index.getCoveredMethods();
-            totalMethods += index.getTotalMethods();
+            String nodeId = codeIndex.resolveCoverageNode(index);
+            if (nodeId == null || !seenCoverageIndexes.add(nodeId + "|" + value(index.getClassName()))) continue;
             coveredBranches += index.getCoveredBranchTargets();
             totalBranches += index.getTotalBranchTargets();
             coveredLines += index.getCoveredLines();
@@ -1032,6 +1036,28 @@ public class TraceabilityMapService {
         }
         return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
                 coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
+    }
+
+    private boolean hasCoveredMeasurements(TraceabilityNode node) {
+        if (node == null || node.coverage() == null) return false;
+        return integer(node.coverage().coveredLines()) > 0 || integer(node.coverage().coveredBranches()) > 0;
+    }
+
+    private boolean hasCoveredMethodDescendant(CodeIndex codeIndex, String classId) {
+        return codeIndex.nodes.values().stream()
+                .filter(node -> node.kind() == NodeKind.CODE_METHOD)
+                .filter(this::hasCoveredMeasurements)
+                .anyMatch(node -> hasAncestor(codeIndex, node, classId));
+    }
+
+    private boolean hasAncestor(CodeIndex codeIndex, TraceabilityNode node, String expectedAncestorId) {
+        TraceabilityNode current = node;
+        Set<String> visited = new HashSet<>();
+        while (current != null && visited.add(current.id())) {
+            if (expectedAncestorId.equals(current.id())) return true;
+            current = current.parentId() == null ? null : codeIndex.nodes.get(current.parentId());
+        }
+        return false;
     }
 
     private List<UniversalCoverageFile> loadCoverageFiles(String projectId, Baseline baseline, List<String> warnings) {

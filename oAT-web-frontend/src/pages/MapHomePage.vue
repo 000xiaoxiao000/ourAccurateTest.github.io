@@ -662,7 +662,7 @@ const codeSummaryTitle = computed(() => {
 const codeTreeSummaryText = computed(() => {
   const summary = map.response.value?.summary
   if (!summary) return '0 个代码符号'
-  return `${summary.codeCount || 0} 个代码符号 · 方法 ${summary.codeMethodCount ?? 0}`
+  return `文件 ${summary.codeFileCount ?? 0} · 类 ${summary.codeClassCount ?? 0} · 方法 ${summary.codeMethodCount ?? 0} · 共 ${summary.codeCount || 0} 个符号`
 })
 
 const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
@@ -726,14 +726,12 @@ const callViewMeta = computed(() => {
     }
   }
   if (callViewMode.value === 'coverage') {
+    const totalFiles = map.response.value?.summary.codeFileCount ?? 0
+    const mapped = `已匹配 ${coverageFileRows.value.length} / ${totalFiles} 个源码文件`
     return {
       title: '覆盖率数据',
-      description: '展示覆盖率和执行记录匹配到的代码节点',
-      count: coverageFileRows.value.length
-        ? `${coverageFileRows.value.length} 个文件 · ${coverageRows.value.length} 条节点`
-        : rawCoverageOverview.value?.totalClasses
-          ? `${rawCoverageOverview.value.totalClasses} 个类`
-          : `${coverageRows.value.length} 条数据`,
+      description: '所有指标严格按当前源码基线统计，未匹配源码的报告条目不参与计算',
+      count: mapped,
     }
   }
   return {
