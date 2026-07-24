@@ -2,6 +2,7 @@ package com.oAT.web.language.java;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.StaticInfoRepository;
 import com.oAT.web.persistence.entity.StaticSourceClassInfo;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
@@ -33,14 +34,16 @@ public class JavaStaticSourceIngestService {
             return;
         }
         int payloadBytes = data.getBytes(StandardCharsets.UTF_8).length;
-        logger.info("静态源码数据接收成功, appId={}, payloadBytes={}", appId, payloadBytes);
+        logger.info("event=static_source.ingest.received {}", LogFields.of(LogFields.map(
+                "app_id", appId,
+                "payload_bytes", payloadBytes)));
         executor.execute(() -> persistStaticData(appId, data));
     }
 
     private void persistStaticData(String appId, String payload) {
         long startTime = System.currentTimeMillis();
         if (!StringUtils.hasText(payload)) {
-            logger.warn("静态源码数据为空, appId={}", appId);
+            logger.warn("event=static_source.ingest.empty {}", LogFields.of(LogFields.map("app_id", appId)));
             return;
         }
 
@@ -48,21 +51,30 @@ public class JavaStaticSourceIngestService {
         try {
             data = objectMapper.readTree(payload);
         } catch (Exception e) {
-            logger.error("解析静态源码数据失败, appId={}", appId, e);
+            logger.error("event=static_source.ingest.parse_failed {}", LogFields.of(LogFields.map("app_id", appId)), e);
             return;
         }
 
         int classCount = data.size();
-        logger.info("静态源码开始落库, appId={}, classCount={}, payloadBytes={}",
-                appId, classCount, payload.getBytes(StandardCharsets.UTF_8).length);
+        logger.info("event=static_source.persist.start {}", LogFields.of(LogFields.map(
+                "app_id", appId,
+                "class_count", classCount,
+                "payload_bytes", payload.getBytes(StandardCharsets.UTF_8).length)));
         try {
             StaticDataPersistStats stats = persistStaticDataToEs(appId, data);
-            logger.info("静态源码落库完成, appId={}, classCount={}, created={}, updated={}, skipped={}, failed={}, elapsedMs={}",
-                    appId, classCount, stats.createdCount, stats.updatedCount, stats.skippedCount,
-                    stats.failedCount, System.currentTimeMillis() - startTime);
+            logger.info("event=static_source.persist.completed {}", LogFields.of(LogFields.map(
+                    "app_id", appId,
+                    "class_count", classCount,
+                    "created", stats.createdCount,
+                    "updated", stats.updatedCount,
+                    "skipped", stats.skippedCount,
+                    "failed", stats.failedCount,
+                    "duration_ms", System.currentTimeMillis() - startTime)));
         } catch (Exception e) {
-            logger.error("静态源码落库失败, appId={}, classCount={}, elapsedMs={}",
-                    appId, classCount, System.currentTimeMillis() - startTime, e);
+            logger.error("event=static_source.persist.failed {}", LogFields.of(LogFields.map(
+                    "app_id", appId,
+                    "class_count", classCount,
+                    "duration_ms", System.currentTimeMillis() - startTime)), e);
         }
     }
 
@@ -92,7 +104,9 @@ public class JavaStaticSourceIngestService {
                 }
             } catch (Exception e) {
                 stats.failedCount++;
-                logger.error("保存静态源码信息失败 key:{}", entry.getKey(), e);
+                logger.error("event=static_source.persist.item_failed {}", LogFields.of(LogFields.map(
+                        "app_id", appId,
+                        "source_key", entry.getKey())), e);
             }
         }
         return stats;

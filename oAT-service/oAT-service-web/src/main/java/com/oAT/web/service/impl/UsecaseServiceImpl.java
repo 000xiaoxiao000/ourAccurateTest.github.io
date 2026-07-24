@@ -2,6 +2,7 @@ package com.oAT.web.service.impl;
 
 import com.oAT.web.domain.usecase.UsecaseDirectoryDeletionService;
 import com.oAT.web.domain.usecase.UsecaseViewMapper;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.CaseCenterRepository;
 import com.oAT.web.persistence.entity.*;
 import com.oAT.web.exceptions.DirtyDataException;
@@ -256,7 +257,9 @@ public class UsecaseServiceImpl implements UsecaseService {
         Assert.hasText(id, "用例ID不能为空");
         Optional<CaseCenterIndex> op = centerRepository.findById(id);
         if (!op.isPresent() || op.get().getUsecase() == null) {
-            logger.warn("删除用例跳过，目标用例已不存在, projectId={}, usecaseId={}", projectId, id);
+            logger.warn("event=usecase.delete.skipped_missing {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "usecase_id", id)));
             return;
         }
         Assert.isTrue(op.get().getUsecase().getProjectId().equals(projectId), "the usecase not belong to project Id=" + projectId);

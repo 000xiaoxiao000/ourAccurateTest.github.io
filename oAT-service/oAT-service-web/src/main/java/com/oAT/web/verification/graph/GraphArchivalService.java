@@ -1,5 +1,6 @@
 package com.oAT.web.verification.graph;
 
+import com.oAT.web.logging.LogFields;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -66,8 +67,10 @@ public class GraphArchivalService {
                 """, ts);
 
         if (nodes > 0 || edges > 0) {
-            log.info("Graph cold-tier: archived {} nodes and {} edges (invalidated > {}d ago)",
-                    nodes, edges, warmTierDays);
+            log.info("event=graph.archive_stale_facts.completed {}", LogFields.of(LogFields.map(
+                    "archived_nodes", nodes,
+                    "archived_edges", edges,
+                    "warm_tier_days", warmTierDays)));
         }
         return new int[]{nodes, edges};
     }
@@ -94,7 +97,9 @@ public class GraphArchivalService {
                   AND (checkpoint_step IS NULL OR checkpoint_step <> 'ARCHIVED')
                 """, Timestamp.valueOf(cutoff));
         if (rows > 0) {
-            log.info("Graph cold-tier: soft-archived {} terminal analysis job rows (cutoff={}d)", rows, warmTierDays);
+            log.info("event=analysis_job.archive_old.completed {}", LogFields.of(LogFields.map(
+                    "archived_rows", rows,
+                    "warm_tier_days", warmTierDays)));
         }
         return rows;
     }

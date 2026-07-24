@@ -1,6 +1,7 @@
 package com.oAT.web.infra.git;
 
 import com.oAT.web.common.FriendlyErrorMessageUtil;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.entity.GitCommitOptionVo;
 import org.eclipse.jgit.api.FetchCommand;
 import org.eclipse.jgit.api.Git;
@@ -73,7 +74,9 @@ public class GitRemoteSupportService {
             }
             Collections.sort(branches);
         } catch (Exception e) {
-            logger.error("Failed to fetch branches for repo: {}", normalizedRepoUrl, e);
+            logger.error("event=git.remote_branches.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "reason", e.getMessage())), e);
             throw new RuntimeException("获取远程分支失败: " + friendlyError(e));
         }
         return branches;
@@ -124,7 +127,11 @@ public class GitRemoteSupportService {
                 checkCommitIdExists(normalizedRepoUrl, username, password, commitId);
             }
         } catch (Exception e) {
-            logger.error("Git check failed: {}", e.getMessage(), e);
+            logger.error("event=git.pull_check.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "branch", finalBranch,
+                    "commit_id", shortCommit(commitId),
+                    "reason", e.getMessage())), e);
             throw new RuntimeException("Git检测失败: " + friendlyError(e));
         }
     }
@@ -155,7 +162,10 @@ public class GitRemoteSupportService {
             }
             throw new RuntimeException("分支 " + finalBranch + " 不存在");
         } catch (Exception e) {
-            logger.error("Failed to get commit id: {}", e.getMessage(), e);
+            logger.error("event=git.latest_commit.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "branch", finalBranch,
+                    "reason", e.getMessage())), e);
             throw new RuntimeException("获取 CommitID失败: " + friendlyError(e));
         }
     }
@@ -230,7 +240,11 @@ public class GitRemoteSupportService {
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get recent commits for repo: {} branch: {}", normalizedRepoUrl, finalBranch, e);
+            logger.error("event=git.recent_commits.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "branch", finalBranch,
+                    "limit", finalLimit,
+                    "reason", e.getMessage())), e);
             throw new RuntimeException("获取 Commit 列表失败: " + friendlyError(e));
         } finally {
             if (tempDir != null) {
@@ -274,7 +288,9 @@ public class GitRemoteSupportService {
         }
 
         if (!normalized.equals(repoUrl.trim())) {
-            logger.debug("Normalized Git remote URL from {} to {}", repoUrl.trim(), normalized);
+            logger.debug("event=git.remote_url.normalized {}", LogFields.of(LogFields.map(
+                    "source_hash", hash(repoUrl.trim()),
+                    "normalized_hash", hash(normalized))));
         }
 
         return normalized;
@@ -376,7 +392,21 @@ public class GitRemoteSupportService {
             }
         }
         if (!file.delete()) {
-            logger.warn("Failed to delete file: {}", file.getAbsolutePath());
+            logger.warn("event=file.delete_failed {}", LogFields.of(LogFields.map(
+                    "file_path_hash", hash(file.getAbsolutePath()),
+                    "directory", file.isDirectory())));
         }
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
+    }
+
+    private String shortCommit(String commitId) {
+        if (!StringUtils.hasText(commitId)) {
+            return "-";
+        }
+        String trimmed = commitId.trim();
+        return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
     }
 }

@@ -1,5 +1,6 @@
 package com.oAT.web.service.impl;
 
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.ResourceService;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -93,8 +94,12 @@ public class ResourceServiceImpl implements ResourceService, InitializingBean{
         if (totalSpace > 0) {
             double freeRatio = (double) usableSpace / totalSpace;
             if (freeRatio < threshold) {
-                logger.warn("磁盘空间告警: 剩余空间比例 {}%, 低于阈值 {}%, 触发强制清理...",
-                        String.format("%.2f", freeRatio * 100), String.format("%.2f", threshold * 100));
+                logger.warn("event=storage.disk_space.low {}", LogFields.of(LogFields.map(
+                        "free_ratio_percent", String.format("%.2f", freeRatio * 100),
+                        "threshold_percent", String.format("%.2f", threshold * 100),
+                        "usable_bytes", usableSpace,
+                        "total_bytes", totalSpace,
+                        "cache_root_hash", hash(cacheRoot))));
                 // 紧急清理：删除旧的 git 缓存和下载的 zip 缓存
                 forceCleanCache(totalSpace, threshold);
             }
@@ -110,7 +115,9 @@ public class ResourceServiceImpl implements ResourceService, InitializingBean{
         if (repos != null) {
             for (File repo : repos) {
                 if (repo.isDirectory() && repo.lastModified() < cutoff) {
-                    logger.info("定期清理 Git 缓存目录: {}", repo.getAbsolutePath());
+                    logger.info("event=storage.git_cache.cleanup_old {}", LogFields.of(LogFields.map(
+                            "directory_hash", hash(repo.getAbsolutePath()),
+                            "retention_days", days)));
                     deleteDirectory(repo);
                 }
             }
@@ -130,7 +137,9 @@ public class ResourceServiceImpl implements ResourceService, InitializingBean{
             if ((double) currentUsable / totalSpace >= targetFreeRatio + 0.05) { // 加 5% 缓冲
                 break;
             }
-            logger.warn("强制清理空间: 删除仓库缓存 {}", repo.getName());
+            logger.warn("event=storage.git_cache.force_cleanup {}", LogFields.of(LogFields.map(
+                    "directory_hash", hash(repo.getAbsolutePath()),
+                    "target_free_ratio", targetFreeRatio)));
             deleteDirectory(repo);
         }
     }
@@ -146,5 +155,9 @@ public class ResourceServiceImpl implements ResourceService, InitializingBean{
             }
             dir.delete();
         }
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 }

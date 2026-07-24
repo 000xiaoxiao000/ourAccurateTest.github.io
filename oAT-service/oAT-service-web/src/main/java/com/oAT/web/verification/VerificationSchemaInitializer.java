@@ -1,5 +1,6 @@
 package com.oAT.web.verification;
 
+import com.oAT.web.logging.LogFields;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
@@ -43,9 +44,11 @@ public class VerificationSchemaInitializer {
             ensureColumn("oat_verification_asset", "storage_key", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS storage_key VARCHAR(512)");
             ensureColumn("oat_verification_asset", "content_size", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS content_size BIGINT NOT NULL DEFAULT 0");
             ensureColumn("oat_verification_asset", "content_preview", "ALTER TABLE oat_verification_asset ADD COLUMN IF NOT EXISTS content_preview TEXT");
-            logger.info("Database schema initialized");
+            logger.info("event=database.schema.initialized {}", LogFields.of(LogFields.map(
+                    "resource_count", SCHEMA_RESOURCES.size())));
         } catch (Exception e) {
-            logger.warn("Database schema initialization skipped or failed: {}", e.getMessage());
+            logger.warn("event=database.schema.initialization_failed {}", LogFields.of(LogFields.map(
+                    "reason", e.getMessage())));
         }
     }
 
@@ -76,7 +79,8 @@ public class VerificationSchemaInitializer {
         try {
             jdbcTemplate.execute(alterSql);
         } catch (Exception e) {
-            logger.debug("Schema nullability adjustment skipped: {}", e.getMessage());
+            logger.debug("event=database.schema.nullability_adjustment_skipped {}", LogFields.of(LogFields.map(
+                    "reason", e.getMessage())));
         }
     }
 

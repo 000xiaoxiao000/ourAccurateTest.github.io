@@ -2,6 +2,7 @@ package com.oAT.web.domain.version;
 
 import com.oAT.web.common.Job;
 import com.oAT.web.common.compare.CompareResult;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.VersionCenterRepository;
 import com.oAT.web.persistence.entity.VersionCenterIndex;
 import com.oAT.web.persistence.entity.VersionCompareReport;
@@ -81,7 +82,11 @@ public class VersionCompareReportService {
 
         job.getLogger().info(String.format("开始保存版本比对报告 id=%s 差异数=%s",
                 job.getId(), listDifference.size()));
-        logger.info("保存版本比对报告 id={} diffs={}", job.getId(), listDifference.size());
+        logger.info("event=version_compare_report.save.start {}", LogFields.of(LogFields.map(
+                "job_id", job.getId(),
+                "project_id", vo.getProjectId(),
+                "app_id", vo.getAppId(),
+                "diff_count", listDifference.size())));
 
         VersionCenterIndex index = new VersionCenterIndex(report);
         index.setId(job.getId());
@@ -92,7 +97,12 @@ public class VersionCompareReportService {
             job.getLogger().info("比对报告保存成功 id=" + index.getId());
         } catch (Exception e) {
             job.getLogger().error("比对报告保存失败 id=" + job.getId() + " 错误=" + e.getMessage());
-            logger.error("比对报告保存失败 id={} diffs={}", job.getId(), listDifference.size(), e);
+            logger.error("event=version_compare_report.save.failed {}", LogFields.of(LogFields.map(
+                    "job_id", job.getId(),
+                    "project_id", vo.getProjectId(),
+                    "app_id", vo.getAppId(),
+                    "diff_count", listDifference.size(),
+                    "reason", e.getMessage())), e);
             throw e;
         }
     }

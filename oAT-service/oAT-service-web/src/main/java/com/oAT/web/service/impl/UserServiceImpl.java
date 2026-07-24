@@ -1,5 +1,6 @@
 package com.oAT.web.service.impl;
 
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.SystemRepository;
 import com.oAT.web.persistence.entity.SystemIndex;
 import com.oAT.web.persistence.entity.User;
@@ -55,8 +56,11 @@ public class UserServiceImpl implements UserService{
                         .getBytes(Charset.forName("UTF-8"))));
         user.setNickName(StringUtils.hasText(register.getNickname()) ? register.getNickname().trim() : name);
         SystemIndex systemIndex = new SystemIndex(user);
-        systemRepository.save(systemIndex);
-        logger.info("register succeed！： {} ", register);
+        SystemIndex saved = systemRepository.save(systemIndex);
+        logger.info("event=user.register.completed {}", LogFields.of(LogFields.map(
+                "user_id", saved.getId(),
+                "user_name", name,
+                "email", email)));
     }
 
     @Override

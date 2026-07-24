@@ -2,6 +2,7 @@ package com.oAT.web.infra.git;
 
 import com.oAT.web.common.SourceClassUtil;
 import com.oAT.web.exceptions.FriendlyException;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.GitDiffVo;
 import org.eclipse.jgit.api.Git;
@@ -63,7 +64,9 @@ public class GitRepositoryContentService {
                 ObjectId oldId = StringUtils.hasText(oldCommit) ? repository.resolve(oldCommit) : null;
                 ObjectId newId = repository.resolve(newCommit);
                 if (newId == null) {
-                    logger.warn("Could not resolve new commit: {} in {}", newCommit, normalizedRepoUrl);
+                    logger.warn("event=git.diff.resolve_new_commit_failed {}", LogFields.of(LogFields.map(
+                            "repo_url_hash", hash(normalizedRepoUrl),
+                            "new_commit", shortCommit(newCommit))));
                     return diffList;
                 }
 
@@ -95,11 +98,16 @@ public class GitRepositoryContentService {
                 }
             }
             if (!gitCacheDir.setLastModified(System.currentTimeMillis())) {
-                logger.debug("Failed to set last modified for {}", gitCacheDir);
+                logger.debug("event=git.cache.touch_failed {}", LogFields.of(LogFields.map(
+                        "directory_hash", hash(gitCacheDir.getAbsolutePath()))));
             }
         } catch (Exception e) {
             String friendlyMessage = gitRemoteSupportService.friendlyError(e);
-            logger.error("Failed to get git diff detail: {}", friendlyMessage, e);
+            logger.error("event=git.diff_detail.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "old_commit", shortCommit(oldCommit),
+                    "new_commit", shortCommit(newCommit),
+                    "reason", friendlyMessage)), e);
             throw new FriendlyException(friendlyMessage, e);
         } finally {
             lock.unlock();
@@ -133,10 +141,15 @@ public class GitRepositoryContentService {
                         git.fetch().setCredentialsProvider(gitRemoteSupportService.credentials(username, password)).call();
                         commitObj = repository.resolve(commitId);
                     } catch (Exception e) {
-                        logger.warn("Fetch failed while resolving commit {} in {}: {}", commitId, normalizedRepoUrl, e.getMessage());
+                        logger.warn("event=git.file_content.fetch_for_commit_failed {}", LogFields.of(LogFields.map(
+                                "repo_url_hash", hash(normalizedRepoUrl),
+                                "commit_id", shortCommit(commitId),
+                                "reason", e.getMessage())));
                     }
                     if (commitObj == null) {
-                        logger.warn("Could not resolve commit {} in {}", commitId, normalizedRepoUrl);
+                        logger.warn("event=git.file_content.resolve_commit_failed {}", LogFields.of(LogFields.map(
+                                "repo_url_hash", hash(normalizedRepoUrl),
+                                "commit_id", shortCommit(commitId))));
                         return result;
                     }
                 }
@@ -159,7 +172,11 @@ public class GitRepositoryContentService {
                 }
             }
         } catch (Exception e) {
-            logger.error("Failed to get file contents at {}: {}", commitId, e.getMessage());
+            logger.error("event=git.file_contents.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "commit_id", shortCommit(commitId),
+                    "file_count", normalizedPaths.size(),
+                    "reason", e.getMessage())));
         } finally {
             lock.unlock();
         }
@@ -174,7 +191,9 @@ public class GitRepositoryContentService {
                 try {
                     clonedGit.fetch().setCredentialsProvider(gitRemoteSupportService.credentials(username, password)).call();
                 } catch (Exception e) {
-                    logger.warn("Fetch failed for cached git repository {}: {}", normalizedRepoUrl, e.getMessage());
+                    logger.warn("event=git.cache.fetch_failed {}", LogFields.of(LogFields.map(
+                            "repo_url_hash", hash(normalizedRepoUrl),
+                            "reason", e.getMessage())));
                 }
             }
         } else {
@@ -302,5 +321,17 @@ public class GitRepositoryContentService {
 
     private String normalizePath(String path) {
         return path == null ? "" : path.replace('\\', '/').replaceAll("^/+", "");
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
+    }
+
+    private String shortCommit(String commitId) {
+        if (!StringUtils.hasText(commitId)) {
+            return "-";
+        }
+        String trimmed = commitId.trim();
+        return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
     }
 }

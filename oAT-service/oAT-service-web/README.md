@@ -186,12 +186,13 @@ nohup ./start.sh > oat.log 2>&1 &
 | 前缀 | 说明 |
 | --- | --- |
 | `/api/auth` | 登录、注册、登出、当前用户 |
+| `/api/resource` | 临时资源上传 |
 | `/api/projects` | 项目列表、项目上下文 |
 | `/api/projects/{projectId}` | 项目设置、应用、成员、标签、版本、搜索 |
 | `/api/projects/{projectId}/verification` | 验证工作区、基线、分析任务、追溯矩阵、质量门禁、影响分析 |
 | `/api/projects/{projectId}/map` | 图谱首页、应用图谱、源码树和代码图 |
 
-历史页面和资源接口仍保留在 `/user`、`/p/{projectId}`、`/resource` 等路径。
+旧版 MVC 页面入口已下线，登录、项目、应用、版本、图谱和验证工作区统一使用 `/api` 接口配合前端路由。资源文件仍通过 `/r/**` 暴露。
 
 ## 测试
 

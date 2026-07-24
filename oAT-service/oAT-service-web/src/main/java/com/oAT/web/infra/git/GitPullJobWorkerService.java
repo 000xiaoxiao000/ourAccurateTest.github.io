@@ -1,6 +1,7 @@
 package com.oAT.web.infra.git;
 
 import com.oAT.web.common.Job;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.ResourceService;
 import com.oAT.web.service.entity.GitCacheInfo;
 import com.oAT.web.service.entity.GitJobVo;
@@ -64,7 +65,12 @@ public class GitPullJobWorkerService {
             deleteFile(new File(tempDir.toFile(), ".git"));
             zipDirectory(tempDir.toFile(), targetZipFile);
         } catch (Exception e) {
-            logger.error("Git download failed", e);
+            logger.error("event=git.download_package.failed {}", LogFields.of(LogFields.map(
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "branch", branch,
+                    "commit_id", shortCommit(commitId),
+                    "target_file", targetZipFile == null ? null : targetZipFile.getName(),
+                    "reason", e.getMessage())), e);
             throw new RuntimeException("代码拉取打包失败: " + gitRemoteSupportService.friendlyError(e));
         } finally {
             if (tempDir != null) {
@@ -137,7 +143,13 @@ public class GitPullJobWorkerService {
             job.getProgress().finish("完成");
             job.state = Job.JobState.finish;
         } catch (Exception e) {
-            logger.error("Git Job Failed", e);
+            logger.error("event=git.pull_job.failed {}", LogFields.of(LogFields.map(
+                    "job_id", job.getId(),
+                    "repo_url_hash", hash(normalizedRepoUrl),
+                    "branch", branch,
+                    "commit_id", shortCommit(commitId),
+                    "duration_ms", System.currentTimeMillis() - pullStartTime,
+                    "reason", e.getMessage())), e);
             job.state = Job.JobState.error;
             gitJobVo.setSuccess(false);
             gitJobVo.setMessage(gitRemoteSupportService.friendlyError(e));
@@ -145,7 +157,9 @@ public class GitPullJobWorkerService {
             runningTaskMap.remove(taskKey);
         } finally {
             if (tempZip != null && !tempZip.delete()) {
-                logger.warn("Failed to delete temp zip: {}", tempZip.getAbsolutePath());
+                logger.warn("event=git.temp_zip.delete_failed {}", LogFields.of(LogFields.map(
+                        "job_id", job.getId(),
+                        "file_path_hash", hash(tempZip.getAbsolutePath()))));
             }
             if (tempDir != null) {
                 deleteFile(tempDir.toFile());
@@ -165,10 +179,14 @@ public class GitPullJobWorkerService {
         File parent = file.getParentFile();
         if (parent != null && !parent.equals(cacheRoot)) {
             deleteFile(parent);
-            logger.info("Deleted cache directory: {}", parent.getAbsolutePath());
+            logger.info("event=git.cache.delete_directory {}", LogFields.of(LogFields.map(
+                    "cache_path", cachePath,
+                    "directory_hash", hash(parent.getAbsolutePath()))));
             deleteEmptyParents(parent.getParentFile(), cacheRoot);
         } else if (file.delete()) {
-            logger.info("Deleted cache file: {}", file.getAbsolutePath());
+            logger.info("event=git.cache.delete_file {}", LogFields.of(LogFields.map(
+                    "cache_path", cachePath,
+                    "file_path_hash", hash(file.getAbsolutePath()))));
         }
     }
 
@@ -193,7 +211,11 @@ public class GitPullJobWorkerService {
             if (files != null && files.length > 0) {
                 File found = files[0];
                 String relativePath = subdir.getName() + "/" + found.getName();
-                logger.info("Found existing cache for branch={}, commitId={}: {}", normalizedBranch, normalizedCommitId, relativePath);
+                logger.info("event=git.cache.hit {}", LogFields.of(LogFields.map(
+                        "branch", normalizedBranch,
+                        "commit_id", shortCommit(normalizedCommitId),
+                        "cache_path", relativePath,
+                        "size_bytes", found.length())));
                 return new GitCacheInfo(relativePath, found.length(), new java.util.Date(found.lastModified()));
             }
         }
@@ -291,7 +313,9 @@ public class GitPullJobWorkerService {
             }
         }
         if (!file.delete()) {
-            logger.warn("Failed to delete file: {}", file.getAbsolutePath());
+            logger.warn("event=file.delete_failed {}", LogFields.of(LogFields.map(
+                    "file_path_hash", hash(file.getAbsolutePath()),
+                    "directory", file.isDirectory())));
         }
     }
 
@@ -304,10 +328,12 @@ public class GitPullJobWorkerService {
             }
             File parent = current.getParentFile();
             if (current.delete()) {
-                logger.info("Deleted empty parent directory: {}", current.getAbsolutePath());
+                logger.info("event=file.empty_parent.delete {}", LogFields.of(LogFields.map(
+                        "directory_hash", hash(current.getAbsolutePath()))));
                 current = parent;
             } else {
-                logger.warn("Failed to delete empty parent directory: {}", current.getAbsolutePath());
+                logger.warn("event=file.empty_parent.delete_failed {}", LogFields.of(LogFields.map(
+                        "directory_hash", hash(current.getAbsolutePath()))));
                 break;
             }
         }
@@ -345,5 +371,17 @@ public class GitPullJobWorkerService {
         if (lower.contains("clone") || lower.contains("cloning")) return "克隆仓库";
         if (lower.contains("fetch")) return "拉取远程数据";
         return gitPhase;
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
+    }
+
+    private String shortCommit(String commitId) {
+        if (!StringUtils.hasText(commitId)) {
+            return "-";
+        }
+        String trimmed = commitId.trim();
+        return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
     }
 }

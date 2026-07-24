@@ -10,6 +10,7 @@ import com.github.javaparser.ast.expr.MemberValuePair;
 import com.github.javaparser.ast.expr.NormalAnnotationExpr;
 import com.github.javaparser.ast.expr.SingleMemberAnnotationExpr;
 import com.github.javaparser.ast.expr.StringLiteralExpr;
+import com.oAT.web.logging.LogFields;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -108,7 +109,9 @@ public class ApiEndpointArtifactScanner {
                         scanNestedArchive(name, bytes, endpointMap);
                     }
                 } catch (Exception ex) {
-                    logger.warn("scan archive entry failed: {}", entry.getName(), ex);
+                    logger.warn("event=api_endpoint.scan_archive_entry.failed {}", LogFields.of(LogFields.map(
+                            "entry_name", entry.getName(),
+                            "reason", ex.getMessage())), ex);
                 }
             });
         }
@@ -163,7 +166,9 @@ public class ApiEndpointArtifactScanner {
                 }
             }
         } catch (Exception ex) {
-            logger.debug("parse java source failed: {}", entryName, ex);
+            logger.debug("event=api_endpoint.parse_java_source.failed {}", LogFields.of(LogFields.map(
+                    "entry_name", entryName,
+                    "reason", ex.getMessage())), ex);
         }
     }
 
@@ -172,7 +177,9 @@ public class ApiEndpointArtifactScanner {
             ClassReader reader = new ClassReader(bytes);
             reader.accept(new EndpointClassVisitor(entryName, sourceType, endpointMap), ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
         } catch (Exception ex) {
-            logger.debug("parse class failed: {}", entryName, ex);
+            logger.debug("event=api_endpoint.parse_class.failed {}", LogFields.of(LogFields.map(
+                    "entry_name", entryName,
+                    "reason", ex.getMessage())), ex);
         }
     }
 

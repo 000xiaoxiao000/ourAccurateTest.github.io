@@ -1,5 +1,6 @@
 package com.oAT.web.verification.graph;
 
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.GraphModels;
 import com.oAT.web.verification.model.GraphModels.GraphNodeKind;
@@ -70,11 +71,17 @@ public class IncrementalRecomputeService {
                 inputHash, "system");
 
         if (submit.isCacheHit()) {
-            log.info("Incremental recompute cache hit baseline={} hash={}", baselineId, inputHash);
+            log.info("event=incremental_recompute.cache_hit {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "input_hash", inputHash)));
             return resultFromCheckpoint(submit.job().checkpointPayload());
         }
         if (!submit.isNew()) {
-            log.info("Incremental recompute deduplicated baseline={} jobId={}", baselineId, submit.jobId());
+            log.info("event=incremental_recompute.deduplicated {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "job_id", submit.jobId())));
             return resultFromCheckpoint(submit.job().checkpointPayload());
         }
 

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.node.MissingNode;
 import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.verification.model.VerificationModels.*;
 import org.slf4j.Logger;
@@ -152,7 +153,9 @@ public class VerificationAiOrchestrator {
         String cachedResponse = promptCache.get(promptHash);
         if (cachedResponse != null) {
             progress.accept("命中 Prompt 缓存，跳过 LLM 调用，直接解析已有结果");
-            logger.debug("Prompt cache hit hash={}", promptHash);
+            logger.debug("event=verification_ai.prompt_cache.hit {}", LogFields.of(LogFields.map(
+                    "baseline_id", input.baselineId(),
+                    "prompt_hash", promptHash)));
         } else {
             progress.accept("正在请求 AI 生成需求、用例和依据关系");
             cachedResponse = llmService.chat(SYSTEM_PROMPT, userMessage);
@@ -170,7 +173,9 @@ public class VerificationAiOrchestrator {
             AiVerificationResult partial = tryParseTruncatedResponse(input, response);
             if (partial != null) {
                 progress.accept("AI 返回被截断，已保留已完成的分析项并补全文档追溯");
-                logger.warn("AI 返回被截断，已恢复已完成分析项: {}", responseSummary(response));
+                logger.warn("event=verification_ai.response.truncated_recovered {}", LogFields.of(LogFields.map(
+                        "baseline_id", input.baselineId(),
+                        "response_summary", responseSummary(response))));
                 return partial;
             }
             progress.accept("AI 返回格式不完整，正在自动修复并重试");
@@ -298,7 +303,9 @@ public class VerificationAiOrchestrator {
         try {
             AiVerificationResult result = buildResult(input, UtilJson.getObjectMapper().createObjectNode());
             progress.accept("已使用文档结构化内容补全分析结果，正在保存");
-            logger.warn("AI 返回无法解析，已使用文档结构化兜底结果: 原因: {}", parseFailure.toString());
+            logger.warn("event=verification_ai.response.fallback_from_documents {}", LogFields.of(LogFields.map(
+                    "baseline_id", input.baselineId(),
+                    "reason", parseFailure.toString())));
             return result;
         } catch (RuntimeException fallbackFailure) {
             fallbackFailure.addSuppressed(parseFailure);
@@ -1219,13 +1226,21 @@ public class VerificationAiOrchestrator {
                 .filter(link -> {
                     if (!"SOURCE_SYMBOL".equals(link.targetType())) return true;
                     boolean valid = isSymbolKnown(link.targetId(), knownSymbols);
-                    if (!valid) logger.debug("Stripped hallucinated SOURCE_SYMBOL ref: {}", link.targetId());
+                    if (!valid) {
+                        logger.debug("event=verification_ai.trace_link.stripped_hallucinated_ref {}", LogFields.of(LogFields.map(
+                                "target_id_hash", hash(link.targetId()))));
+                    }
                     return valid;
                 })
                 .toList();
 
         int stripped = result.traceLinks().size() - validLinks.size();
-        if (stripped > 0) logger.warn("Stripped {} hallucinated SOURCE_SYMBOL TraceLinks", stripped);
+        if (stripped > 0) {
+            logger.warn("event=verification_ai.trace_link.stripped_hallucinated_refs {}", LogFields.of(LogFields.map(
+                    "stripped_count", stripped,
+                    "original_count", result.traceLinks().size(),
+                    "valid_count", validLinks.size())));
+        }
 
         return new AiVerificationResult(result.criteria(), result.testcases(), validLinks, result.findings());
     }
@@ -1389,6 +1404,10 @@ public class VerificationAiOrchestrator {
 
     private String responseSummary(String response) {
         return "回复长度=" + value(response).length();
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 
     private <T extends Enum<T>> T enumValue(Class<T> type, String value, T defaultValue) {

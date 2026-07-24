@@ -1,5 +1,6 @@
 package com.oAT.web.domain.version;
 
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.VersionCenterRepository;
 import com.oAT.web.persistence.entity.VersionCenterIndex;
 import com.oAT.web.persistence.entity.VersionItem;
@@ -111,12 +112,25 @@ public class VersionItemCatalogService {
             File parent = file.getParentFile();
             if (parent != null && !parent.equals(cacheRoot) && parent.getParentFile().equals(cacheRoot)) {
                 FileSystemUtils.deleteRecursively(parent);
-                logger.info("Deleted {} directory: {}", label, parent.getAbsolutePath());
+                logger.info("event=version.cache.delete_directory {}", LogFields.of(LogFields.map(
+                        "label", label,
+                        "cache_path", path,
+                        "directory_hash", hash(parent.getAbsolutePath()))));
             } else if (file.delete()) {
-                logger.info("Deleted {} file: {}", label, file.getAbsolutePath());
+                logger.info("event=version.cache.delete_file {}", LogFields.of(LogFields.map(
+                        "label", label,
+                        "cache_path", path,
+                        "file_path_hash", hash(file.getAbsolutePath()))));
             }
         } catch (Exception e) {
-            logger.warn("Error deleting {} file: {}", label, path, e);
+            logger.warn("event=version.cache.delete_failed {}", LogFields.of(LogFields.map(
+                    "label", label,
+                    "cache_path", path,
+                    "reason", e.getMessage())), e);
         }
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 }

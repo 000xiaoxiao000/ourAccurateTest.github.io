@@ -67,10 +67,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ResultNotified<Object>> handleUnexpected(Exception e) {
         if (isClientDisconnected(e)) {
-            logger.debug("客户端已断开连接，停止写入 API 响应: {}", e.getMessage());
+            logger.debug("event=api.client_disconnected {}", LogFields.of(LogFields.map("reason", e.getMessage())));
             return null;
         }
-        logger.error("API request failed unexpectedly", e);
+        logger.error("event=api.unexpected_error {}", LogFields.of(LogFields.map(
+                "exception", e.getClass().getSimpleName(),
+                "reason", e.getMessage())), e);
         ResultNotified<Object> result = new ResultNotified<>(false, "系统暂时无法处理请求，请稍后重试");
         result.setErrorMessage("INTERNAL_ERROR");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(result);

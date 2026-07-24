@@ -3,6 +3,7 @@ package com.oAT.web.verification.impact;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.service.entity.GitDiffVo;
@@ -80,7 +81,12 @@ public class GitImpactAnalysisService {
             String oldSource = oldSources.get(file.getOldPath());
             String newSource = newSources.get(file.getNewPath());
             if (tooLarge(oldSource) || tooLarge(newSource)) {
-                logger.info("Skip structural analysis for large changed file {}", path);
+                logger.info("event=git_impact.structural_analysis.skipped_large_file {}", LogFields.of(LogFields.map(
+                        "app_id", app.getId(),
+                        "path_hash", hash(path),
+                        "old_chars", oldSource == null ? 0 : oldSource.length(),
+                        "new_chars", newSource == null ? 0 : newSource.length(),
+                        "max_chars", MAX_STRUCTURAL_SOURCE_CHARS)));
                 continue;
             }
             List<SymbolSnapshot> oldSymbols = analyzer.analyze(path, oldSource);
@@ -121,6 +127,7 @@ public class GitImpactAnalysisService {
 
     private void runLlmReview(String reportId, List<ImpactCandidate> candidates) {
         List<LlmJudgement> result = new ArrayList<>();
+        long started = System.nanoTime();
         llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.RUNNING, candidates.size(), 0, List.of(), ""));
         try {
             for (ImpactCandidate candidate : candidates) {
@@ -130,7 +137,12 @@ public class GitImpactAnalysisService {
             }
             llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, candidates.size(), result.size(), List.copyOf(result), ""));
         } catch (RuntimeException exception) {
-            logger.warn("LLM impact review task failed for report {}: {}", reportId, exception.getMessage());
+            logger.warn("event=git_impact.llm_review.failed {}", LogFields.of(LogFields.map(
+                    "report_id", reportId,
+                    "candidate_count", candidates.size(),
+                    "completed_count", result.size(),
+                    "duration_ms", (System.nanoTime() - started) / 1_000_000,
+                    "reason", exception.getMessage())));
             llmReviews.put(reportId, new LlmReviewProgress(reportId, LlmReviewStatus.FAILED, candidates.size(), result.size(), List.copyOf(result), exception.getMessage()));
         }
     }
@@ -148,7 +160,10 @@ public class GitImpactAnalysisService {
                     confidence = .5d;
                 }
             } catch (RuntimeException exception) {
-                logger.warn("LLM impact review unavailable for {} -> {}: {}", candidate.seedSymbol(), candidate.targetSymbol(), exception.getMessage());
+                logger.warn("event=git_impact.llm_review.candidate_unavailable {}", LogFields.of(LogFields.map(
+                        "seed_symbol_hash", hash(candidate.seedSymbol()),
+                        "target_symbol_hash", hash(candidate.targetSymbol()),
+                        "reason", exception.getMessage())));
                 decision = LlmDecision.UNCERTAIN;
                 confidence = .25d;
             }
@@ -170,12 +185,18 @@ public class GitImpactAnalysisService {
                     .completeOnTimeout(null, LLM_REVIEW_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                     .join();
             if (!StringUtils.hasText(answer)) {
-                logger.warn("LLM impact review timed out or returned empty for {} -> {}", candidate.seedSymbol(), candidate.targetSymbol());
+                logger.warn("event=git_impact.llm_review.empty_response {}", LogFields.of(LogFields.map(
+                        "seed_symbol_hash", hash(candidate.seedSymbol()),
+                        "target_symbol_hash", hash(candidate.targetSymbol()),
+                        "timeout_seconds", LLM_REVIEW_TIMEOUT_SECONDS)));
                 return LlmDecision.UNCERTAIN;
             }
             return parseDecision(answer);
         } catch (RuntimeException exception) {
-            logger.warn("LLM impact review unavailable for {} -> {}: {}", candidate.seedSymbol(), candidate.targetSymbol(), exception.getMessage());
+            logger.warn("event=git_impact.llm_review.unavailable {}", LogFields.of(LogFields.map(
+                    "seed_symbol_hash", hash(candidate.seedSymbol()),
+                    "target_symbol_hash", hash(candidate.targetSymbol()),
+                    "reason", exception.getMessage())));
             return LlmDecision.UNCERTAIN;
         }
     }
@@ -187,7 +208,8 @@ public class GitImpactAnalysisService {
             String value = root.path("decision").asText("");
             return LlmDecision.valueOf(value.trim().toUpperCase());
         } catch (Exception exception) {
-            logger.warn("Unable to parse LLM impact decision json: {}", exception.getMessage());
+            logger.warn("event=git_impact.llm_review.parse_failed {}", LogFields.of(LogFields.map(
+                    "reason", exception.getMessage())));
             return LlmDecision.UNCERTAIN;
         }
     }
@@ -218,6 +240,10 @@ public class GitImpactAnalysisService {
 
     private boolean tooLarge(String source) {
         return source != null && source.length() > MAX_STRUCTURAL_SOURCE_CHARS;
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 
     private List<GraphEdge> dependencyEdges(List<SymbolSnapshot> symbols) {

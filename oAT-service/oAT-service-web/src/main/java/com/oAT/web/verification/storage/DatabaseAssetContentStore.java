@@ -1,5 +1,6 @@
 package com.oAT.web.verification.storage;
 
+import com.oAT.web.logging.LogFields;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -117,7 +118,11 @@ public class DatabaseAssetContentStore implements AssetContentStore {
                         FROM oat_verification_baseline WHERE status NOT IN ('STALE','FAILED')
                   )
                 """, Timestamp.valueOf(cutoff));
-        if (rows > 0) log.info("Cold-tier: soft-archived {} asset content rows (cutoff={}d)", rows, warmTierDays);
+        if (rows > 0) {
+            log.info("event=asset_content.soft_archive.completed {}", LogFields.of(LogFields.map(
+                    "archived_rows", rows,
+                    "warm_tier_days", warmTierDays)));
+        }
         return rows;
     }
 
@@ -136,7 +141,11 @@ public class DatabaseAssetContentStore implements AssetContentStore {
                   AND archived_at < ?
                   AND content_text IS NOT NULL
                 """, Timestamp.valueOf(cutoff));
-        if (rows > 0) log.info("Cold-tier: hard-archived (cleared text) {} asset content rows (cutoff={}d)", rows, coldTierDays);
+        if (rows > 0) {
+            log.info("event=asset_content.hard_archive.completed {}", LogFields.of(LogFields.map(
+                    "archived_rows", rows,
+                    "cold_tier_days", coldTierDays)));
+        }
         return rows;
     }
 

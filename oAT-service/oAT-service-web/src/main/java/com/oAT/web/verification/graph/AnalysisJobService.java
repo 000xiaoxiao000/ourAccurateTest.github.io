@@ -1,5 +1,6 @@
 package com.oAT.web.verification.graph;
 
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.GraphModels;
 import com.oAT.web.verification.model.VerificationModels.AnalysisJob;
@@ -55,7 +56,10 @@ public class AnalysisJobService {
         Optional<AnalysisJob> cached = verificationRepository.findSucceededJobByInputHash(
                 baselineId, jobType, inputHash);
         if (cached.isPresent()) {
-            log.debug("Cache hit for job type={} baseline={} hash={}", jobType, baselineId, inputHash);
+            log.debug("event=analysis_job.cache_hit {}", LogFields.of(LogFields.map(
+                    "job_type", jobType,
+                    "baseline_id", baselineId,
+                    "input_hash", inputHash)));
             return new SubmitResult(cached.get().id(), SubmitOutcome.CACHE_HIT, cached.get());
         }
 
@@ -63,7 +67,11 @@ public class AnalysisJobService {
         Optional<AnalysisJob> active = verificationRepository.findActiveJobByInputHash(
                 baselineId, jobType, inputHash);
         if (active.isPresent()) {
-            log.debug("Deduped job type={} baseline={} hash={} existing={}", jobType, baselineId, inputHash, active.get().id());
+            log.debug("event=analysis_job.deduplicated {}", LogFields.of(LogFields.map(
+                    "job_type", jobType,
+                    "baseline_id", baselineId,
+                    "input_hash", inputHash,
+                    "existing_job_id", active.get().id())));
             return new SubmitResult(active.get().id(), SubmitOutcome.DEDUPLICATED, active.get());
         }
 
@@ -73,7 +81,13 @@ public class AnalysisJobService {
         AnalysisJob job = new AnalysisJob(jobId, projectId, baselineId, jobType, inputHash,
                 AnalysisJobStatus.QUEUED, null, createdBy, now, now, null, null, Map.of(), 0, 3);
         verificationRepository.saveAnalysisJob(job);
-        log.info("Enqueued job id={} type={} baseline={}", jobId, jobType, baselineId);
+        log.info("event=analysis_job.enqueued {}", LogFields.of(LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "job_id", jobId,
+                "job_type", jobType,
+                "input_hash", inputHash,
+                "created_by", createdBy)));
         return new SubmitResult(jobId, SubmitOutcome.ENQUEUED, job);
     }
 
@@ -95,19 +109,23 @@ public class AnalysisJobService {
      */
     public void checkpoint(String jobId, String stepName, Map<String, Object> payload) {
         verificationRepository.saveCheckpoint(jobId, stepName, payload);
-        log.debug("Checkpoint saved job={} step={}", jobId, stepName);
+        log.debug("event=analysis_job.checkpoint_saved {}", LogFields.of(LogFields.map(
+                "job_id", jobId,
+                "step", stepName)));
     }
 
     // ── Complete / Fail ───────────────────────────────────────────────────────
 
     public void succeed(String jobId) {
         verificationRepository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, null, LocalDateTime.now());
-        log.info("Job succeeded id={}", jobId);
+        log.info("event=analysis_job.succeeded {}", LogFields.of(LogFields.map("job_id", jobId)));
     }
 
     public void fail(String jobId, String reason) {
         verificationRepository.failAndScheduleRetry(jobId, reason);
-        log.warn("Job failed id={} reason={}", jobId, reason);
+        log.warn("event=analysis_job.failed {}", LogFields.of(LogFields.map(
+                "job_id", jobId,
+                "reason", reason)));
     }
 
     // ── Input hash helpers ────────────────────────────────────────────────────

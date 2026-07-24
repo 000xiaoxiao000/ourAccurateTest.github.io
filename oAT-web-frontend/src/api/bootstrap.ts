@@ -235,7 +235,7 @@ export * from './version'
 export function uploadResource(file: File) {
   const formData = new FormData()
   formData.append('file', file)
-  return apiPost<string>('/resource/upload', formData)
+  return apiPost<string>('/api/resource/upload', formData)
 }
 
 export function searchKeyword(projectId: string, keyword: string, type?: 'usecase') {

@@ -1,6 +1,7 @@
 package com.oAT.web.language.java;
 
 import com.oAT.web.common.SourceClassUtil;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.VersionCenterRepository;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.persistence.entity.VersionCenterIndex;
@@ -141,9 +142,15 @@ public class JavaSourcePresenceService {
                 entries.add(en.nextElement().getName());
             }
         } catch (IOException e) {
-            logger.error("Failed to read zip entries from {}", path, e);
+            logger.error("event=java_source_presence.read_zip_entries.failed {}", LogFields.of(LogFields.map(
+                    "path_hash", hash(path),
+                    "reason", e.getMessage())), e);
         }
         return entries;
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 
     public static class SourcePresenceFilterResult {

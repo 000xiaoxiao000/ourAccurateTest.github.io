@@ -4,6 +4,7 @@ import com.oAT.web.common.FriendlyErrorMessageUtil;
 import com.oAT.web.common.Job;
 import com.oAT.web.common.compare.CompareResult;
 import com.oAT.web.common.compare.CompareUtils;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.VersionCompareReport;
 import com.oAT.web.exceptions.FriendlyException;
 import com.oAT.web.domain.version.VersionGitDiffCompareService;
@@ -113,7 +114,13 @@ public class VersionServiceImpl implements VersionService, InitializingBean {
             } catch (Exception e) {
                 markCompareJobError(job, e, "版本文件比对失败，请检查选择的文件后重试。");
                 job.state = Job.JobState.error;
-                logger.error("版本文件比对失败:{}", job.getData(), e);
+                logger.error("event=version.compare_file.failed {}", LogFields.of(LogFields.map(
+                        "job_id", job.getId(),
+                        "project_id", jobInfo.getProjectId(),
+                        "app_id", jobInfo.getAppId(),
+                        "source_file_hash", hash(sourceFile),
+                        "target_file_hash", hash(targetFile),
+                        "reason", e.getMessage())), e);
             } finally {
                 if (job.state != Job.JobState.error) {
                     job.state = Job.JobState.finish;
@@ -125,7 +132,10 @@ public class VersionServiceImpl implements VersionService, InitializingBean {
                         jobs.remove(job);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        logger.error("比对任务移除失败", e);
+                        logger.error("event=version.compare_job.remove_interrupted {}", LogFields.of(LogFields.map(
+                                "job_id", job.getId(),
+                                "project_id", jobInfo.getProjectId(),
+                                "app_id", jobInfo.getAppId())), e);
                     }
                 }).start();
             }
@@ -197,7 +207,10 @@ public class VersionServiceImpl implements VersionService, InitializingBean {
                         jobs.remove(job);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        logger.error("移除比对任务失败", e);
+                        logger.error("event=version.compare_job.remove_interrupted {}", LogFields.of(LogFields.map(
+                                "job_id", job.getId(),
+                                "project_id", jobInfo.getProjectId(),
+                                "app_id", jobInfo.getAppId())), e);
                     }
                 }).start();
             }
@@ -276,7 +289,13 @@ public class VersionServiceImpl implements VersionService, InitializingBean {
         } catch (IOException e) {
             markCompareJobError(job, e, "版本文件比对失败，请检查选择的文件后重试。");
             job.state = Job.JobState.error;
-            logger.error("版本文件比对失败:{}", job.getData(), e);
+            logger.error("event=version.compare_file.failed {}", LogFields.of(LogFields.map(
+                    "job_id", job.getId(),
+                    "project_id", job.getData().getProjectId(),
+                    "app_id", job.getData().getAppId(),
+                    "source_file_hash", hash(job.getData().getSourceFile()),
+                    "target_file_hash", hash(job.getData().getTargetFile()),
+                    "reason", e.getMessage())), e);
             return;
         }
         job.getData().setDifferences(difference);
@@ -372,6 +391,10 @@ public class VersionServiceImpl implements VersionService, InitializingBean {
         }
         String trimmed = commitId.trim();
         return trimmed.length() > 7 ? trimmed.substring(0, 7) : trimmed;
+    }
+
+    private String hash(String value) {
+        return Integer.toHexString(String.valueOf(value).hashCode());
     }
 
 }

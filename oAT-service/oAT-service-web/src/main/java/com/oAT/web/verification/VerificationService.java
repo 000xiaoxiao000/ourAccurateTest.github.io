@@ -1,6 +1,7 @@
 package com.oAT.web.verification;
 
 import com.oAT.web.coverage.universal.CoverageReportService;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.ClassCoverageIndexRepository;
 import com.oAT.web.persistence.StaticInfoRepository;
 import com.oAT.web.persistence.entity.ClassCoverageIndex;
@@ -236,11 +237,23 @@ public class VerificationService {
 
     private void runAnalysisJob(String projectId, String baselineId, String jobId) {
         updateAnalysisProgress(jobId, "正在准备分析资料");
+        long started = System.nanoTime();
         try {
             executeAnalysis(projectId, baselineId, jobId);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.SUCCEEDED, "分析完成，结果已生成", LocalDateTime.now());
+            logger.info("event=verification.analysis.completed {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "job_id", jobId,
+                    "duration_ms", (System.nanoTime() - started) / 1_000_000)));
         } catch (Throwable e) {
-            logger.error("AI分析任务失败, baselineId={}, jobId={}", baselineId, jobId, e);
+            logger.error("event=verification.analysis.failed {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "job_id", jobId,
+                    "duration_ms", (System.nanoTime() - started) / 1_000_000,
+                    "exception", e.getClass().getSimpleName(),
+                    "reason", e.getMessage())), e);
             String message = readableAnalysisFailure(e);
             repository.updateAnalysisJobStatus(jobId, AnalysisJobStatus.FAILED,
                     message, LocalDateTime.now());
@@ -321,7 +334,11 @@ public class VerificationService {
                 "AI分析任务超过 " + ANALYSIS_HEARTBEAT_TIMEOUT_MINUTES + " 分钟没有进度更新，已自动终止。请检查服务日志后重试。");
         if (recovered > 0) {
             repository.updateBaselineStatus(baselineId, BaselineStatus.FAILED);
-            logger.warn("已自动终止超时AI分析任务, projectId={}, baselineId={}, count={}", projectId, baselineId, recovered);
+            logger.warn("event=verification.analysis.timeout_recovered {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "recovered_count", recovered,
+                    "timeout_minutes", ANALYSIS_HEARTBEAT_TIMEOUT_MINUTES)));
         }
     }
 
@@ -478,7 +495,8 @@ public class VerificationService {
         try {
             projection.run();
         } catch (RuntimeException exception) {
-            logger.warn("图谱可选投影步骤失败，已跳过并继续: {}", exception.getMessage());
+            logger.warn("event=verification.graph.optional_projection_skipped {}", LogFields.of(LogFields.map(
+                    "reason", exception.getMessage())));
         }
     }
 

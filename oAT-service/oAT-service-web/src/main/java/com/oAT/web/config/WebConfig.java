@@ -1,7 +1,6 @@
 package com.oAT.web.config;
 
 import com.oAT.web.control.LoginInterceptor;
-import com.oAT.web.control.ProjectInterceptor;
 import com.oAT.web.service.ResourceService;
 import org.jspecify.annotations.NonNull;
 import org.springframework.context.annotation.Configuration;
@@ -15,16 +14,13 @@ import java.io.File;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
-    private final ProjectInterceptor projectInterceptor;
     private final LoginInterceptor loginInterceptor;
     private final ResourceService resourceService;
     private final FrontendProperties frontendProperties;
 
-    public WebConfig(ProjectInterceptor projectInterceptor,
-                     LoginInterceptor loginInterceptor,
+    public WebConfig(LoginInterceptor loginInterceptor,
                      ResourceService resourceService,
                      FrontendProperties frontendProperties) {
-        this.projectInterceptor = projectInterceptor;
         this.loginInterceptor = loginInterceptor;
         this.resourceService = resourceService;
         this.frontendProperties = frontendProperties;
@@ -34,11 +30,9 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(loginInterceptor)
                 .addPathPatterns("/**")
-                .excludePathPatterns("/", "/login", "/doLogin", "/register", "/doRegister",
-                        "/r/**", "/error", "/share/**", "/share/api/**",
+                .excludePathPatterns("/", "/r/**", "/error", "/share/**", "/share/api/**",
                         "/webhook/**",
                         "/api/auth/login", "/api/auth/register", "/api/auth/me");
-        registry.addInterceptor(projectInterceptor).addPathPatterns("/p/**");
     }
 
     @Override
