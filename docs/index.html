@@ -17,7 +17,9 @@
         <span>ourAccurateTest</span>
       </a>
       <nav class="site-nav" aria-label="站点导航">
-        <a href="#features">能力</a>
+        <a href="#workflow">流程</a>
+        <a href="#features">场景</a>
+        <a href="#coverage">覆盖率</a>
         <a href="#architecture">架构</a>
         <a href="#start">启动</a>
         <a href="#contact">交流</a>
@@ -30,14 +32,14 @@
           <p class="eyebrow">AI Requirement Verification</p>
           <h1>ourAccurateTest</h1>
           <p class="hero-summary">
-            面向研发、测试和质量保障团队的 AI 需求一致性验证平台，将需求、用例、源码、版本变更、
-            运行证据和覆盖率数据组织成可追溯关系。
+            从需求和用例导入开始，串联 AI 验证、链路地图、Git 影响分析和质量门禁，
+            帮助团队判断每次实现与变更是否真的满足需求。
           </p>
           <div class="hero-actions" aria-label="主要操作">
             <a class="primary-link" href="https://github.com/000xiaoxiao000/ourAccurateTest.github.io" rel="noreferrer">
               查看源码
             </a>
-            <a class="secondary-link" href="#start">本地启动</a>
+            <a class="secondary-link" href="#workflow">查看流程</a>
           </div>
         </div>
 
@@ -50,7 +52,7 @@
           <div class="board-grid">
             <div class="board-panel wide">
               <span class="panel-label">Traceability Graph</span>
-              <strong>需求 -> 用例 -> 源码 -> 证据</strong>
+              <strong>需求 -> 用例 -> 源码 -> 依据</strong>
               <div class="flow-line">
                 <span>REQ</span>
                 <i></i>
@@ -62,56 +64,188 @@
               </div>
             </div>
             <div class="board-panel">
-              <span class="panel-label">Quality Gate</span>
-              <strong>84%</strong>
-              <small>通过率</small>
+              <span class="panel-label">AI Verification</span>
+              <strong>12</strong>
+              <small>待复核发现</small>
             </div>
             <div class="board-panel">
-              <span class="panel-label">AI Findings</span>
-              <strong>12</strong>
-              <small>待复核风险</small>
+              <span class="panel-label">Quality Gate</span>
+              <strong>84%</strong>
+              <small>当前基线通过率</small>
             </div>
             <div class="board-panel wide">
-              <span class="panel-label">Impact Analysis</span>
+              <span class="panel-label">Git Impact</span>
               <div class="change-list">
-                <span>commit diff</span>
-                <span>coverage drift</span>
-                <span>stale links</span>
+                <span>Commit Diff 定位变更代码</span>
+                <span>链路地图标记过期关系</span>
+                <span>门禁汇总待复核影响</span>
               </div>
             </div>
           </div>
         </div>
       </section>
 
+      <section id="workflow" class="content-section">
+        <div class="section-head">
+          <p class="eyebrow">User Flow</p>
+          <h2>一次验证，从依据准备到变更闭环</h2>
+          <p>
+            页面按研发和测试实际使用路径组织：先沉淀验证基线，再让 AI 生成可复核发现，
+            通过链路地图定位缺口，最后把 Git 变更影响纳入门禁。
+          </p>
+        </div>
+        <div class="workflow-list">
+          <article class="workflow-step">
+            <div class="workflow-copy">
+              <div class="step-header">
+                <span class="step-index">01</span>
+                <h3>建立验证基线</h3>
+              </div>
+              <p>导入需求、验收标准、测试用例、源码快照、执行依据和覆盖率，让后续分析基于同一组版本化依据。</p>
+            </div>
+            <div class="workflow-media" aria-label="验证基线界面预览">
+              <img src="./assets/workflow-02-ai-verification.png" alt="建立验证基线界面截图" loading="lazy">
+            </div>
+          </article>
+          <article class="workflow-step reverse">
+            <div class="workflow-copy">
+              <div class="step-header">
+                <span class="step-index">02</span>
+                <h3>运行 AI 一致性验证</h3>
+              </div>
+              <p>LLM 结合结构化依据生成追溯关系、覆盖缺口、实现偏差和风险摘要，结果进入人工复核队列。</p>
+            </div>
+            <div class="workflow-media" aria-label="AI 一致性验证界面预览">
+              <img src="./assets/workflow-01-baseline.png" alt="AI 一致性验证界面截图" loading="lazy">
+            </div>
+          </article>
+          <article class="workflow-step">
+            <div class="workflow-copy">
+              <div class="step-header">
+                <span class="step-index">03</span>
+                <h3>查看链路地图</h3>
+              </div>
+              <p>以需求、用例、代码、执行依据和覆盖率为节点，沿着验证链路定位断点、弱关联和需要补充的材料。</p>
+            </div>
+            <div class="workflow-media" aria-label="链路地图界面预览">
+              <img src="./assets/workflow-03-trace-map.png" alt="链路地图界面截图" loading="lazy">
+            </div>
+          </article>
+          <article class="workflow-step reverse">
+            <div class="workflow-copy">
+              <div class="step-header">
+                <span class="step-index">04</span>
+                <h3>评估 Git 影响</h3>
+              </div>
+              <p>选择 Commit 或 Diff 后，系统映射变更文件与方法，标记受影响的需求、用例、链路和 AI 结论。</p>
+            </div>
+            <div class="workflow-media" aria-label="Git 影响分析界面预览">
+              <img src="./assets/workflow-04-git-impact.png" alt="Git 影响分析界面截图" loading="lazy">
+            </div>
+          </article>
+          <article class="workflow-step">
+            <div class="workflow-copy">
+              <div class="step-header">
+                <span class="step-index">05</span>
+                <h3>通过门禁闭环</h3>
+              </div>
+              <p>按通过率、未覆盖需求、未审核风险和变更影响判断发布状态，保留豁免和复核记录。</p>
+            </div>
+            <div class="workflow-media" aria-label="质量门禁界面预览">
+              <img src="./assets/workflow-05-quality-gate.png" alt="质量门禁界面截图" loading="lazy">
+            </div>
+          </article>
+        </div>
+      </section>
+
       <section id="features" class="content-section">
         <div class="section-head">
-          <p class="eyebrow">Core Capabilities</p>
-          <h2>核心能力</h2>
+          <p class="eyebrow">Daily Scenarios</p>
+          <h2>围绕关键场景组织能力</h2>
+          <p>
+            核心功能面向三类高频问题：需求有没有被验证、变更会影响哪里、当前版本能不能进入下一阶段。
+          </p>
         </div>
         <div class="feature-grid">
           <article class="feature-card">
-            <h3>验证工作区</h3>
-            <p>导入需求、用例、源码、执行报告、覆盖率和 Git 源码快照，沉淀可复核的验证基线。</p>
+            <span class="feature-tag">AI 验证</span>
+            <h3>发现需求与实现偏差</h3>
+            <p>用需求、用例、源码和执行依据共同约束 AI 输出，形成可追溯、可复核的风险发现。</p>
           </article>
           <article class="feature-card">
-            <h3>一致性分析</h3>
-            <p>结合 LLM 与结构化证据生成追溯边、风险发现和分析摘要，辅助识别实现偏差。</p>
+            <span class="feature-tag">链路地图</span>
+            <h3>从需求追到代码和依据</h3>
+            <p>查看需求、用例、源码、接口、执行结果、覆盖率和 AI 发现之间的关联关系。</p>
           </article>
           <article class="feature-card">
-            <h3>追溯矩阵与图谱</h3>
-            <p>查看需求、用例、源码、运行证据、覆盖率和 AI 发现之间的关联关系。</p>
+            <span class="feature-tag">Git 影响</span>
+            <h3>让代码变更驱动复核</h3>
+            <p>基于 Commit、Diff 和源码快照识别影响范围，并把过期链路和待复核项推送到验证流程。</p>
           </article>
           <article class="feature-card">
-            <h3>质量门禁</h3>
-            <p>配置门禁策略、评估基线结果、记录豁免并识别 stale 状态。</p>
+            <span class="feature-tag">质量门禁</span>
+            <h3>明确版本是否可继续</h3>
+            <p>按覆盖率、未关联需求、未审核风险和 stale 状态生成门禁结论，支持豁免记录。</p>
           </article>
           <article class="feature-card">
-            <h3>Git 影响分析</h3>
-            <p>基于 Commit、Diff 和源码快照分析变更范围，并联动图谱过期标记。</p>
+            <span class="feature-tag">源码与覆盖率</span>
+            <h3>补足机器可读依据</h3>
+            <p>解析 Java 源码、字节码、接口端点和多语言覆盖率报告，为图谱和门禁提供结构化事实。</p>
           </article>
           <article class="feature-card">
+            <span class="feature-tag">流量采集</span>
             <h3>桌面流量采集</h3>
             <p>采集、过滤、查看、重放和导出 HTTP、HTTPS、WebSocket、MQTT 等流量。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="coverage" class="content-section">
+        <div class="section-head">
+          <p class="eyebrow">Coverage Inputs</p>
+          <h2>覆盖率怎么得到</h2>
+          <p>
+            平台消费的是被测系统实际运行后的覆盖率文件。先用 agent、插桩包或运行时采集器启动应用，
+            再执行业务流量、接口自动化或端到端场景，最后导出报告并导入验证基线。
+          </p>
+        </div>
+        <div class="coverage-grid">
+          <article class="coverage-card">
+            <h3>Java / Kotlin</h3>
+            <p>启动被测服务时挂载 JaCoCo agent 生成 jacoco.exec，场景跑完后用 JaCoCo CLI 转成 XML。</p>
+            <code>java -javaagent:jacocoagent.jar=destfile=jacoco.exec -jar app.jar
+java -jar jacococli.jar report jacoco.exec --classfiles target/classes --sourcefiles src/main/java --xml jacoco.xml</code>
+          </article>
+          <article class="coverage-card">
+            <h3>JavaScript / TypeScript</h3>
+            <p>用 nyc/Istanbul 包裹被测 Node 服务或插桩前端代码，真实场景结束后生成 LCOV。</p>
+            <code>nyc --reporter=lcov --report-dir coverage node server.js
+nyc report --reporter=lcov</code>
+          </article>
+          <article class="coverage-card">
+            <h3>Python</h3>
+            <p>用 coverage.py 包裹被测 Web 服务或任务进程，执行真实请求后导出 XML 或 LCOV。</p>
+            <code>coverage run -m uvicorn app:app
+coverage xml -o coverage.xml</code>
+          </article>
+          <article class="coverage-card">
+            <h3>Go</h3>
+            <p>构建带覆盖率插桩的可执行文件，运行真实服务后从 GOCOVERDIR 汇总 coverage.out。</p>
+            <code>go build -cover -o app ./cmd/app
+GOCOVERDIR=./cov ./app
+go tool covdata textfmt -i=./cov -o coverage.out</code>
+          </article>
+          <article class="coverage-card">
+            <h3>C / C++</h3>
+            <p>用 gcov/lcov 或 llvm-cov 插桩编译被测程序，场景执行后导出 LCOV 或 gcov 文件。</p>
+            <code>gcc --coverage -O0 app.c -o app
+./app
+lcov --capture --directory . --output-file coverage.info</code>
+          </article>
+          <article class="coverage-card">
+            <h3>统一导入</h3>
+            <p>把运行时产出的 JaCoCo XML、Istanbul LCOV、coverage.py XML、go cover 或 gcov/lcov 报告关联到当前基线。</p>
+            <code>基线 -> 覆盖率 -> 上传报告</code>
           </article>
         </div>
       </section>
