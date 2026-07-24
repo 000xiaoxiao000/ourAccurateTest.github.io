@@ -129,10 +129,45 @@ export interface TraceabilityMapResponse {
 export interface CodeGraphData {
   dependencies: CodeDependency[]
   controlFlows: ControlFlowStep[]
+  controlFlowGraphs?: ControlFlowGraph[]
 }
 
 export interface CodeDependency { source: string; target: string; kind: string }
 export interface ControlFlowStep { methodId: string; methodLabel: string; kind: string; expression: string; order: number }
+export type ControlFlowParseStatus = 'PRECISE' | 'PARTIAL' | 'UNSUPPORTED_LANGUAGE' | 'PARSE_FAILED' | 'EMPTY'
+export type ControlFlowNodeType = 'START' | 'ACTION' | 'DECISION' | 'LOOP' | 'SWITCH' | 'CASE' | 'TRY' | 'CATCH' | 'FINALLY' | 'RETURN' | 'THROW' | 'BREAK' | 'CONTINUE' | 'MERGE' | 'END' | 'UNKNOWN_BLOCK'
+export type ControlFlowEdgeType = 'NEXT' | 'TRUE' | 'FALSE' | 'CASE' | 'DEFAULT' | 'LOOP_BODY' | 'LOOP_BACK' | 'EXCEPTION' | 'FINALLY' | 'BREAK' | 'CONTINUE' | 'RETURN' | 'THROW'
+export interface ControlFlowGraph {
+  methodId: string
+  methodLabel: string
+  language: string
+  parseStatus: ControlFlowParseStatus
+  message?: string
+  nodes: ControlFlowNode[]
+  edges: ControlFlowEdge[]
+  entryNodeId?: string
+  exitNodeIds: string[]
+}
+export interface ControlFlowNode {
+  id: string
+  type: ControlFlowNodeType
+  label: string
+  expression?: string
+  line?: number
+  order: number
+  depth: number
+  precise: boolean
+  coverageState?: 'COVERED' | 'UNCOVERED' | 'PARTIAL' | 'UNKNOWN'
+}
+export interface ControlFlowEdge {
+  id: string
+  source: string
+  target: string
+  type: ControlFlowEdgeType
+  label?: string
+  precise: boolean
+  coverageState?: 'COVERED' | 'UNCOVERED' | 'PARTIAL' | 'UNKNOWN'
+}
 
 export interface TraceabilityMapQuery {
   baselineId?: string

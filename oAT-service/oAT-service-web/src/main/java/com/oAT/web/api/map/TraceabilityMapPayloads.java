@@ -130,7 +130,8 @@ public final class TraceabilityMapPayloads {
 
     public record CodeGraphData(
             List<CodeDependency> dependencies,
-            List<ControlFlowStep> controlFlows) {
+            List<ControlFlowStep> controlFlows,
+            List<ControlFlowGraph> controlFlowGraphs) {
     }
 
     public record CodeDependency(String source, String target, String kind) {
@@ -139,10 +140,47 @@ public final class TraceabilityMapPayloads {
     public record ControlFlowStep(String methodId, String methodLabel, String kind, String expression, int order) {
     }
 
+    public record ControlFlowGraph(
+            String methodId,
+            String methodLabel,
+            String language,
+            ControlFlowParseStatus parseStatus,
+            String message,
+            List<ControlFlowNode> nodes,
+            List<ControlFlowEdge> edges,
+            String entryNodeId,
+            List<String> exitNodeIds) {
+    }
+
+    public record ControlFlowNode(
+            String id,
+            ControlFlowNodeType type,
+            String label,
+            String expression,
+            Integer line,
+            int order,
+            int depth,
+            boolean precise,
+            String coverageState) {
+    }
+
+    public record ControlFlowEdge(
+            String id,
+            String source,
+            String target,
+            ControlFlowEdgeType type,
+            String label,
+            boolean precise,
+            String coverageState) {
+    }
+
     public enum NodeKind { REQUIREMENT, TESTCASE, CODE_FILE, CODE_CLASS, CODE_METHOD }
     public enum CodeTreeKind { DIRECTORY, FILE, CLASS, METHOD }
     public enum Relation { VERIFIED_BY, COVERS, IMPLEMENTED_BY, CALLS }
     public enum EvidenceType { DOCUMENT, AI, STATIC_ANALYSIS, COVERAGE, EXECUTION_TRACE, DERIVED }
     public enum CallEvidence { DYNAMIC_CONFIRMED, STATIC_BRIDGED, STATIC_ONLY }
     public enum EvidenceState { NONE, STATIC, DYNAMIC, BOTH }
+    public enum ControlFlowParseStatus { PRECISE, PARTIAL, UNSUPPORTED_LANGUAGE, PARSE_FAILED, EMPTY }
+    public enum ControlFlowNodeType { START, ACTION, DECISION, LOOP, SWITCH, CASE, TRY, CATCH, FINALLY, RETURN, THROW, BREAK, CONTINUE, MERGE, END, UNKNOWN_BLOCK }
+    public enum ControlFlowEdgeType { NEXT, TRUE, FALSE, CASE, DEFAULT, LOOP_BODY, LOOP_BACK, EXCEPTION, FINALLY, BREAK, CONTINUE, RETURN, THROW }
 }

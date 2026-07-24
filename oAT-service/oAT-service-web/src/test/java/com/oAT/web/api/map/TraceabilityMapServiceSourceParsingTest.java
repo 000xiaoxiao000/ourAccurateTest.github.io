@@ -1,5 +1,7 @@
 package com.oAT.web.api.map;
 
+import com.github.javaparser.StaticJavaParser;
+import com.github.javaparser.ast.stmt.BlockStmt;
 import com.oAT.web.persistence.entity.ClassCoverageIndex;
 import com.oAT.web.coverage.universal.JacocoCoverageParser;
 import com.oAT.web.coverage.universal.UniversalCoverageFile;
@@ -31,6 +33,486 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class TraceabilityMapServiceSourceParsingTest {
+
+    @Test
+    void buildsPreciseJavaCfgWithoutConnectingReturnToContinuation() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        BlockStmt body = StaticJavaParser.parseBlock("""
+                {
+                  if (num3 > 0) {
+                    str.append("branch");
+                    log.info("branch");
+                  }
+                  return response;
+                }
+                """);
+        Method builder = TraceabilityMapService.class.getDeclaredMethod(
+                "buildJavaControlFlowGraph", String.class, String.class, BlockStmt.class);
+        builder.setAccessible(true);
+
+        TraceabilityMapPayloads.ControlFlowGraph graph =
+                (TraceabilityMapPayloads.ControlFlowGraph) builder.invoke(service, "method:web3", "web3", body);
+
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes())
+                .extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.DECISION,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN,
+                        TraceabilityMapPayloads.ControlFlowNodeType.END);
+        assertThat(graph.edges())
+                .extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.TRUE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.FALSE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+
+        String returnNodeId = graph.nodes().stream()
+                .filter(node -> node.type() == TraceabilityMapPayloads.ControlFlowNodeType.RETURN)
+                .findFirst()
+                .orElseThrow()
+                .id();
+        String endNodeId = graph.nodes().stream()
+                .filter(node -> node.type() == TraceabilityMapPayloads.ControlFlowNodeType.END)
+                .findFirst()
+                .orElseThrow()
+                .id();
+        assertThat(graph.edges())
+                .noneMatch(edge -> edge.source().equals(returnNodeId) && edge.target().equals(endNodeId));
+    }
+
+    @Test
+    void buildsJavaTryCatchCfgWithoutHidingItAsPartialExpansion() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        BlockStmt body = StaticJavaParser.parseBlock("""
+                {
+                  try {
+                    int value = num1 / num2;
+                    return value;
+                  } catch (ArithmeticException ex) {
+                    return 0;
+                  }
+                }
+                """);
+        Method builder = TraceabilityMapService.class.getDeclaredMethod(
+                "buildJavaControlFlowGraph", String.class, String.class, BlockStmt.class);
+        builder.setAccessible(true);
+
+        TraceabilityMapPayloads.ControlFlowGraph graph =
+                (TraceabilityMapPayloads.ControlFlowGraph) builder.invoke(service, "method:division", "division", body);
+
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.TRY,
+                        TraceabilityMapPayloads.ControlFlowNodeType.CATCH,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.EXCEPTION,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+        assertThat(graph.nodes()).noneMatch(node -> node.type() == TraceabilityMapPayloads.ControlFlowNodeType.UNKNOWN_BLOCK);
+    }
+
+    @Test
+    void buildsJavaCommonStatementsWithoutMarkingThemUnknown() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        BlockStmt body = StaticJavaParser.parseBlock("""
+                {
+                  synchronized (lock) {
+                    assert num > 0;
+                    label:
+                    num++;
+                  }
+                  return num;
+                }
+                """);
+        Method builder = TraceabilityMapService.class.getDeclaredMethod(
+                "buildJavaControlFlowGraph", String.class, String.class, BlockStmt.class);
+        builder.setAccessible(true);
+
+        TraceabilityMapPayloads.ControlFlowGraph graph =
+                (TraceabilityMapPayloads.ControlFlowGraph) builder.invoke(service, "method:setNum", "setNum", body);
+
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).noneMatch(node -> node.type() == TraceabilityMapPayloads.ControlFlowNodeType.UNKNOWN_BLOCK);
+    }
+
+    @Test
+    void buildsPreciseJavascriptCfgFromBabelWorker() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        VerificationModels.AssetSnapshot asset = new VerificationModels.AssetSnapshot(
+                "asset-js", "project", AssetType.SOURCE, VerificationModels.SourceType.FILE,
+                null, null, null, "service.js", "hash", """
+                function web3(num3) {
+                    if (num3 > 0) {
+                        return "yes"
+                    }
+                    return "no"
+                }
+                """, "INLINE", null, 0, null, Map.of(), Freshness.SNAPSHOT, "tester", LocalDateTime.now());
+        Class<?> sourceUnitType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("SourceUnit"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> sourceUnitConstructor = sourceUnitType.getDeclaredConstructor(String.class, String.class);
+        sourceUnitConstructor.setAccessible(true);
+        Object sourceUnit = sourceUnitConstructor.newInstance("service.js", asset.content());
+        Method fallback = TraceabilityMapService.class.getDeclaredMethod(
+                "addSourceAssetWithRegexFallback", codeIndexType, VerificationModels.AssetSnapshot.class,
+                boolean.class, sourceUnitType, String.class);
+        fallback.setAccessible(true);
+        fallback.invoke(service, codeIndex, asset, true, sourceUnit, "code:javascript:service.js");
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+
+        assertThat(graphs).hasSize(1);
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.language()).isEqualTo("javascript");
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.DECISION,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.TRUE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.FALSE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+    }
+
+    @Test
+    void appliesLineCoverageStateToCfgNodesWithoutInferringEdges() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        Method putCodeNode = codeIndexType.getDeclaredMethod("putCodeNode", TraceabilityMapPayloads.TraceabilityNode.class);
+        putCodeNode.setAccessible(true);
+
+        String path = "src/service.js";
+        String fileId = "code:javascript:" + path;
+        String classId = fileId + "#service.js";
+        String methodId = classId + ".web3(num3)";
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(fileId, CODE_FILE, "service.js", path, path,
+                "CODE", "javascript", path, null, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(classId, CODE_CLASS, "service.js", path, path,
+                "CODE", "javascript", "service.js", fileId, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(methodId, CODE_METHOD, "web3", "web3(num3)", path + ":10",
+                "CODE", "javascript", "service.js#web3", classId, STATIC, null,
+                Map.of(
+                        "coverageTotalLines", List.of(10, 11, 12),
+                        "coverageCoveredLines", List.of(10, 12),
+                        "coveragePartialBranchLines", List.of(11),
+                        "coverageTotalBranchTargetProbeMap", Map.of("11:istanbul-if", List.of(0, 1)),
+                        "coverageCoveredBranchTargetProbeMap", Map.of("11:istanbul-if", List.of(0)))));
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+        graphs.add(new TraceabilityMapPayloads.ControlFlowGraph(methodId, "web3", "javascript",
+                TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE, "test",
+                List.of(
+                        new TraceabilityMapPayloads.ControlFlowNode("n1", TraceabilityMapPayloads.ControlFlowNodeType.START, "开始", "", 10, 0, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n2", TraceabilityMapPayloads.ControlFlowNodeType.DECISION, "判断", "num3 > 0", 11, 1, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n3", TraceabilityMapPayloads.ControlFlowNodeType.RETURN, "返回", "response", 12, 2, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n4", TraceabilityMapPayloads.ControlFlowNodeType.RETURN, "返回", "fallback", 13, 3, 0, true, "UNKNOWN")),
+                List.of(
+                        new TraceabilityMapPayloads.ControlFlowEdge("e1", "n1", "n2", TraceabilityMapPayloads.ControlFlowEdgeType.NEXT, "下一步", true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowEdge("e2", "n2", "n3", TraceabilityMapPayloads.ControlFlowEdgeType.TRUE, "是", true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowEdge("e3", "n2", "n4", TraceabilityMapPayloads.ControlFlowEdgeType.FALSE, "否", true, "UNKNOWN")),
+                "n1", List.of("n3")));
+
+        Method applyControlFlowCoverage = codeIndexType.getDeclaredMethod("applyControlFlowCoverage");
+        applyControlFlowCoverage.setAccessible(true);
+        applyControlFlowCoverage.invoke(codeIndex);
+
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::coverageState)
+                .containsExactly("COVERED", "PARTIAL", "COVERED", "UNKNOWN");
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::coverageState)
+                .containsExactly("UNKNOWN", "PARTIAL", "PARTIAL");
+    }
+
+    @Test
+    void marksMissedCfgNodesAndBranchEdgesAsUncoveredFromJacocoLines() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        Method putCodeNode = codeIndexType.getDeclaredMethod("putCodeNode", TraceabilityMapPayloads.TraceabilityNode.class);
+        putCodeNode.setAccessible(true);
+
+        String path = "src/Web3Controller.java";
+        String fileId = "code:java:" + path;
+        String classId = fileId + "#web3Server.controller.Web3Controller";
+        String methodId = classId + ".setNum(int)";
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(fileId, CODE_FILE, "Web3Controller.java", path, path,
+                "CODE", "java", path, null, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(classId, CODE_CLASS, "Web3Controller", path, path,
+                "CODE", "java", "web3Server.controller.Web3Controller", fileId, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(methodId, CODE_METHOD, "setNum", "setNum(int)", path + ":524",
+                "CODE", "java", "web3Server.controller.Web3Controller#setNum", classId, STATIC, null,
+                Map.of(
+                        "coverageTotalLines", List.of(524, 525, 526),
+                        "coverageCoveredLines", List.of(),
+                        "coveragePartialBranchLines", List.of(),
+                        "coverageTotalBranchTargetProbeMap", Map.of("524:jacoco", List.of(0, 1, 2, 3)),
+                        "coverageCoveredBranchTargetProbeMap", Map.of())));
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+        graphs.add(new TraceabilityMapPayloads.ControlFlowGraph(methodId, "setNum", "java",
+                TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE, "test",
+                List.of(
+                        new TraceabilityMapPayloads.ControlFlowNode("n1", TraceabilityMapPayloads.ControlFlowNodeType.START, "开始", "", 524, 0, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n2", TraceabilityMapPayloads.ControlFlowNodeType.DECISION, "判断", "num > 0", 524, 1, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n3", TraceabilityMapPayloads.ControlFlowNodeType.RETURN, "返回", "1", 525, 2, 0, true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowNode("n4", TraceabilityMapPayloads.ControlFlowNodeType.RETURN, "返回", "0", 526, 3, 0, true, "UNKNOWN")),
+                List.of(
+                        new TraceabilityMapPayloads.ControlFlowEdge("e1", "n1", "n2", TraceabilityMapPayloads.ControlFlowEdgeType.NEXT, "下一步", true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowEdge("e2", "n2", "n3", TraceabilityMapPayloads.ControlFlowEdgeType.TRUE, "是", true, "UNKNOWN"),
+                        new TraceabilityMapPayloads.ControlFlowEdge("e3", "n2", "n4", TraceabilityMapPayloads.ControlFlowEdgeType.FALSE, "否", true, "UNKNOWN")),
+                "n1", List.of("n3", "n4")));
+
+        Method applyControlFlowCoverage = codeIndexType.getDeclaredMethod("applyControlFlowCoverage");
+        applyControlFlowCoverage.setAccessible(true);
+        applyControlFlowCoverage.invoke(codeIndex);
+
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::coverageState)
+                .containsExactly("UNCOVERED", "UNCOVERED", "UNCOVERED", "UNCOVERED");
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::coverageState)
+                .containsExactly("UNKNOWN", "UNCOVERED", "UNCOVERED");
+    }
+
+    @Test
+    void buildsPreciseCppCfgFromClangWorker() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        VerificationModels.AssetSnapshot asset = new VerificationModels.AssetSnapshot(
+                "asset-cpp", "project", AssetType.SOURCE, VerificationModels.SourceType.FILE,
+                null, null, null, "service.cpp", "hash", """
+                int web3(int num3) {
+                    if (num3 > 0) {
+                        return 1;
+                    }
+                    return 0;
+                }
+                """, "INLINE", null, 0, null, Map.of(), Freshness.SNAPSHOT, "tester", LocalDateTime.now());
+        Class<?> sourceUnitType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("SourceUnit"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> sourceUnitConstructor = sourceUnitType.getDeclaredConstructor(String.class, String.class);
+        sourceUnitConstructor.setAccessible(true);
+        Object sourceUnit = sourceUnitConstructor.newInstance("service.cpp", asset.content());
+        Method fallback = TraceabilityMapService.class.getDeclaredMethod(
+                "addSourceAssetWithRegexFallback", codeIndexType, VerificationModels.AssetSnapshot.class,
+                boolean.class, sourceUnitType, String.class);
+        fallback.setAccessible(true);
+        fallback.invoke(service, codeIndex, asset, true, sourceUnit, "code:cpp:service.cpp");
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+
+        assertThat(graphs).hasSize(1);
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.language()).isEqualTo("cpp");
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.DECISION,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.TRUE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.FALSE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+    }
+
+    @Test
+    void buildsPreciseCCfgFromClangWorker() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        VerificationModels.AssetSnapshot asset = new VerificationModels.AssetSnapshot(
+                "asset-c", "project", AssetType.SOURCE, VerificationModels.SourceType.FILE,
+                null, null, null, "service.c", "hash", """
+                int web3(int num3) {
+                    if (num3 > 0) {
+                        return 1;
+                    }
+                    return 0;
+                }
+                """, "INLINE", null, 0, null, Map.of(), Freshness.SNAPSHOT, "tester", LocalDateTime.now());
+        Class<?> sourceUnitType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("SourceUnit"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> sourceUnitConstructor = sourceUnitType.getDeclaredConstructor(String.class, String.class);
+        sourceUnitConstructor.setAccessible(true);
+        Object sourceUnit = sourceUnitConstructor.newInstance("service.c", asset.content());
+        Method fallback = TraceabilityMapService.class.getDeclaredMethod(
+                "addSourceAssetWithRegexFallback", codeIndexType, VerificationModels.AssetSnapshot.class,
+                boolean.class, sourceUnitType, String.class);
+        fallback.setAccessible(true);
+        fallback.invoke(service, codeIndex, asset, true, sourceUnit, "code:c:service.c");
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+
+        assertThat(graphs).hasSize(1);
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.language()).isEqualTo("c");
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.DECISION,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.TRUE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.FALSE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+    }
+
+    @Test
+    void buildsPreciseGoCfgFromGoParserWorker() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        VerificationModels.AssetSnapshot asset = new VerificationModels.AssetSnapshot(
+                "asset-go", "project", AssetType.SOURCE, VerificationModels.SourceType.FILE,
+                null, null, null, "service.go", "hash", """
+                package demo
+                func web3(num3 int) string {
+                    switch {
+                    case num3 > 0:
+                        return "yes"
+                    default:
+                        return "no"
+                    }
+                }
+                """, "INLINE", null, 0, null, Map.of(), Freshness.SNAPSHOT, "tester", LocalDateTime.now());
+        Class<?> sourceUnitType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("SourceUnit"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> sourceUnitConstructor = sourceUnitType.getDeclaredConstructor(String.class, String.class);
+        sourceUnitConstructor.setAccessible(true);
+        Object sourceUnit = sourceUnitConstructor.newInstance("service.go", asset.content());
+        Method fallback = TraceabilityMapService.class.getDeclaredMethod(
+                "addSourceAssetWithRegexFallback", codeIndexType, VerificationModels.AssetSnapshot.class,
+                boolean.class, sourceUnitType, String.class);
+        fallback.setAccessible(true);
+        fallback.invoke(service, codeIndex, asset, true, sourceUnit, "code:go:service.go");
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+
+        assertThat(graphs).hasSize(1);
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.language()).isEqualTo("go");
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.SWITCH,
+                        TraceabilityMapPayloads.ControlFlowNodeType.CASE,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.CASE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.DEFAULT,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+    }
+
+    @Test
+    void buildsPrecisePythonCfgFromAstWorker() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        VerificationModels.AssetSnapshot asset = new VerificationModels.AssetSnapshot(
+                "asset-py", "project", AssetType.SOURCE, VerificationModels.SourceType.FILE,
+                null, null, null, "service.py", "hash", """
+                def web3(num3):
+                    if num3 > 0:
+                        value = "yes"
+                    return value
+                """, "INLINE", null, 0, null, Map.of(), Freshness.SNAPSHOT, "tester", LocalDateTime.now());
+        Class<?> sourceUnitType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("SourceUnit"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> sourceUnitConstructor = sourceUnitType.getDeclaredConstructor(String.class, String.class);
+        sourceUnitConstructor.setAccessible(true);
+        Object sourceUnit = sourceUnitConstructor.newInstance("service.py", asset.content());
+        Method fallback = TraceabilityMapService.class.getDeclaredMethod(
+                "addSourceAssetWithRegexFallback", codeIndexType, VerificationModels.AssetSnapshot.class,
+                boolean.class, sourceUnitType, String.class);
+        fallback.setAccessible(true);
+        fallback.invoke(service, codeIndex, asset, true, sourceUnit, "code:python:service.py");
+
+        Field graphsField = codeIndexType.getDeclaredField("controlFlowGraphs");
+        graphsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        List<TraceabilityMapPayloads.ControlFlowGraph> graphs =
+                (List<TraceabilityMapPayloads.ControlFlowGraph>) graphsField.get(codeIndex);
+
+        assertThat(graphs).hasSize(1);
+        TraceabilityMapPayloads.ControlFlowGraph graph = graphs.get(0);
+        assertThat(graph.language()).isEqualTo("python");
+        assertThat(graph.parseStatus()).isEqualTo(TraceabilityMapPayloads.ControlFlowParseStatus.PRECISE);
+        assertThat(graph.nodes()).extracting(TraceabilityMapPayloads.ControlFlowNode::type)
+                .contains(TraceabilityMapPayloads.ControlFlowNodeType.DECISION,
+                        TraceabilityMapPayloads.ControlFlowNodeType.RETURN);
+        assertThat(graph.edges()).extracting(TraceabilityMapPayloads.ControlFlowEdge::type)
+                .contains(TraceabilityMapPayloads.ControlFlowEdgeType.TRUE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.FALSE,
+                        TraceabilityMapPayloads.ControlFlowEdgeType.RETURN);
+    }
 
     @Test
     void sumsPerFileJacocoXmlCountersWithoutTreatingThemAsOneGlobalHtmlTotal() throws Exception {

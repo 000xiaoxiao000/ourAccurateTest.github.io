@@ -385,29 +385,61 @@
         <div v-else-if="callViewMode === 'control'" class="code-analysis-panel">
           <div v-if="!miniGraphReady" class="empty-card">请选择左侧代码树中的方法、类或文件，或输入搜索关键字后查看控制流图。</div>
           <div v-else-if="!controlFlowGraph.nodes.length" class="empty-card">当前选择范围暂无控制流数据。请确认当前基线已绑定源码，且源码快照包含可解析的方法体。</div>
-          <svg v-else class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图" @click="clearMiniGraphSelection">
-            <defs><marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker></defs>
+          <template v-else>
+            <div class="control-flow-legend" aria-label="控制流图图例">
+              <div class="legend-group">
+                <strong>节点</strong>
+                <span><i class="legend-node covered"></i>全部覆盖</span>
+                <span><i class="legend-node partial"></i>部分覆盖</span>
+                <span><i class="legend-node uncovered"></i>未覆盖</span>
+                <span><i class="legend-node unknown"></i>无覆盖率数据</span>
+              </div>
+              <div class="legend-group">
+                <strong>连线</strong>
+                <span><i class="legend-line covered"></i>全部覆盖</span>
+                <span><i class="legend-line partial"></i>部分覆盖</span>
+                <span><i class="legend-line uncovered"></i>未覆盖</span>
+                <span><i class="legend-line normal"></i>无覆盖率数据</span>
+              </div>
+            </div>
+          <svg class="mini-code-graph" :viewBox="`0 0 ${controlFlowGraph.width} ${controlFlowGraph.height}`" role="img" aria-label="代码控制流图" @click="clearMiniGraphSelection">
+            <defs>
+              <marker id="control-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#94a3b8" /></marker>
+              <marker id="control-arrow-covered" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#059669" /></marker>
+              <marker id="control-arrow-partial" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#d97706" /></marker>
+              <marker id="control-arrow-uncovered" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#dc2626" /></marker>
+            </defs>
             <g
               v-for="edge in controlFlowGraph.edges"
               :key="edge.id"
-              :class="['mini-graph-edge', { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
+              :class="['mini-graph-edge', coverageClass(edge.coverageState), { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
             >
-              <path :d="edge.path" marker-end="url(#control-arrow)" />
+              <title v-if="controlFlowEdgeCoverageText(edge.coverageState)">{{ controlFlowEdgeCoverageText(edge.coverageState) }}</title>
+              <path :d="edge.path" :marker-end="`url(#${controlFlowMarkerId(edge.coverageState)})`" />
+              <template v-if="edge.label">
+                <rect class="mini-edge-label-bg" :x="(edge.labelX || 0) - 18" :y="(edge.labelY || 0) - 14" width="36" height="20" rx="3" />
+                <text class="mini-edge-label" :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
+              </template>
             </g>
             <g
               v-for="node in controlFlowGraph.nodes"
               :key="node.id"
-              :class="['mini-graph-node', node.tone, { executed: node.executed, active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
+              :class="['mini-graph-node', node.tone, coverageClass(node.coverageState), { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
               @click.stop="selectMiniGraphNode(node)"
               @pointerenter="showMiniGraphTooltip($event, node)"
               @pointermove="showMiniGraphTooltip($event, node)"
               @pointerleave="hideMiniGraphTooltip"
             >
-              <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
+              <polygon
+                v-if="node.shape === 'diamond'"
+                :points="`${node.x + node.width / 2},${node.y} ${node.x + node.width},${node.y + node.height / 2} ${node.x + node.width / 2},${node.y + node.height} ${node.x},${node.y + node.height / 2}`"
+              />
+              <rect v-else :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + 20">{{ node.label }}</text>
               <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + 37">{{ node.subtitle }}</text>
             </g>
           </svg>
+          </template>
           <div
             v-if="miniGraphTooltip.visible"
             class="mini-graph-tooltip"
@@ -523,7 +555,7 @@ import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { fetchVerificationOverview } from '@/api/verification'
 import type { VerificationBaseline } from '@/api/verification'
-import type { CodeTreeNode, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'
+import type { CodeTreeNode, ControlFlowGraph, ControlFlowNodeType, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'
 import { useTraceabilityMap } from '@/features/map/composables/useTraceabilityMap'
 import type { TraceFilter } from '@/features/map/composables/useTraceabilityMap'
 import { filterBusinessCodeTree } from '@/shared/codeGraphScope'
@@ -558,8 +590,8 @@ interface SvgEdge {
   labelWidth: number
   raw: TraceabilityEdge
 }
-interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean }
-interface MiniGraphEdge { id: string; source: string; target: string; path: string }
+interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean; shape?: 'rect' | 'diamond'; precise?: boolean; coverageState?: string }
+interface MiniGraphEdge { id: string; source: string; target: string; path: string; label?: string; labelX?: number; labelY?: number; precise?: boolean; coverageState?: string }
 
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectId || ''))
@@ -714,7 +746,7 @@ const dependencyGraph = computed(() => miniGraphReady.value
   ? buildDependencyGraph(map.response.value?.codeGraph?.dependencies || [], codeKeyword.value, map.nodes.value, map.focusId.value)
   : emptyMiniGraph())
 const controlFlowGraph = computed(() => miniGraphReady.value
-  ? buildControlFlowGraph(map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value)
+  ? buildControlFlowGraph(map.response.value?.codeGraph?.controlFlowGraphs, map.response.value?.codeGraph?.controlFlows || [], map.focusId.value, codeKeyword.value, map.nodes.value)
   : emptyMiniGraph())
 const visibleMiniGraph = computed(() => callViewMode.value === 'dependency' ? dependencyGraph.value : callViewMode.value === 'control' ? controlFlowGraph.value : null)
 const miniGraphHighlight = computed(() => buildMiniGraphHighlight(visibleMiniGraph.value, selectedMiniGraphId.value, miniGraphFocusHighlightDisabled.value ? '' : map.focusId.value))
@@ -1998,7 +2030,37 @@ function buildDependencyGraph(dependencies: Array<{ source: string; target: stri
   return { width: 860, height: Math.max(420, Math.max(sources.length * 76, targets.length * 58) + 80), nodes: graphNodes, edges }
 }
 
-function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, keyword: string, allNodes: TraceabilityNode[]) {
+function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Array<{ methodId: string; methodLabel: string; kind: string; expression: string; order: number }>, focusId: string, keyword: string, allNodes: TraceabilityNode[]) {
+  if (graphs) {
+    const scopedMethodIds = codeMethodScopeIds(allNodes, focusId)
+    const normalizedKeyword = normalizeSearch(keyword)
+    const methodNode = focusId ? allNodes.find((node) => node.id === focusId && node.kind === 'CODE_METHOD') : null
+    const selectedGraph = methodNode ? graphs.find((graph) => graph.methodId === focusId) : null
+    if (selectedGraph) return buildPreciseControlFlowGraph(selectedGraph, allNodes)
+    const visibleGraphs = graphs
+      .filter((graph) => !scopedMethodIds.size || scopedMethodIds.has(graph.methodId))
+      .filter((graph) => !normalizedKeyword || normalizeSearch([graph.methodId, graph.methodLabel, graph.language, graph.message].join(' ')).includes(normalizedKeyword))
+      .slice(0, 60)
+    if (visibleGraphs.length) {
+      const graphNodes: MiniGraphNode[] = visibleGraphs.map((graph, index) => ({
+        id: `cfg-method:${graph.methodId}`,
+        x: 70 + (index % 2) * 390,
+        y: 42 + Math.floor(index / 2) * 76,
+        width: 320,
+        height: 50,
+        label: shorten(graph.methodLabel || graph.methodId, 28),
+        subtitle: controlFlowStatusText(graph),
+        fullLabel: graph.methodLabel || graph.methodId,
+        fullSubtitle: `${controlFlowStatusText(graph)}${graph.message ? `\n${graph.message}` : ''}`,
+        tone: graph.parseStatus === 'PRECISE' ? 'flow' : graph.parseStatus === 'PARTIAL' ? 'branch' : 'unknown',
+        nodeId: graph.methodId,
+        executed: codeNodeHasDynamicCoverageById(allNodes, graph.methodId),
+        precise: graph.parseStatus === 'PRECISE',
+      }))
+      return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 76 + 84), nodes: graphNodes, edges: [] as MiniGraphEdge[] }
+    }
+    return emptyMiniGraph()
+  }
   const scopedMethodIds = codeMethodScopeIds(allNodes, focusId)
   const selected = focusId ? steps.filter((step) => step.methodId === focusId) : steps
   const source = scopedMethodIds.size ? steps.filter((step) => scopedMethodIds.has(step.methodId)) : keyword ? steps : selected.length ? selected : steps
@@ -2026,6 +2088,190 @@ function buildControlFlowGraph(steps: Array<{ methodId: string; methodLabel: str
     edges.push({ id: `control:${index}`, source: source.id, target: target.id, path: `M ${source.x + source.width / 2} ${source.y + source.height} C ${source.x + source.width / 2} ${source.y + source.height + 24}, ${target.x + target.width / 2} ${target.y - 24}, ${target.x + target.width / 2} ${target.y}` })
   }
   return { width: 860, height: Math.max(420, Math.ceil(graphNodes.length / 2) * 78 + 70), nodes: graphNodes, edges }
+}
+
+function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: TraceabilityNode[]) {
+  if (!graph.nodes.length) {
+    const method = allNodes.find((node) => node.id === graph.methodId)
+    const placeholder: MiniGraphNode = {
+      id: `cfg-status:${graph.methodId}`,
+      x: 220,
+      y: 150,
+      width: 420,
+      height: 72,
+      label: controlFlowStatusTitle(graph),
+      subtitle: shorten(graph.message || controlFlowStatusText(graph), 52),
+      fullLabel: `${graph.methodLabel || graph.methodId} · ${controlFlowStatusTitle(graph)}`,
+      fullSubtitle: [
+        graph.message || controlFlowStatusText(graph),
+        method?.locator ? `位置：${method.locator}` : '',
+        '只展示能确认的执行走向，不用覆盖率倒推出代码路径',
+      ].filter(Boolean).join('\n'),
+      tone: graph.parseStatus === 'EMPTY' ? 'flow' : 'unknown',
+      nodeId: graph.methodId,
+      executed: codeNodeHasDynamicCoverageById(allNodes, graph.methodId),
+      precise: false,
+    }
+    return { width: 860, height: 420, nodes: [placeholder], edges: [] as MiniGraphEdge[] }
+  }
+  const nodeWidth = 260
+  const nodeHeight = 58
+  const verticalGap = 92
+  const centerX = 430
+  const sorted = [...graph.nodes].sort((left, right) => left.order - right.order)
+  const positioned = new Map<string, MiniGraphNode>()
+  sorted.forEach((node, index) => {
+    const depthOffset = Math.max(-2, Math.min(2, node.depth || 0)) * 72
+    const width = controlFlowDiamondNode(node.type) ? 230 : nodeWidth
+    const height = controlFlowDiamondNode(node.type) ? 86 : nodeHeight
+    positioned.set(node.id, {
+      id: node.id,
+      x: centerX - width / 2 + depthOffset,
+      y: 36 + index * verticalGap,
+      width,
+      height,
+      label: controlFlowNodeLabel(node.type, node.label),
+      subtitle: shorten(node.expression || '', controlFlowDiamondNode(node.type) ? 26 : 34),
+      fullLabel: `${controlFlowNodeLabel(node.type, node.label)} · ${graph.methodLabel}`,
+      fullSubtitle: [
+        node.expression || '',
+        controlFlowNodeHelp(node.type, node.label),
+        node.line ? `行号：${node.line}` : '',
+        node.precise ? '来源：源码结构识别' : '来源：暂未识别的语句',
+        controlFlowCoverageText(node.coverageState),
+        graph.message || '',
+      ].filter(Boolean).join('\n'),
+      tone: controlFlowNodeTone(node.type, node.precise),
+      nodeId: graph.methodId,
+      executed: codeNodeHasDynamicCoverageById(allNodes, graph.methodId),
+      shape: controlFlowDiamondNode(node.type) ? 'diamond' : 'rect',
+      precise: node.precise,
+      coverageState: node.coverageState || 'UNKNOWN',
+    })
+  })
+  const edges: MiniGraphEdge[] = graph.edges
+    .filter((edge) => positioned.has(edge.source) && positioned.has(edge.target))
+    .map((edge) => {
+      const source = positioned.get(edge.source)!
+      const target = positioned.get(edge.target)!
+      const startX = source.x + source.width / 2
+      const startY = source.y + source.height
+      const endX = target.x + target.width / 2
+      const endY = target.y
+      const midY = (startY + endY) / 2
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        path: `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`,
+        label: edge.label && !['继续', '下一步'].includes(edge.label) ? edge.label : '',
+        labelX: (startX + endX) / 2,
+        labelY: midY - 6,
+        precise: edge.precise,
+        coverageState: edge.coverageState || 'UNKNOWN',
+      }
+    })
+  return {
+    width: 860,
+    height: Math.max(420, sorted.length * verticalGap + 80),
+    nodes: [...positioned.values()],
+    edges,
+  }
+}
+
+function controlFlowDiamondNode(type: ControlFlowNodeType) {
+  return type === 'DECISION' || type === 'LOOP' || type === 'SWITCH'
+}
+
+function controlFlowNodeTone(type: ControlFlowNodeType, precise: boolean) {
+  if (!precise || type === 'UNKNOWN_BLOCK') return 'unknown'
+  if (type === 'DECISION' || type === 'LOOP' || type === 'SWITCH' || type === 'CASE' || type === 'TRY' || type === 'CATCH' || type === 'FINALLY') return 'branch'
+  if (type === 'RETURN' || type === 'THROW' || type === 'BREAK' || type === 'CONTINUE' || type === 'END') return 'exit'
+  return 'flow'
+}
+
+function controlFlowNodeLabel(type: ControlFlowNodeType, label: string) {
+  return ({
+    START: '开始',
+    ACTION: label || '执行',
+    DECISION: '判断',
+    LOOP: '循环判断',
+    SWITCH: '选择分支',
+    CASE: label || '分支',
+    TRY: 'try',
+    CATCH: 'catch',
+    FINALLY: 'finally',
+    RETURN: '返回',
+    THROW: '抛出异常',
+    BREAK: '跳出',
+    CONTINUE: '进入下一轮',
+    MERGE: label || '回到主流程',
+    END: '结束',
+    UNKNOWN_BLOCK: label || '暂未识别的语句',
+  } as Record<ControlFlowNodeType, string>)[type]
+}
+
+function controlFlowNodeHelp(type: ControlFlowNodeType, label: string) {
+  if (type === 'MERGE') {
+    if (label === '跳过分支') return '表示当前判断条件不满足，直接进入后面的代码。'
+    if (label === '循环结束') return '表示循环条件不再满足，进入循环后面的代码。'
+    if (label === '无匹配分支') return '表示没有命中任何分支，进入后面的代码。'
+    return '表示多个分支在这里汇合，然后进入后面的代码。'
+  }
+  if (type === 'END') return '表示该方法的执行路径到这里结束。'
+  return ''
+}
+
+function controlFlowStatusText(graph: ControlFlowGraph) {
+  const unknownCount = graph.nodes.filter((node) => node.type === 'UNKNOWN_BLOCK' || !node.precise).length
+  return ({
+    PRECISE: `执行路径 · ${graph.nodes.length} 个步骤 / ${graph.edges.length} 条连线`,
+    PARTIAL: `执行路径 · ${unknownCount || 1} 个语句暂未识别 · ${graph.nodes.length} 个步骤 / ${graph.edges.length} 条连线`,
+    UNSUPPORTED_LANGUAGE: '暂不支持该语言的执行路径图',
+    PARSE_FAILED: '无法生成执行路径图',
+    EMPTY: '空方法体',
+  } as Record<string, string>)[graph.parseStatus] || graph.parseStatus
+}
+
+function controlFlowStatusTitle(graph: ControlFlowGraph) {
+  return ({
+    PRECISE: '执行路径图',
+    PARTIAL: '执行路径图',
+    UNSUPPORTED_LANGUAGE: '暂不支持执行路径图',
+    PARSE_FAILED: '无法生成执行路径图',
+    EMPTY: '空方法体',
+  } as Record<string, string>)[graph.parseStatus] || graph.parseStatus
+}
+
+function controlFlowCoverageText(state?: string) {
+  return ({
+    COVERED: '覆盖：全部覆盖',
+    UNCOVERED: '覆盖：未覆盖',
+    PARTIAL: '覆盖：部分覆盖',
+    UNKNOWN: '',
+  } as Record<string, string>)[state || 'UNKNOWN'] || ''
+}
+
+function controlFlowEdgeCoverageText(state?: string) {
+  return ({
+    COVERED: '连线覆盖：全部覆盖',
+    UNCOVERED: '连线覆盖：未覆盖',
+    PARTIAL: '连线覆盖：部分覆盖；不推断具体 true/false 路径',
+    UNKNOWN: '',
+  } as Record<string, string>)[state || 'UNKNOWN'] || ''
+}
+
+function coverageClass(state?: string) {
+  return state ? `coverage-${state.toLowerCase()}` : ''
+}
+
+function controlFlowMarkerId(state?: string) {
+  return ({
+    COVERED: 'control-arrow-covered',
+    PARTIAL: 'control-arrow-partial',
+    UNCOVERED: 'control-arrow-uncovered',
+    UNKNOWN: 'control-arrow',
+  } as Record<string, string>)[state || 'UNKNOWN'] || 'control-arrow'
 }
 
 function emptyMiniGraph() {
@@ -2472,10 +2718,6 @@ function codeNodeHasDynamicCoverage(node: TraceabilityNode, nodes: TraceabilityN
   if (coverage && ((coverage.coveredLines ?? 0) > 0 || (coverage.coveredBranches ?? 0) > 0)) return true
   const metadata = node.metadata || {}
   if (numberArrayMetadata(metadata.coverageCoveredLines).length || numberArrayMetadata(metadata.coveragePartialBranchLines).length) return true
-  const dynamicEdges = map.edges.value.filter((edge) =>
-    (edge.source === node.id || edge.target === node.id) &&
-    (edge.evidenceType === 'COVERAGE' || edge.evidenceType === 'EXECUTION_TRACE' || edge.callEvidence === 'DYNAMIC_CONFIRMED'))
-  if (dynamicEdges.length) return true
   const descendants = nodes.filter((item) => item.parentId === node.id)
   return descendants.some((child) => codeNodeHasDynamicCoverage(child, nodes))
 }
@@ -3054,6 +3296,19 @@ onBeforeUnmount(() => {
 .coverage-metric-card p { color:#334155; }
 .coverage-workbench { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; padding:10px 12px; align-items:stretch; flex:1; min-height:0; }
 .code-analysis-panel { position:relative; flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
+.control-flow-legend { position:sticky; top:0; z-index:10; display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 12px; border-bottom:1px solid #e2e8f0; background:rgba(255,255,255,.94); backdrop-filter:blur(10px); box-shadow:0 8px 20px rgba(15,23,42,.06); }
+.legend-group { display:flex; flex-wrap:wrap; gap:7px; align-items:center; padding:5px 8px; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#475569; font-size:11px; font-weight:850; line-height:1; }
+.legend-group strong { color:#172033; font-size:11px; font-weight:950; }
+.legend-group span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+.legend-node { width:18px; height:12px; border-radius:3px; border:2px solid transparent; box-sizing:border-box; background:#f8fafc; }
+.legend-node.covered { background:#dcfce7; border-color:#16a34a; }
+.legend-node.partial { background:#fef3c7; border-color:#d97706; }
+.legend-node.uncovered { background:#fee2e2; border-color:#dc2626; }
+.legend-node.unknown { background:#f1f5f9; border-color:#cbd5e1; }
+.legend-line { width:24px; height:0; border-top:2px solid #94a3b8; }
+.legend-line.covered { border-top-color:#059669; }
+.legend-line.partial { border-top-color:#d97706; }
+.legend-line.uncovered { border-top-color:#dc2626; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
 .mini-graph-tooltip,
 .graph-tooltip {
@@ -3078,26 +3333,49 @@ onBeforeUnmount(() => {
 .mini-graph-tooltip { position:absolute; z-index:12; width:min(460px,calc(100% - 32px)); }
 .graph-tooltip { position:fixed; z-index:3000; width:min(460px,calc(100vw - 32px)); }
 .mini-graph-edge path { fill:none; stroke:#94a3b8; stroke-width:1.4; opacity:.7; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease; }
-.mini-graph-edge.active path { stroke:#0f766e; stroke-width:3; opacity:1; }
+.mini-graph-edge.coverage-covered path { stroke:#059669; opacity:.85; }
+.mini-graph-edge.coverage-uncovered path { stroke:#dc2626; opacity:.88; stroke-dasharray:none; }
+.mini-graph-edge.coverage-partial path { stroke:#d97706; opacity:.9; stroke-dasharray:none; }
+.mini-graph-edge.active path { stroke:#475569; stroke-width:2.4; opacity:1; }
 .mini-graph-edge.dimmed { opacity:.14; }
 .mini-graph-node { cursor:pointer; }
-.mini-graph-node rect { fill:#e0e7ff; stroke:transparent; stroke-width:0; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
+.mini-graph-node rect,
+.mini-graph-node polygon { fill:#f1f5f9; stroke:#cbd5e1; stroke-width:1.2; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
 .mini-graph-node.source rect { fill:#dbeafe; }
 .mini-graph-node.target rect { fill:#fef3c7; }
-.mini-graph-node.branch rect { fill:#fed7aa; }
-.mini-graph-node.exit rect { fill:#fecaca; }
-.mini-graph-node.executed rect { stroke:#6366f1; stroke-width:1.5; }
+.mini-graph-node.branch rect,
+.mini-graph-node.branch polygon { fill:#f1f5f9; }
+.mini-graph-node.exit rect,
+.mini-graph-node.exit polygon { fill:#f1f5f9; }
+.mini-graph-node.unknown rect,
+.mini-graph-node.unknown polygon { fill:#e2e8f0; }
+.mini-graph-node.executed rect,
+.mini-graph-node.executed polygon { stroke:#6366f1; stroke-width:1.5; }
 .mini-graph-node.executed.source rect { stroke:#2563eb; }
 .mini-graph-node.executed.target rect { stroke:#d97706; }
-.mini-graph-node.executed.branch rect { stroke:#f97316; }
-.mini-graph-node.executed.exit rect { stroke:#dc2626; }
-.mini-graph-node.active rect { filter:drop-shadow(0 8px 14px rgba(124,58,237,.18)); }
-.mini-graph-node.linked:not(.active) rect { filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
-.mini-graph-node.executed.active rect { stroke:#7c3aed; stroke-width:2.8; }
-.mini-graph-node.executed.linked:not(.active) rect { stroke:#0f766e; stroke-width:2.5; }
+.mini-graph-node.executed.branch rect,
+.mini-graph-node.executed.branch polygon { stroke:#f97316; }
+.mini-graph-node.executed.exit rect,
+.mini-graph-node.executed.exit polygon { stroke:#dc2626; }
+.mini-graph-node.active rect,
+.mini-graph-node.active polygon { filter:drop-shadow(0 8px 14px rgba(71,85,105,.18)); }
+.mini-graph-node.linked:not(.active) rect,
+.mini-graph-node.linked:not(.active) polygon { filter:drop-shadow(0 6px 12px rgba(15,118,110,.16)); }
+.mini-graph-node.executed.active rect,
+.mini-graph-node.executed.active polygon { stroke:#6366f1; stroke-width:2.2; }
+.mini-graph-node.executed.linked:not(.active) rect,
+.mini-graph-node.executed.linked:not(.active) polygon { stroke:#0f766e; stroke-width:2.5; }
+.mini-graph-node.coverage-covered rect,
+.mini-graph-node.coverage-covered polygon { fill:#dcfce7; stroke:#16a34a; stroke-width:2.4; stroke-dasharray:none; }
+.mini-graph-node.coverage-uncovered rect,
+.mini-graph-node.coverage-uncovered polygon { fill:#fee2e2; stroke:#dc2626; stroke-width:2.4; stroke-dasharray:none; }
+.mini-graph-node.coverage-partial rect,
+.mini-graph-node.coverage-partial polygon { fill:#fef3c7; stroke:#d97706; stroke-width:2.4; stroke-dasharray:none; }
 .mini-graph-node.dimmed { opacity:.26; }
 .mini-graph-node text { fill:#172033; font-size:12px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .mini-graph-node .mini-node-subtitle { fill:#64748b; font-size:10px; font-weight:700; }
+.mini-edge-label-bg { fill:#fff; stroke:#e2e8f0; stroke-width:1; }
+.mini-edge-label { fill:#334155; font-size:11px; font-weight:900; text-anchor:middle; pointer-events:none; }
 .coverage-source-view { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
 .coverage-source-head { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-source-head strong { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#172033; font-size:13px; }

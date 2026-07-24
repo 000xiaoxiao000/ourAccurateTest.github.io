@@ -15,6 +15,26 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.BreakStmt;
+import com.github.javaparser.ast.stmt.CatchClause;
+import com.github.javaparser.ast.stmt.ContinueStmt;
+import com.github.javaparser.ast.stmt.DoStmt;
+import com.github.javaparser.ast.stmt.AssertStmt;
+import com.github.javaparser.ast.stmt.EmptyStmt;
+import com.github.javaparser.ast.stmt.ExpressionStmt;
+import com.github.javaparser.ast.stmt.ForEachStmt;
+import com.github.javaparser.ast.stmt.ForStmt;
+import com.github.javaparser.ast.stmt.IfStmt;
+import com.github.javaparser.ast.stmt.LabeledStmt;
+import com.github.javaparser.ast.stmt.ReturnStmt;
+import com.github.javaparser.ast.stmt.Statement;
+import com.github.javaparser.ast.stmt.SynchronizedStmt;
+import com.github.javaparser.ast.stmt.SwitchEntry;
+import com.github.javaparser.ast.stmt.SwitchStmt;
+import com.github.javaparser.ast.stmt.ThrowStmt;
+import com.github.javaparser.ast.stmt.TryStmt;
+import com.github.javaparser.ast.stmt.WhileStmt;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.coverage.universal.CoverageReportService;
 import com.oAT.web.coverage.universal.UniversalCoverageFile;
@@ -40,7 +60,11 @@ import com.oAT.web.verification.storage.AssetContentStore;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -59,6 +83,7 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -69,6 +94,12 @@ import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeTreeNode;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeGraphData;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeDependency;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowStep;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowEdge;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowEdgeType;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowGraph;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowNode;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowNodeType;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowParseStatus;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CoverageReportOverview;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CoverageSummary;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.EdgeEvidence;
@@ -95,6 +126,11 @@ public class TraceabilityMapService {
     private static final Pattern IMPORT_PATTERN = Pattern.compile("(?m)^\\s*import\\s+(?:static\\s+)?([A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$*]*)*);\\s*$");
     private static final Pattern CONTROL_FLOW_PATTERN = Pattern.compile("(?m)^\\s*(if|else\\s+if|else|for|while|switch|case|catch|return|throw)\\b\\s*(.*)");
     private static final Pattern METHOD_PATTERN = Pattern.compile("(?m)^\\s*(?:@[\\w.]+(?:\\([^\\n]*\\))?\\s*)*(?:(?:public|protected|private|static|final|synchronized|abstract|native|default)\\s+)*[\\w<>,.?\\[\\]]+(?:\\s*<[^\\n{};()]+>)?\\s+([A-Za-z_$][\\w$]*)\\s*\\([^;{}]*\\)\\s*(?:throws [^{]+)?\\{");
+    private static final Pattern JS_FUNCTION_PATTERN = Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:async\\s+)?function\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\{");
+    private static final Pattern JS_ARROW_PATTERN = Pattern.compile("(?m)^\\s*(?:export\\s+)?(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*(?:async\\s*)?\\(?([^)=]*)\\)?\\s*=>");
+    private static final Pattern GO_FUNCTION_PATTERN = Pattern.compile("(?m)^\\s*func\\s+(?:\\([^)]*\\)\\s*)?([A-Za-z_][\\w]*)\\s*\\(([^)]*)\\)");
+    private static final Pattern PY_FUNCTION_PATTERN = Pattern.compile("(?m)^(\\s*)(?:async\\s+)?def\\s+([A-Za-z_][\\w]*)\\s*\\(([^)]*)\\)");
+    private static final Pattern CPP_FUNCTION_PATTERN = Pattern.compile("(?m)^\\s*(?:[A-Za-z_][\\w:<>,~*&\\s]*\\s+)?([A-Za-z_~][\\w:~]*)\\s*\\(([^;{}()]*)\\)\\s*(?:const\\s*)?\\{");
     private static final Set<String> JAVA_CONTROL_KEYWORDS = Set.of(
             "if", "for", "while", "switch", "catch", "return", "throw", "else", "case", "do", "try", "finally", "synchronized");
     private static final JavaParser JAVA_PARSER = new JavaParser(new ParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_17));
@@ -162,6 +198,7 @@ public class TraceabilityMapService {
 
         CodeIndex codeIndex = buildCodeIndex(projectId, baseline, includeStatic, includeCallEdges || includeCodeGraph, warnings);
         DynamicEvidence dynamicEvidence = includeDynamic ? readDynamicEvidence(projectId, baseline, codeIndex, warnings) : DynamicEvidence.empty();
+        codeIndex.applyControlFlowCoverage();
 
         // Coverage mutates the code index. Copy nodes into the response graph only afterwards.
         // Otherwise the graph would retain nodes without coverage metadata or source line numbers.
@@ -209,7 +246,7 @@ public class TraceabilityMapService {
                 clipped.nodes(),
                 clipped.edges(),
                 codeTree,
-                includeCodeGraph ? new CodeGraphData(codeIndex.dependencies, codeIndex.controlFlows) : null,
+                includeCodeGraph ? new CodeGraphData(codeIndex.dependencies, codeIndex.controlFlows, codeIndex.controlFlowGraphs) : null,
                 coverageOverview,
                 warnings);
     }
@@ -517,6 +554,7 @@ public class TraceabilityMapService {
                     if (collectCodeAnalysis) {
                         index.methodSpans.add(new MethodSpan(methodId, parsedClass.className(), method.methodName(), method.body(), method.invocations()));
                         addControlFlowSteps(index, methodId, method.methodName(), method.body());
+                        index.controlFlowGraphs.add(buildJavaControlFlowGraph(methodId, method.methodName(), method.bodyBlock()));
                     }
                 }
             }
@@ -525,14 +563,19 @@ public class TraceabilityMapService {
 
     private void addSourceAssetWithRegexFallback(CodeIndex index, AssetSnapshot asset, boolean collectCodeAnalysis, SourceUnit unit, String fileId) {
         String path = normalizer.normalizePath(unit.path());
+        String language = languageFromPath(path);
+        if (!CodeSymbolNormalizer.DEFAULT_LANGUAGE.equals(language)) {
+            addUnsupportedLanguageSourceAsset(index, asset, collectCodeAnalysis, unit, fileId, language);
+            return;
+        }
         String className = extractClassName(path, unit.content());
-        String classId = normalizer.classId(languageFromPath(path), path, className);
+        String classId = normalizer.classId(language, path, className);
         Map<String, Object> classMetadata = new LinkedHashMap<>();
         classMetadata.put("sourceAssetId", asset.id());
         classMetadata.put("sourceContent", sourceSnippet(unit.content()));
         classMetadata.put("sourceStartLine", 1);
         index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, className, className, path,
-                "CODE", languageFromPath(path), className, fileId, EvidenceState.STATIC, null, classMetadata));
+                "CODE", language, className, fileId, EvidenceState.STATIC, null, classMetadata));
         index.alias(path, classId);
         index.alias(className, classId);
         Matcher matcher = METHOD_PATTERN.matcher(unit.content());
@@ -542,7 +585,7 @@ public class TraceabilityMapService {
                 continue;
             }
             int line = lineNumber(unit.content(), matcher.start());
-            String methodId = normalizer.methodId(languageFromPath(path), path, className, methodName, null);
+            String methodId = normalizer.methodId(language, path, className, methodName, null);
             String declaration = unit.content().substring(matcher.start(), matcher.end());
             int bodyEnd = methodBodyEnd(unit.content(), matcher.end() - 1);
             String body = bodyEnd > matcher.start() ? unit.content().substring(matcher.start(), bodyEnd) : "";
@@ -552,7 +595,7 @@ public class TraceabilityMapService {
             metadata.put("visibility", declaration.contains("private") ? "PRIVATE" : declaration.contains("protected") ? "PROTECTED" : "PUBLIC");
             metadata.put("staticMethod", declaration.contains("static"));
             index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, "", path + ":" + line,
-                    "CODE", languageFromPath(path), className + "#" + methodName, classId, EvidenceState.STATIC,
+                    "CODE", language, className + "#" + methodName, classId, EvidenceState.STATIC,
                     null, metadata));
             index.alias(methodName, methodId);
             index.alias(className + "#" + methodName, methodId);
@@ -560,8 +603,459 @@ public class TraceabilityMapService {
             if (collectCodeAnalysis) {
                 index.methodSpans.add(new MethodSpan(methodId, className, methodName, body, inferredInvocations(body)));
                 addControlFlowSteps(index, methodId, methodName, body);
+                index.controlFlowGraphs.add(parseFailedControlFlowGraph(methodId, methodName, language, "该方法结构暂时无法识别，未生成执行路径图"));
             }
         }
+    }
+
+    private void addUnsupportedLanguageSourceAsset(CodeIndex index, AssetSnapshot asset, boolean collectCodeAnalysis,
+                                                   SourceUnit unit, String fileId, String language) {
+        String path = normalizer.normalizePath(unit.path());
+        String className = normalizer.simpleFileName(path);
+        String classId = normalizer.classId(language, path, className);
+        Map<String, Object> classMetadata = new LinkedHashMap<>();
+        classMetadata.put("sourceAssetId", asset.id());
+        classMetadata.put("sourceContent", sourceSnippet(unit.content()));
+        classMetadata.put("sourceStartLine", 1);
+        classMetadata.put("controlFlowStatus", externalCfgLanguage(language) ? "EXTERNAL_PARSER" : "UNSUPPORTED_LANGUAGE");
+        index.putCodeNode(new TraceabilityNode(classId, NodeKind.CODE_CLASS, className, path, path,
+                "CODE", language, className, fileId, EvidenceState.STATIC, null, classMetadata));
+        index.alias(path, classId);
+        if ("python".equals(language)) {
+            List<PythonCfgMethod> pythonMethods = analyzePythonControlFlows(path, unit.content());
+            for (PythonCfgMethod method : pythonMethods) {
+                addPolyglotMethodNode(index, asset, path, language, className, classId, method.name(), method.parameters(), method.line(),
+                        method.graph() == null ? parseFailedControlFlowGraph("", method.name(), language, method.message()) : method.graph());
+            }
+            return;
+        }
+        if ("go".equals(language)) {
+            List<PythonCfgMethod> goMethods = analyzeGoControlFlows(path, unit.content());
+            for (PythonCfgMethod method : goMethods) {
+                addPolyglotMethodNode(index, asset, path, language, className, classId, method.name(), method.parameters(), method.line(),
+                        method.graph() == null ? parseFailedControlFlowGraph("", method.name(), language, method.message()) : method.graph());
+            }
+            return;
+        }
+        if ("c".equals(language) || "cpp".equals(language)) {
+            List<PythonCfgMethod> cppMethods = analyzeCppControlFlows(path, unit.content(), language);
+            for (PythonCfgMethod method : cppMethods) {
+                addPolyglotMethodNode(index, asset, path, language, className, classId, method.name(), method.parameters(), method.line(),
+                        method.graph() == null ? parseFailedControlFlowGraph("", method.name(), language, method.message()) : method.graph());
+            }
+            return;
+        }
+        if ("javascript".equals(language) || "typescript".equals(language)) {
+            List<PythonCfgMethod> jsMethods = analyzeJavascriptControlFlows(path, unit.content(), language);
+            for (PythonCfgMethod method : jsMethods) {
+                addPolyglotMethodNode(index, asset, path, language, className, classId, method.name(), method.parameters(), method.line(),
+                        method.graph() == null ? parseFailedControlFlowGraph("", method.name(), language, method.message()) : method.graph());
+            }
+            return;
+        }
+        List<UnsupportedMethodCandidate> methods = unsupportedMethodCandidates(language, unit.content());
+        for (UnsupportedMethodCandidate method : methods) {
+            addPolyglotMethodNode(index, asset, path, language, className, classId, method.name(), method.parameters(), method.line(),
+                    collectCodeAnalysis ? unsupportedControlFlowGraph("", method.name(), language) : null);
+        }
+    }
+
+    private void addPolyglotMethodNode(CodeIndex index, AssetSnapshot asset, String path, String language, String className,
+                                       String classId, String methodName, String parameters, int line, ControlFlowGraph graphTemplate) {
+        String descriptor = "(" + value(parameters).replaceAll("\\s+", " ").trim() + ")";
+        String methodId = normalizer.methodId(language, path, className, methodName, descriptor);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("line", line);
+        metadata.put("sourceAssetId", asset.id());
+        metadata.put("descriptor", descriptor);
+        metadata.put("controlFlowStatus", graphTemplate == null ? "" : graphTemplate.parseStatus().name());
+        index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, methodName + descriptor, path + ":" + line,
+                "CODE", language, className + "#" + methodName, classId, EvidenceState.STATIC, null, metadata));
+        index.alias(methodName, methodId);
+        index.alias(className + "#" + methodName, methodId);
+        index.alias(path + "#" + methodName, methodId);
+        if (graphTemplate != null) {
+            index.controlFlowGraphs.add(rekeyControlFlowGraph(graphTemplate, methodId, methodName, language));
+        }
+    }
+
+    private List<UnsupportedMethodCandidate> unsupportedMethodCandidates(String language, String source) {
+        if (!StringUtils.hasText(source)) return List.of();
+        List<UnsupportedMethodCandidate> methods = new ArrayList<>();
+        if ("javascript".equals(language) || "typescript".equals(language)) {
+            addUnsupportedMatches(methods, source, JS_FUNCTION_PATTERN, 1, 2);
+            addUnsupportedMatches(methods, source, JS_ARROW_PATTERN, 1, 2);
+        } else if ("go".equals(language)) {
+            addUnsupportedMatches(methods, source, GO_FUNCTION_PATTERN, 1, 2);
+        } else if ("python".equals(language)) {
+            addUnsupportedMatches(methods, source, PY_FUNCTION_PATTERN, 2, 3);
+        } else if ("c".equals(language) || "cpp".equals(language)) {
+            addUnsupportedMatches(methods, source, CPP_FUNCTION_PATTERN, 1, 2);
+        }
+        return methods.stream()
+                .filter(method -> !JAVA_CONTROL_KEYWORDS.contains(method.name()))
+                .collect(Collectors.toMap(
+                        method -> method.name() + "#" + method.line(),
+                        method -> method,
+                        (left, right) -> left,
+                        LinkedHashMap::new))
+                .values()
+                .stream()
+                .toList();
+    }
+
+    private boolean externalCfgLanguage(String language) {
+        return "python".equals(language)
+                || "go".equals(language)
+                || "c".equals(language)
+                || "cpp".equals(language)
+                || "javascript".equals(language)
+                || "typescript".equals(language);
+    }
+
+    private void addUnsupportedMatches(List<UnsupportedMethodCandidate> methods, String source, Pattern pattern, int nameGroup, int parameterGroup) {
+        Matcher matcher = pattern.matcher(source);
+        while (matcher.find()) {
+            methods.add(new UnsupportedMethodCandidate(matcher.group(nameGroup), matcher.group(parameterGroup), lineNumber(source, matcher.start())));
+        }
+    }
+
+    private ControlFlowGraph unsupportedControlFlowGraph(String methodId, String methodLabel, String language) {
+        return new ControlFlowGraph(methodId, methodLabel, language, ControlFlowParseStatus.UNSUPPORTED_LANGUAGE,
+                unsupportedControlFlowMessage(language), List.of(), List.of(), null, List.of());
+    }
+
+    private ControlFlowGraph parseFailedControlFlowGraph(String methodId, String methodLabel, String language, String message) {
+        return new ControlFlowGraph(methodId, methodLabel, language, ControlFlowParseStatus.PARSE_FAILED,
+                message, List.of(), List.of(), null, List.of());
+    }
+
+    private List<PythonCfgMethod> analyzePythonControlFlows(String path, String source) {
+        String script = loadResourceText("analysis/python_cfg_analyzer.py");
+        if (!StringUtils.hasText(script)) {
+            return pythonParseFailedFallback(path, source, "当前环境缺少 Python 执行路径分析能力");
+        }
+        String executable = firstText(System.getenv("OAT_PYTHON_EXECUTABLE"), "python3");
+        Process process = null;
+        try {
+            process = new ProcessBuilder(executable, "-c", script).start();
+            String payload = UtilJson.writeValueAsString(Map.of("path", path, "source", value(source)));
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(payload.getBytes(StandardCharsets.UTF_8));
+            }
+            boolean finished = process.waitFor(5, TimeUnit.SECONDS);
+            String stdout;
+            String stderr;
+            try (InputStream out = process.getInputStream(); InputStream err = process.getErrorStream()) {
+                stdout = new String(out.readAllBytes(), StandardCharsets.UTF_8);
+                stderr = new String(err.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!finished) {
+                process.destroyForcibly();
+                return pythonParseFailedFallback(path, source, "Python 执行路径分析超时");
+            }
+            if (process.exitValue() != 0) {
+                return pythonParseFailedFallback(path, source, firstText(stderr.trim(), "Python 执行路径分析失败"));
+            }
+            JsonNode root = UtilJson.getObjectMapper().readTree(stdout);
+            if (!"OK".equals(root.path("status").asText())) {
+                return pythonParseFailedFallback(path, source, firstText(root.path("message").asText(), "Python 执行路径分析失败"));
+            }
+            List<PythonCfgMethod> result = new ArrayList<>();
+            for (JsonNode method : root.path("methods")) {
+                result.add(toPythonCfgMethod(method, path));
+            }
+            return result;
+        } catch (Exception exception) {
+            return pythonParseFailedFallback(path, source, "Python 执行路径分析不可用: " + exception.getMessage());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private List<PythonCfgMethod> analyzeGoControlFlows(String path, String source) {
+        String script = loadResourceText("analysis/go_cfg_analyzer.go");
+        if (!StringUtils.hasText(script)) {
+            return parseFailedFallback("go", source, "当前环境缺少 Go 执行路径分析能力");
+        }
+        String executable = firstText(System.getenv("OAT_GO_EXECUTABLE"), "go");
+        Path worker = null;
+        Process process = null;
+        try {
+            worker = Files.createTempFile("oat-go-cfg-", ".go");
+            Files.writeString(worker, script, StandardCharsets.UTF_8);
+            process = new ProcessBuilder(executable, "run", worker.toAbsolutePath().toString()).start();
+            String payload = UtilJson.writeValueAsString(Map.of("path", path, "source", value(source)));
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(payload.getBytes(StandardCharsets.UTF_8));
+            }
+            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+            String stdout;
+            String stderr;
+            try (InputStream out = process.getInputStream(); InputStream err = process.getErrorStream()) {
+                stdout = new String(out.readAllBytes(), StandardCharsets.UTF_8);
+                stderr = new String(err.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!finished) {
+                process.destroyForcibly();
+                return parseFailedFallback("go", source, "Go 执行路径分析超时");
+            }
+            if (process.exitValue() != 0) {
+                return parseFailedFallback("go", source, firstText(stderr.trim(), "Go 执行路径分析失败"));
+            }
+            JsonNode root = UtilJson.getObjectMapper().readTree(stdout);
+            if (!"OK".equals(root.path("status").asText())) {
+                return parseFailedFallback("go", source, firstText(root.path("message").asText(), "Go 执行路径分析失败"));
+            }
+            List<PythonCfgMethod> result = new ArrayList<>();
+            for (JsonNode method : root.path("methods")) {
+                result.add(toExternalCfgMethod(method, "go", "执行路径已完整生成", "部分语句暂未识别"));
+            }
+            return result;
+        } catch (Exception exception) {
+            return parseFailedFallback("go", source, "Go 执行路径分析不可用: " + exception.getMessage());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+            if (worker != null) {
+                try {
+                    Files.deleteIfExists(worker);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private List<PythonCfgMethod> analyzeCppControlFlows(String path, String source, String language) {
+        String script = loadResourceText("analysis/cpp_cfg_analyzer.py");
+        if (!StringUtils.hasText(script)) {
+            return parseFailedFallback(language, source, "当前环境缺少 C/C++ 执行路径分析能力");
+        }
+        String executable = firstText(System.getenv("OAT_PYTHON_EXECUTABLE"), "python3");
+        Process process = null;
+        try {
+            process = new ProcessBuilder(executable, "-c", script).start();
+            String payload = UtilJson.writeValueAsString(Map.of("path", path, "source", value(source)));
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(payload.getBytes(StandardCharsets.UTF_8));
+            }
+            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+            String stdout;
+            String stderr;
+            try (InputStream out = process.getInputStream(); InputStream err = process.getErrorStream()) {
+                stdout = new String(out.readAllBytes(), StandardCharsets.UTF_8);
+                stderr = new String(err.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!finished) {
+                process.destroyForcibly();
+                return parseFailedFallback(language, source, "C/C++ 执行路径分析超时");
+            }
+            if (process.exitValue() != 0) {
+                return parseFailedFallback(language, source, firstText(stderr.trim(), "C/C++ 执行路径分析失败"));
+            }
+            JsonNode root = UtilJson.getObjectMapper().readTree(stdout);
+            if (!"OK".equals(root.path("status").asText())) {
+                return parseFailedFallback(language, source, firstText(root.path("message").asText(), "C/C++ 执行路径分析失败"));
+            }
+            List<PythonCfgMethod> result = new ArrayList<>();
+            for (JsonNode method : root.path("methods")) {
+                result.add(toExternalCfgMethod(method, language, "执行路径已完整生成", "部分语句暂未识别"));
+            }
+            return result;
+        } catch (Exception exception) {
+            return parseFailedFallback(language, source, "C/C++ 执行路径分析不可用: " + exception.getMessage());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private List<PythonCfgMethod> analyzeJavascriptControlFlows(String path, String source, String language) {
+        String script = loadResourceText("analysis/js_cfg_analyzer.js");
+        if (!StringUtils.hasText(script)) {
+            return parseFailedFallback(language, source, "当前环境缺少 JS/TS 执行路径分析能力");
+        }
+        String executable = firstText(System.getenv("OAT_NODE_EXECUTABLE"), "node");
+        Process process = null;
+        try {
+            ProcessBuilder builder = new ProcessBuilder(executable, "-e", script);
+            Map<String, String> environment = builder.environment();
+            String nodePath = nodeModulePath();
+            if (StringUtils.hasText(nodePath)) {
+                environment.put("NODE_PATH", nodePath);
+            }
+            process = builder.start();
+            String payload = UtilJson.writeValueAsString(Map.of("path", path, "source", value(source)));
+            try (OutputStream stdin = process.getOutputStream()) {
+                stdin.write(payload.getBytes(StandardCharsets.UTF_8));
+            }
+            boolean finished = process.waitFor(10, TimeUnit.SECONDS);
+            String stdout;
+            String stderr;
+            try (InputStream out = process.getInputStream(); InputStream err = process.getErrorStream()) {
+                stdout = new String(out.readAllBytes(), StandardCharsets.UTF_8);
+                stderr = new String(err.readAllBytes(), StandardCharsets.UTF_8);
+            }
+            if (!finished) {
+                process.destroyForcibly();
+                return parseFailedFallback(language, source, "JS/TS 执行路径分析超时");
+            }
+            if (process.exitValue() != 0) {
+                return parseFailedFallback(language, source, firstText(stderr.trim(), "JS/TS 执行路径分析失败"));
+            }
+            JsonNode root = UtilJson.getObjectMapper().readTree(stdout);
+            if (!"OK".equals(root.path("status").asText())) {
+                return parseFailedFallback(language, source, firstText(root.path("message").asText(), "JS/TS 执行路径分析失败"));
+            }
+            List<PythonCfgMethod> result = new ArrayList<>();
+            for (JsonNode method : root.path("methods")) {
+                result.add(toExternalCfgMethod(method, language, "执行路径已完整生成", "部分语句暂未识别"));
+            }
+            return result;
+        } catch (Exception exception) {
+            return parseFailedFallback(language, source, "JS/TS 执行路径分析不可用: " + exception.getMessage());
+        } finally {
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
+        }
+    }
+
+    private String nodeModulePath() {
+        String configured = System.getenv("OAT_NODE_PATH");
+        if (StringUtils.hasText(configured)) return configured;
+        String userDir = System.getProperty("user.dir", ".");
+        List<Path> candidates = List.of(
+                Path.of(userDir, "node_modules"),
+                Path.of(userDir, "oAT-web-frontend", "node_modules"),
+                Path.of(userDir, "..", "oAT-web-frontend", "node_modules"),
+                Path.of(userDir, "..", "..", "oAT-web-frontend", "node_modules"),
+                Path.of(userDir, "..", "..", "..", "oAT-web-frontend", "node_modules"));
+        return candidates.stream()
+                .map(Path::normalize)
+                .filter(Files::isDirectory)
+                .map(Path::toAbsolutePath)
+                .map(Path::toString)
+                .findFirst()
+                .orElse("");
+    }
+
+    private PythonCfgMethod toPythonCfgMethod(JsonNode method, String path) {
+        return toExternalCfgMethod(method, "python", "执行路径已完整生成", "部分语句暂未识别");
+    }
+
+    private PythonCfgMethod toExternalCfgMethod(JsonNode method, String language, String preciseMessage, String partialMessage) {
+        String name = method.path("name").asText("function");
+        String parameters = method.path("parameters").asText("");
+        int line = method.path("line").asInt(1);
+        List<ControlFlowNode> nodes = new ArrayList<>();
+        for (JsonNode node : method.path("nodes")) {
+            nodes.add(new ControlFlowNode(
+                    node.path("key").asText(),
+                    enumValue(ControlFlowNodeType.class, node.path("type").asText(), ControlFlowNodeType.UNKNOWN_BLOCK),
+                    node.path("label").asText(""),
+                    node.path("expression").asText(""),
+                    node.path("line").isMissingNode() || node.path("line").isNull() ? null : node.path("line").asInt(),
+                    node.path("order").asInt(),
+                    node.path("depth").asInt(),
+                    node.path("precise").asBoolean(false),
+                    "UNKNOWN"));
+        }
+        List<ControlFlowEdge> edges = new ArrayList<>();
+        for (JsonNode edge : method.path("edges")) {
+            edges.add(new ControlFlowEdge(
+                    edge.path("id").asText(),
+                    edge.path("source").asText(),
+                    edge.path("target").asText(),
+                    enumValue(ControlFlowEdgeType.class, edge.path("type").asText(), ControlFlowEdgeType.NEXT),
+                    pythonEdgeLabel(edge.path("label").asText("")),
+                    edge.path("precise").asBoolean(false),
+                    "UNKNOWN"));
+        }
+        List<String> exits = new ArrayList<>();
+        method.path("exitNodeKeys").forEach(item -> exits.add(item.asText()));
+        ControlFlowParseStatus status = enumValue(ControlFlowParseStatus.class, method.path("parseStatus").asText(), ControlFlowParseStatus.PARSE_FAILED);
+        ControlFlowGraph graph = new ControlFlowGraph("", name, language, status,
+                status == ControlFlowParseStatus.PRECISE ? preciseMessage : partialMessage,
+                nodes, edges, method.path("entryNodeKey").asText(null), exits);
+        return new PythonCfgMethod(name, parameters, line, graph, "");
+    }
+
+    private List<PythonCfgMethod> pythonParseFailedFallback(String path, String source, String message) {
+        return parseFailedFallback("python", source, message);
+    }
+
+    private List<PythonCfgMethod> parseFailedFallback(String language, String source, String message) {
+        return unsupportedMethodCandidates(language, source).stream()
+                .map(method -> new PythonCfgMethod(method.name(), method.parameters(), method.line(), null, message))
+                .toList();
+    }
+
+    private ControlFlowGraph rekeyControlFlowGraph(ControlFlowGraph graph, String methodId, String methodLabel, String language) {
+        Map<String, String> ids = new HashMap<>();
+        for (ControlFlowNode node : graph.nodes()) {
+            ids.put(node.id(), methodId + ":cfg:" + node.order());
+        }
+        List<ControlFlowNode> nodes = graph.nodes().stream()
+                .map(node -> new ControlFlowNode(ids.get(node.id()), node.type(), node.label(), node.expression(),
+                        node.line(), node.order(), node.depth(), node.precise(), node.coverageState()))
+                .toList();
+        List<ControlFlowEdge> edges = graph.edges().stream()
+                .filter(edge -> ids.containsKey(edge.source()) && ids.containsKey(edge.target()))
+                .map(edge -> new ControlFlowEdge(methodId + ":cfg:" + edge.id(), ids.get(edge.source()), ids.get(edge.target()),
+                        edge.type(), edge.label(), edge.precise(), edge.coverageState()))
+                .toList();
+        List<String> exits = graph.exitNodeIds().stream().map(ids::get).filter(Objects::nonNull).toList();
+        String entry = graph.entryNodeId() == null ? null : ids.get(graph.entryNodeId());
+        return new ControlFlowGraph(methodId, methodLabel, language, graph.parseStatus(), graph.message(), nodes, edges, entry, exits);
+    }
+
+    private String pythonEdgeLabel(String label) {
+        String normalized = value(label);
+        if (normalized.startsWith("catch ") || normalized.startsWith("except ")) return "捕获异常";
+        return switch (value(label)) {
+            case "yes" -> "是";
+            case "no" -> "否";
+            case "return" -> "返回";
+            case "raise" -> "异常";
+            case "enter try" -> "进入 try";
+            case "catch" -> "捕获异常";
+            case "finally" -> "finally";
+            case "break" -> "跳出";
+            case "loop" -> "循环";
+            default -> "continue".equals(label) ? "下一步" : label;
+        };
+    }
+
+    private String loadResourceText(String path) {
+        try (InputStream input = TraceabilityMapService.class.getClassLoader().getResourceAsStream(path)) {
+            return input == null ? "" : new String(input.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception exception) {
+            return "";
+        }
+    }
+
+    private <T extends Enum<T>> T enumValue(Class<T> type, String value, T fallback) {
+        if (!StringUtils.hasText(value)) return fallback;
+        try {
+            return Enum.valueOf(type, value);
+        } catch (IllegalArgumentException exception) {
+            return fallback;
+        }
+    }
+
+    private String unsupportedControlFlowMessage(String language) {
+        return switch (language) {
+            case "go" -> "当前环境暂时无法生成 Go 执行路径图";
+            case "python" -> "当前环境暂时无法生成 Python 执行路径图";
+            case "c", "cpp" -> "当前环境暂时无法生成 C/C++ 执行路径图";
+            case "javascript", "typescript" -> "当前环境暂时无法生成 JS/TS 执行路径图；覆盖率只用于标注执行情况";
+            default -> "当前暂不支持该语言的执行路径图";
+        };
     }
 
     private void addControlFlowSteps(CodeIndex index, String methodId, String methodLabel, String body) {
@@ -573,6 +1067,288 @@ public class TraceabilityMapService {
                     shortenGraphText(matcher.group(2), 180), order++));
         }
     }
+
+    private ControlFlowGraph buildJavaControlFlowGraph(String methodId, String methodLabel, BlockStmt body) {
+        if (body == null || body.getStatements().isEmpty()) {
+            return new ControlFlowGraph(methodId, methodLabel, CodeSymbolNormalizer.DEFAULT_LANGUAGE,
+                    ControlFlowParseStatus.EMPTY, "方法体为空", List.of(), List.of(), null, List.of());
+        }
+        JavaCfgBuilder builder = new JavaCfgBuilder(methodId, methodLabel);
+        return builder.build(body);
+    }
+
+    private final class JavaCfgBuilder {
+        private final String methodId;
+        private final String methodLabel;
+        private final List<ControlFlowNode> nodes = new ArrayList<>();
+        private final List<ControlFlowEdge> edges = new ArrayList<>();
+        private int nodeSequence = 0;
+        private int edgeSequence = 0;
+        private boolean partial = false;
+
+        JavaCfgBuilder(String methodId, String methodLabel) {
+            this.methodId = methodId;
+            this.methodLabel = methodLabel;
+        }
+
+        ControlFlowGraph build(BlockStmt body) {
+            ControlFlowNode start = node(ControlFlowNodeType.START, "开始", methodLabel, line(body), 0, true);
+            FlowTail bodyTail = connectBlock(List.of(start.id()), body.getStatements(), 0);
+            ControlFlowNode end = node(ControlFlowNodeType.END, "结束", "", line(body), 0, true);
+            for (String tail : bodyTail.open()) {
+                edge(tail, end.id(), ControlFlowEdgeType.NEXT, "下一步", true);
+            }
+            List<String> exits = bodyTail.terminal().isEmpty() ? List.of(end.id()) : bodyTail.terminal();
+            return new ControlFlowGraph(methodId, methodLabel, CodeSymbolNormalizer.DEFAULT_LANGUAGE,
+                    partial ? ControlFlowParseStatus.PARTIAL : ControlFlowParseStatus.PRECISE,
+                    partial ? "部分语句暂未识别，已在图中标出" : "执行路径已完整生成",
+                    nodes, edges, start.id(), exits);
+        }
+
+        private FlowTail connectBlock(List<String> incoming, List<Statement> statements, int depth) {
+            List<String> open = incoming;
+            List<String> terminal = new ArrayList<>();
+            for (Statement statement : statements) {
+                if (open.isEmpty()) {
+                    terminal.addAll(connectStatement(List.of(), statement, depth).terminal());
+                    continue;
+                }
+                FlowTail next = connectStatement(open, statement, depth);
+                open = next.open();
+                terminal.addAll(next.terminal());
+            }
+            return new FlowTail(open, terminal);
+        }
+
+        private FlowTail connectStatement(List<String> incoming, Statement statement, int depth) {
+            if (statement.isBlockStmt()) {
+                return connectBlock(incoming, statement.asBlockStmt().getStatements(), depth);
+            }
+            if (statement instanceof IfStmt ifStmt) {
+                return connectIf(incoming, ifStmt, depth);
+            }
+            if (statement instanceof ForStmt || statement instanceof ForEachStmt || statement instanceof WhileStmt || statement instanceof DoStmt) {
+                return connectLoop(incoming, statement, depth);
+            }
+            if (statement instanceof SwitchStmt switchStmt) {
+                return connectSwitch(incoming, switchStmt, depth);
+            }
+            if (statement instanceof ReturnStmt returnStmt) {
+                ControlFlowNode node = node(ControlFlowNodeType.RETURN, "返回", expression(returnStmt.getExpression().map(Object::toString).orElse("return")), line(statement), depth, true);
+                connectIncoming(incoming, node.id(), ControlFlowEdgeType.RETURN, "返回", true);
+                return new FlowTail(List.of(), List.of(node.id()));
+            }
+            if (statement instanceof ThrowStmt throwStmt) {
+                ControlFlowNode node = node(ControlFlowNodeType.THROW, "抛出异常", expression(throwStmt.getExpression().toString()), line(statement), depth, true);
+                connectIncoming(incoming, node.id(), ControlFlowEdgeType.THROW, "异常", true);
+                return new FlowTail(List.of(), List.of(node.id()));
+            }
+            if (statement instanceof BreakStmt) {
+                ControlFlowNode node = node(ControlFlowNodeType.BREAK, "跳出", "break", line(statement), depth, true);
+                connectIncoming(incoming, node.id(), ControlFlowEdgeType.BREAK, "跳出", true);
+                return new FlowTail(List.of(node.id()), List.of());
+            }
+            if (statement instanceof ContinueStmt) {
+                ControlFlowNode node = node(ControlFlowNodeType.CONTINUE, "进入下一轮", "continue", line(statement), depth, true);
+                connectIncoming(incoming, node.id(), ControlFlowEdgeType.CONTINUE, "进入下一轮", true);
+                return new FlowTail(List.of(node.id()), List.of());
+            }
+            if (statement instanceof TryStmt tryStmt) {
+                return connectTry(incoming, tryStmt, depth);
+            }
+            if (statement instanceof SynchronizedStmt synchronizedStmt) {
+                ControlFlowNode node = node(ControlFlowNodeType.ACTION, "同步块", expression(synchronizedStmt.getExpression().toString()), line(statement), depth, true);
+                connectIncoming(incoming, node.id(), ControlFlowEdgeType.NEXT, "进入同步块", true);
+                return connectBlock(List.of(node.id()), synchronizedStmt.getBody().getStatements(), depth + 1);
+            }
+            if (statement instanceof LabeledStmt labeledStmt) {
+                return connectStatement(incoming, labeledStmt.getStatement(), depth);
+            }
+            if (statement instanceof EmptyStmt) {
+                return new FlowTail(incoming, List.of());
+            }
+            boolean precise = statement instanceof ExpressionStmt || statement instanceof AssertStmt;
+            if (!precise) partial = true;
+            ControlFlowNode node = node(precise ? ControlFlowNodeType.ACTION : ControlFlowNodeType.UNKNOWN_BLOCK,
+                    precise ? "执行" : "暂未识别的语句", expression(statement.toString()), line(statement), depth, precise);
+            connectIncoming(incoming, node.id(), ControlFlowEdgeType.NEXT, "下一步", precise);
+            return new FlowTail(List.of(node.id()), List.of());
+        }
+
+        private FlowTail connectIf(List<String> incoming, IfStmt ifStmt, int depth) {
+            ControlFlowNode decision = node(ControlFlowNodeType.DECISION, "判断", expression(ifStmt.getCondition().toString()), line(ifStmt), depth, true);
+            connectIncoming(incoming, decision.id(), ControlFlowEdgeType.NEXT, "下一步", true);
+            FlowTail thenTail = connectStatement(List.of(decision.id()), ifStmt.getThenStmt(), depth + 1);
+            relabelLastOutgoing(decision.id(), ControlFlowEdgeType.TRUE, "是");
+            FlowTail elseTail = ifStmt.getElseStmt()
+                    .map(stmt -> connectStatement(List.of(decision.id()), stmt, depth + 1))
+                    .orElseGet(() -> {
+                        ControlFlowNode pass = node(ControlFlowNodeType.MERGE, "跳过分支", "", line(ifStmt), depth + 1, true);
+                        edge(decision.id(), pass.id(), ControlFlowEdgeType.FALSE, "否", true);
+                        return new FlowTail(List.of(pass.id()), List.of());
+                    });
+            if (ifStmt.getElseStmt().isPresent()) {
+                relabelFirstOutgoing(decision.id(), ControlFlowEdgeType.FALSE, "否", ControlFlowEdgeType.TRUE);
+            }
+            List<String> open = new ArrayList<>();
+            open.addAll(thenTail.open());
+            open.addAll(elseTail.open());
+            List<String> terminal = new ArrayList<>();
+            terminal.addAll(thenTail.terminal());
+            terminal.addAll(elseTail.terminal());
+            return new FlowTail(open, terminal);
+        }
+
+        private FlowTail connectLoop(List<String> incoming, Statement statement, int depth) {
+            String condition = loopCondition(statement);
+            ControlFlowNode loop = node(ControlFlowNodeType.LOOP, "循环判断", expression(condition), line(statement), depth, true);
+            connectIncoming(incoming, loop.id(), ControlFlowEdgeType.NEXT, "下一步", true);
+            Statement body = loopBody(statement);
+            FlowTail bodyTail = body == null
+                    ? new FlowTail(List.of(loop.id()), List.of())
+                    : connectStatement(List.of(loop.id()), body, depth + 1);
+            relabelLastOutgoing(loop.id(), ControlFlowEdgeType.LOOP_BODY, "是");
+            ControlFlowNode after = node(ControlFlowNodeType.MERGE, "循环结束", "", line(statement), depth, true);
+            for (String tail : bodyTail.open()) {
+                if (nodeType(tail) == ControlFlowNodeType.BREAK) {
+                    edge(tail, after.id(), ControlFlowEdgeType.BREAK, "跳出", true);
+                } else {
+                    edge(tail, loop.id(), ControlFlowEdgeType.LOOP_BACK, "循环", true);
+                }
+            }
+            edge(loop.id(), after.id(), ControlFlowEdgeType.FALSE, "否", true);
+            return new FlowTail(List.of(after.id()), bodyTail.terminal());
+        }
+
+        private FlowTail connectSwitch(List<String> incoming, SwitchStmt switchStmt, int depth) {
+            ControlFlowNode decision = node(ControlFlowNodeType.SWITCH, "选择分支", expression(switchStmt.getSelector().toString()), line(switchStmt), depth, true);
+            connectIncoming(incoming, decision.id(), ControlFlowEdgeType.NEXT, "下一步", true);
+            List<String> open = new ArrayList<>();
+            List<String> terminal = new ArrayList<>();
+            for (SwitchEntry entry : switchStmt.getEntries()) {
+                String label = entry.getLabels().isEmpty() ? "默认" : shortenGraphText(entry.getLabels().stream().map(Object::toString).collect(Collectors.joining(", ")), 80);
+                ControlFlowNode caseNode = node(ControlFlowNodeType.CASE, label, "", line(entry), depth + 1, true);
+                edge(decision.id(), caseNode.id(), entry.getLabels().isEmpty() ? ControlFlowEdgeType.DEFAULT : ControlFlowEdgeType.CASE, label, true);
+                FlowTail caseTail = connectBlock(List.of(caseNode.id()), entry.getStatements(), depth + 2);
+                open.addAll(caseTail.open());
+                terminal.addAll(caseTail.terminal());
+            }
+            if (switchStmt.getEntries().stream().noneMatch(entry -> entry.getLabels().isEmpty())) {
+                ControlFlowNode defaultPass = node(ControlFlowNodeType.MERGE, "无匹配分支", "", line(switchStmt), depth + 1, true);
+                edge(decision.id(), defaultPass.id(), ControlFlowEdgeType.DEFAULT, "默认", true);
+                open.add(defaultPass.id());
+            }
+            return new FlowTail(open, terminal);
+        }
+
+        private FlowTail connectTry(List<String> incoming, TryStmt tryStmt, int depth) {
+            String resources = tryStmt.getResources().isEmpty()
+                    ? ""
+                    : tryStmt.getResources().stream().map(Object::toString).collect(Collectors.joining("; "));
+            ControlFlowNode tryNode = node(ControlFlowNodeType.TRY, "try", expression(resources), line(tryStmt), depth, true);
+            connectIncoming(incoming, tryNode.id(), ControlFlowEdgeType.NEXT, "进入 try", true);
+            FlowTail tryTail = connectBlock(List.of(tryNode.id()), tryStmt.getTryBlock().getStatements(), depth + 1);
+
+            List<String> open = new ArrayList<>(tryTail.open());
+            List<String> terminal = new ArrayList<>(tryTail.terminal());
+            for (CatchClause catchClause : tryStmt.getCatchClauses()) {
+                String parameter = catchClause.getParameter().toString();
+                ControlFlowNode catchNode = node(ControlFlowNodeType.CATCH, "catch", expression(parameter), line(catchClause), depth + 1, true);
+                edge(tryNode.id(), catchNode.id(), ControlFlowEdgeType.EXCEPTION, "异常: " + shortenGraphText(parameter, 40), true);
+                FlowTail catchTail = connectBlock(List.of(catchNode.id()), catchClause.getBody().getStatements(), depth + 2);
+                open.addAll(catchTail.open());
+                terminal.addAll(catchTail.terminal());
+            }
+
+            if (tryStmt.getFinallyBlock().isPresent()) {
+                ControlFlowNode finallyNode = node(ControlFlowNodeType.FINALLY, "finally", "", line(tryStmt.getFinallyBlock().get()), depth + 1, true);
+                connectIncoming(open, finallyNode.id(), ControlFlowEdgeType.FINALLY, "finally", true);
+                FlowTail finallyTail = connectBlock(List.of(finallyNode.id()), tryStmt.getFinallyBlock().get().getStatements(), depth + 2);
+                open = new ArrayList<>(finallyTail.open());
+                terminal.addAll(finallyTail.terminal());
+            }
+            return new FlowTail(open, terminal);
+        }
+
+        private FlowTail connectBlockWithFallback(List<String> incoming, List<Statement> statements, int depth, String label) {
+            ControlFlowNode node = node(ControlFlowNodeType.UNKNOWN_BLOCK, label, "", null, depth, false);
+            connectIncoming(incoming, node.id(), ControlFlowEdgeType.NEXT, "下一步", false);
+            FlowTail inner = connectBlock(List.of(node.id()), statements, depth + 1);
+            return new FlowTail(inner.open(), inner.terminal());
+        }
+
+        private void connectIncoming(List<String> incoming, String target, ControlFlowEdgeType type, String label, boolean precise) {
+            for (String source : incoming) {
+                edge(source, target, type, label, precise);
+            }
+        }
+
+        private ControlFlowNode node(ControlFlowNodeType type, String label, String expression, Integer line, int depth, boolean precise) {
+            String id = methodId + ":cfg:" + nodeSequence;
+            ControlFlowNode node = new ControlFlowNode(id, type, label, shortenGraphText(value(expression), 180), line, nodeSequence++, depth, precise, "UNKNOWN");
+            nodes.add(node);
+            return node;
+        }
+
+        private void edge(String source, String target, ControlFlowEdgeType type, String label, boolean precise) {
+            if (!StringUtils.hasText(source) || !StringUtils.hasText(target)) return;
+            edges.add(new ControlFlowEdge(methodId + ":cfg:e:" + edgeSequence++, source, target, type, label, precise, "UNKNOWN"));
+        }
+
+        private void relabelLastOutgoing(String source, ControlFlowEdgeType type, String label) {
+            for (int i = edges.size() - 1; i >= 0; i--) {
+                ControlFlowEdge edge = edges.get(i);
+                if (edge.source().equals(source)) {
+                    edges.set(i, new ControlFlowEdge(edge.id(), edge.source(), edge.target(), type, label, edge.precise(), edge.coverageState()));
+                    return;
+                }
+            }
+        }
+
+        private void relabelFirstOutgoing(String source, ControlFlowEdgeType type, String label, ControlFlowEdgeType skipType) {
+            for (int i = 0; i < edges.size(); i++) {
+                ControlFlowEdge edge = edges.get(i);
+                if (edge.source().equals(source) && edge.type() != skipType) {
+                    edges.set(i, new ControlFlowEdge(edge.id(), edge.source(), edge.target(), type, label, edge.precise(), edge.coverageState()));
+                    return;
+                }
+            }
+        }
+
+        private String expression(String text) {
+            return shortenGraphText(text, 180);
+        }
+
+        private Integer line(Node node) {
+            return node.getRange().map(range -> range.begin.line).orElse(null);
+        }
+
+        private String loopCondition(Statement statement) {
+            if (statement instanceof ForStmt forStmt) return forStmt.getCompare().map(Object::toString).orElse("for");
+            if (statement instanceof ForEachStmt forEachStmt) return forEachStmt.getVariable() + " : " + forEachStmt.getIterable();
+            if (statement instanceof WhileStmt whileStmt) return whileStmt.getCondition().toString();
+            if (statement instanceof DoStmt doStmt) return doStmt.getCondition().toString();
+            return "loop";
+        }
+
+        private Statement loopBody(Statement statement) {
+            if (statement instanceof ForStmt forStmt) return forStmt.getBody();
+            if (statement instanceof ForEachStmt forEachStmt) return forEachStmt.getBody();
+            if (statement instanceof WhileStmt whileStmt) return whileStmt.getBody();
+            if (statement instanceof DoStmt doStmt) return doStmt.getBody();
+            return null;
+        }
+
+        private ControlFlowNodeType nodeType(String id) {
+            return nodes.stream()
+                    .filter(node -> node.id().equals(id))
+                    .map(ControlFlowNode::type)
+                    .findFirst()
+                    .orElse(ControlFlowNodeType.UNKNOWN_BLOCK);
+        }
+    }
+
+    private record FlowTail(List<String> open, List<String> terminal) {}
 
     private String shortenGraphText(String text, int max) {
         String normalized = value(text).replaceAll("\\s+", " ").trim();
@@ -1213,6 +1989,8 @@ public class TraceabilityMapService {
         Set<Integer> totalLines = new LinkedHashSet<>();
         Set<Integer> coveredLines = new LinkedHashSet<>();
         Set<Integer> partialBranchLines = new LinkedHashSet<>();
+        Map<String, List<Integer>> totalBranchProbes = new LinkedHashMap<>();
+        Map<String, List<Integer>> coveredBranchProbes = new LinkedHashMap<>();
         if (index.getTotalLineNumbers() != null) totalLines.addAll(index.getTotalLineNumbers());
         if (index.getCoveredLineNumbers() != null) coveredLines.addAll(index.getCoveredLineNumbers());
         if (index.getMethods() != null) {
@@ -1221,6 +1999,8 @@ public class TraceabilityMapService {
                 if (method.getTotalLineNumbers() != null) totalLines.addAll(method.getTotalLineNumbers());
                 if (method.getCoveredLineNumbers() != null) coveredLines.addAll(method.getCoveredLineNumbers());
                 partialBranchLines.addAll(partialBranchLines(method));
+                if (method.getTotalBranchTargetProbeMap() != null) totalBranchProbes.putAll(copyBranchProbeMap(method.getTotalBranchTargetProbeMap()));
+                if (method.getCoveredBranchTargetProbeMap() != null) coveredBranchProbes.putAll(copyBranchProbeMap(method.getCoveredBranchTargetProbeMap()));
             }
         }
         metadata.put("coverageComplexity", index.getTotalComplexity());
@@ -1228,7 +2008,19 @@ public class TraceabilityMapService {
         metadata.put("coverageTotalLines", new ArrayList<>(totalLines));
         metadata.put("coverageCoveredLines", new ArrayList<>(coveredLines));
         metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines));
+        metadata.put("coverageTotalBranchTargetProbeMap", totalBranchProbes);
+        metadata.put("coverageCoveredBranchTargetProbeMap", coveredBranchProbes);
         return metadata;
+    }
+
+    private Map<String, List<Integer>> copyBranchProbeMap(Map<String, List<Integer>> probes) {
+        Map<String, List<Integer>> result = new LinkedHashMap<>();
+        if (probes == null) return result;
+        for (Map.Entry<String, List<Integer>> entry : probes.entrySet()) {
+            if (!StringUtils.hasText(entry.getKey())) continue;
+            result.put(entry.getKey(), entry.getValue() == null ? List.of() : new ArrayList<>(entry.getValue()));
+        }
+        return result;
     }
 
     private Set<Integer> partialBranchLines(ClassCoverageIndex.MethodCoverageDetail method) {
@@ -1448,7 +2240,13 @@ public class TraceabilityMapService {
         List<InvocationCandidate> invocations = callable.findAll(MethodCallExpr.class).stream()
                 .map(call -> new InvocationCandidate(call.getNameAsString(), call.getArguments().size()))
                 .toList();
-        return new ParsedSourceMethod(methodName, descriptor, signature, line, visibility, staticMethod, body, invocations);
+        BlockStmt bodyBlock = null;
+        if (callable instanceof MethodDeclaration method) {
+            bodyBlock = method.getBody().orElse(null);
+        } else if (callable instanceof ConstructorDeclaration constructor) {
+            bodyBlock = constructor.getBody();
+        }
+        return new ParsedSourceMethod(methodName, descriptor, signature, line, visibility, staticMethod, body, bodyBlock, invocations);
     }
 
     private ParsedSourceMethod parsedInitializer(InitializerDeclaration initializer, int line) {
@@ -1457,7 +2255,7 @@ public class TraceabilityMapService {
         List<InvocationCandidate> invocations = initializer.findAll(MethodCallExpr.class).stream()
                 .map(call -> new InvocationCandidate(call.getNameAsString(), call.getArguments().size()))
                 .toList();
-        return new ParsedSourceMethod(name, "()", name, line, "PACKAGE", initializer.isStatic(), body, invocations);
+        return new ParsedSourceMethod(name, "()", name, line, "PACKAGE", initializer.isStatic(), body, initializer.getBody(), invocations);
     }
 
     private String qualifiedTypeName(String packageName, TypeDeclaration<?> type) {
@@ -1558,6 +2356,9 @@ public class TraceabilityMapService {
         if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".vue")) return "javascript";
         if (lower.endsWith(".py")) return "python";
         if (lower.endsWith(".go")) return "go";
+        if (lower.endsWith(".c")) return "c";
+        if (lower.endsWith(".cc") || lower.endsWith(".cpp") || lower.endsWith(".cxx")
+                || lower.endsWith(".h") || lower.endsWith(".hpp")) return "cpp";
         return CodeSymbolNormalizer.DEFAULT_LANGUAGE;
     }
 
@@ -1631,9 +2432,11 @@ public class TraceabilityMapService {
     }
 
     private record SourceUnit(String path, String content) {}
+    private record UnsupportedMethodCandidate(String name, String parameters, int line) {}
+    private record PythonCfgMethod(String name, String parameters, int line, ControlFlowGraph graph, String message) {}
     private record ParsedSourceClass(String className, List<ParsedSourceMethod> methods) {}
     private record ParsedSourceMethod(String methodName, String descriptor, String signature, int line, String visibility,
-                                      boolean staticMethod, String body, List<InvocationCandidate> invocations) {}
+                                      boolean staticMethod, String body, BlockStmt bodyBlock, List<InvocationCandidate> invocations) {}
     private record InvocationCandidate(String name, int argumentCount) {}
     private Map<String, Object> callMetadata(CallPair pair) {
         Integer opcode = pair.opcode();
@@ -1667,6 +2470,113 @@ public class TraceabilityMapService {
         private final List<MethodSpan> methodSpans = new ArrayList<>();
         private final List<CodeDependency> dependencies = new ArrayList<>();
         private final List<ControlFlowStep> controlFlows = new ArrayList<>();
+        private final List<ControlFlowGraph> controlFlowGraphs = new ArrayList<>();
+
+        void applyControlFlowCoverage() {
+            for (int index = 0; index < controlFlowGraphs.size(); index++) {
+                ControlFlowGraph graph = controlFlowGraphs.get(index);
+                TraceabilityNode method = nodes.get(graph.methodId());
+                Map<String, Object> metadata = method == null || method.metadata() == null ? Map.of() : method.metadata();
+                Set<Integer> totalLines = integerSet(metadata.get("coverageTotalLines"));
+                Set<Integer> coveredLines = integerSet(metadata.get("coverageCoveredLines"));
+                Set<Integer> partialBranchLines = integerSet(metadata.get("coveragePartialBranchLines"));
+                Map<Integer, String> branchCoverageByLine = branchCoverageStatesByLine(metadata);
+                if (totalLines.isEmpty() && coveredLines.isEmpty() && partialBranchLines.isEmpty() && branchCoverageByLine.isEmpty()) {
+                    continue;
+                }
+                List<ControlFlowNode> cfgNodes = graph.nodes().stream()
+                        .map(node -> new ControlFlowNode(node.id(), node.type(), node.label(), node.expression(), node.line(),
+                                node.order(), node.depth(), node.precise(), coverageState(node.line(), totalLines, coveredLines, partialBranchLines)))
+                        .toList();
+                Map<String, Integer> branchNodeLines = graph.nodes().stream()
+                        .filter(node -> isBranchCoverageNode(node.type()))
+                        .filter(node -> node.line() != null && node.line() > 0)
+                        .collect(Collectors.toMap(ControlFlowNode::id, ControlFlowNode::line, (left, right) -> left, LinkedHashMap::new));
+                List<ControlFlowEdge> cfgEdges = graph.edges().stream()
+                        .map(edge -> {
+                            Integer line = branchNodeLines.get(edge.source());
+                            String state = line == null || !isBranchCoverageEdge(edge.type())
+                                    ? "UNKNOWN"
+                                    : branchCoverageByLine.getOrDefault(line, "UNKNOWN");
+                            return new ControlFlowEdge(edge.id(), edge.source(), edge.target(), edge.type(), edge.label(), edge.precise(), state);
+                        })
+                        .toList();
+                controlFlowGraphs.set(index, new ControlFlowGraph(graph.methodId(), graph.methodLabel(), graph.language(),
+                        graph.parseStatus(), graph.message(), cfgNodes, cfgEdges, graph.entryNodeId(), graph.exitNodeIds()));
+            }
+        }
+
+        private String coverageState(Integer line, Set<Integer> totalLines, Set<Integer> coveredLines, Set<Integer> partialBranchLines) {
+            if (line == null || line <= 0) return "UNKNOWN";
+            if (partialBranchLines.contains(line)) return "PARTIAL";
+            if (coveredLines.contains(line)) return "COVERED";
+            if (totalLines.contains(line)) return "UNCOVERED";
+            return "UNKNOWN";
+        }
+
+        private boolean isBranchCoverageNode(ControlFlowNodeType type) {
+            return type == ControlFlowNodeType.DECISION || type == ControlFlowNodeType.LOOP || type == ControlFlowNodeType.SWITCH;
+        }
+
+        private boolean isBranchCoverageEdge(ControlFlowEdgeType type) {
+            return type == ControlFlowEdgeType.TRUE
+                    || type == ControlFlowEdgeType.FALSE
+                    || type == ControlFlowEdgeType.CASE
+                    || type == ControlFlowEdgeType.DEFAULT
+                    || type == ControlFlowEdgeType.LOOP_BODY;
+        }
+
+        private Map<Integer, String> branchCoverageStatesByLine(Map<String, Object> metadata) {
+            Map<String, List<Integer>> total = branchProbeMap(metadata.get("coverageTotalBranchTargetProbeMap"));
+            Map<String, List<Integer>> covered = branchProbeMap(metadata.get("coverageCoveredBranchTargetProbeMap"));
+            Map<Integer, int[]> counts = new LinkedHashMap<>();
+            for (Map.Entry<String, List<Integer>> entry : total.entrySet()) {
+                int line = branchLine(entry.getKey());
+                if (line <= 0) continue;
+                int[] count = counts.computeIfAbsent(line, ignored -> new int[2]);
+                count[1] += entry.getValue() == null ? 0 : entry.getValue().size();
+                List<Integer> coveredTargets = covered.get(entry.getKey());
+                count[0] += coveredTargets == null ? 0 : coveredTargets.size();
+            }
+            Map<Integer, String> result = new LinkedHashMap<>();
+            for (Map.Entry<Integer, int[]> entry : counts.entrySet()) {
+                int coveredCount = entry.getValue()[0];
+                int totalCount = entry.getValue()[1];
+                if (totalCount <= 0) continue;
+                if (coveredCount <= 0) result.put(entry.getKey(), "UNCOVERED");
+                else if (coveredCount >= totalCount) result.put(entry.getKey(), "COVERED");
+                else result.put(entry.getKey(), "PARTIAL");
+            }
+            return result;
+        }
+
+        private Map<String, List<Integer>> branchProbeMap(Object value) {
+            if (!(value instanceof Map<?, ?> rawMap)) return Map.of();
+            Map<String, List<Integer>> result = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
+                String key = entry.getKey() == null ? "" : String.valueOf(entry.getKey());
+                if (!StringUtils.hasText(key)) continue;
+                List<Integer> probes = new ArrayList<>();
+                if (entry.getValue() instanceof Iterable<?> iterable) {
+                    for (Object item : iterable) {
+                        Integer number = metadataInteger(item);
+                        if (number != null) probes.add(number);
+                    }
+                }
+                result.put(key, probes);
+            }
+            return result;
+        }
+
+        private Set<Integer> integerSet(Object value) {
+            if (!(value instanceof Iterable<?> iterable)) return Set.of();
+            Set<Integer> result = new LinkedHashSet<>();
+            for (Object item : iterable) {
+                Integer number = metadataInteger(item);
+                if (number != null) result.add(number);
+            }
+            return result;
+        }
 
         void putCodeNode(TraceabilityNode node) {
             TraceabilityNode existing = nodes.get(node.id());
@@ -1720,6 +2630,8 @@ public class TraceabilityMapService {
                 metadata.put("coverageTotalLines", method.getTotalLineNumbers() == null ? List.of() : method.getTotalLineNumbers());
                 metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
                 metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines(method)));
+                metadata.put("coverageTotalBranchTargetProbeMap", copyBranchProbeMap(method.getTotalBranchTargetProbeMap()));
+                metadata.put("coverageCoveredBranchTargetProbeMap", copyBranchProbeMap(method.getCoveredBranchTargetProbeMap()));
                 applyCoverageSummary(methodId, coverage, metadata);
                 if (method.getCoveredLines() > 0 || method.getCoveredBranchTargets() > 0 || method.isCovered()) {
                     coveredMethodIds.add(methodId);
@@ -1768,6 +2680,8 @@ public class TraceabilityMapService {
                 if (methodTotal.isEmpty()) continue;
                 List<Integer> methodCovered = new ArrayList<>(coveredLines.subSet(startLine, true, endLine, true));
                 List<Integer> partialBranches = derivedPartialBranchLines(totalBranchProbes, coveredBranchProbes, startLine, endLine);
+                Map<String, List<Integer>> methodTotalBranches = sliceBranchProbeMap(totalBranchProbes, startLine, endLine);
+                Map<String, List<Integer>> methodCoveredBranches = sliceBranchProbeMap(coveredBranchProbes, startLine, endLine);
                 int[] branch = branchTargetCounts(totalBranchProbes, coveredBranchProbes, startLine, endLine);
                 CoverageSummary coverage = new CoverageSummary(methodCovered.size(), methodTotal.size(),
                         rate(methodCovered.size(), methodTotal.size()), branch[0], branch[1], rate(branch[0], branch[1]));
@@ -1775,6 +2689,8 @@ public class TraceabilityMapService {
                 metadata.put("coverageTotalLines", methodTotal);
                 metadata.put("coverageCoveredLines", methodCovered);
                 metadata.put("coveragePartialBranchLines", partialBranches);
+                metadata.put("coverageTotalBranchTargetProbeMap", methodTotalBranches);
+                metadata.put("coverageCoveredBranchTargetProbeMap", methodCoveredBranches);
                 Integer complexity = metadataInteger((node.metadata() == null ? Map.of() : node.metadata()).get("coverageComplexity"));
                 metadata.put("coverageCoveredComplexity", methodCovered.isEmpty() && branch[0] <= 0 ? 0 : (complexity == null ? 0 : complexity));
                 applyCoverageSummary(node.id(), coverage, metadata);
@@ -1824,6 +2740,16 @@ public class TraceabilityMapService {
                 if (covered > 0 && covered < total) result.add(line);
             }
             return new ArrayList<>(result);
+        }
+
+        private Map<String, List<Integer>> sliceBranchProbeMap(Map<String, List<Integer>> probes, int startLine, int endLine) {
+            Map<String, List<Integer>> result = new LinkedHashMap<>();
+            for (Map.Entry<String, List<Integer>> entry : probes.entrySet()) {
+                int line = branchLine(entry.getKey());
+                if (line < startLine || line > endLine) continue;
+                result.put(entry.getKey(), entry.getValue() == null ? List.of() : new ArrayList<>(entry.getValue()));
+            }
+            return result;
         }
 
         private int branchLine(String probeKey) {
