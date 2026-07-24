@@ -1,13 +1,14 @@
 package com.oAT.web.control;
 
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogContext;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.entity.AppVo;
 import com.oAT.web.service.entity.ProjectVo;
 import com.oAT.web.service.entity.UserVo;
 import org.jspecify.annotations.NonNull;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -21,10 +22,15 @@ import java.util.List;
 @Component
 public class ProjectInterceptor implements HandlerInterceptor {
 
-    @Autowired
-    ProjectService projectService;
-    @Autowired
-    AppService appService;
+    private final ProjectService projectService;
+    private final AppService appService;
+    private final AuditLogger auditLogger;
+
+    public ProjectInterceptor(ProjectService projectService, AppService appService, AuditLogger auditLogger) {
+        this.projectService = projectService;
+        this.appService = appService;
+        this.auditLogger = auditLogger;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler)
@@ -51,6 +57,7 @@ public class ProjectInterceptor implements HandlerInterceptor {
             }
             projectId = parts[2];
         }
+        LogContext.putProjectId(projectId);
 
 
         // 如果为共享请求，则跳过项目权限验证
@@ -66,6 +73,10 @@ public class ProjectInterceptor implements HandlerInterceptor {
         Assert.notNull(user, "user must be logging state");
         project = projectService.getProjectByProjectIdAndMemberId(projectId, user.getId());
         if (project == null) {
+            auditLogger.securityFailure("project.access.denied", LogFields.map(
+                    "project_id", projectId,
+                    "user_id", user.getId(),
+                    "path", requestUri));
             request.setAttribute("errorMessage", "找不到指定项目,或者您没有该项目的访问权限");
             request.getRequestDispatcher("/error/404").forward(request, response);
             return false;

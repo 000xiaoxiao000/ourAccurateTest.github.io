@@ -3,6 +3,8 @@ package com.oAT.web.control.api;
 import com.oAT.web.api.common.ApiSummaries.*;
 import com.oAT.web.api.project.ProjectSettingsApiPayloads.*;
 import com.oAT.web.control.entity.ResultNotified;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.App;
 import com.oAT.web.persistence.entity.LabelGroup;
 import com.oAT.web.service.AppService;
@@ -39,13 +41,16 @@ public class ProjectSettingsApiControl {
     private final ProjectService projectService;
     private final AppService appService;
     private final UserService userService;
+    private final AuditLogger auditLogger;
 
     public ProjectSettingsApiControl(ProjectService projectService,
                                      AppService appService,
-                                     UserService userService) {
+                                     UserService userService,
+                                     AuditLogger auditLogger) {
         this.projectService = projectService;
         this.appService = appService;
         this.userService = userService;
+        this.auditLogger = auditLogger;
     }
 
     @GetMapping("/apps")
@@ -83,6 +88,11 @@ public class ProjectSettingsApiControl {
         app.setCurrentCommitId(request.getCurrentCommitId());
 
         AppVo created = appService.createApp(app);
+        auditLogger.business("app.create", LogFields.map(
+                "project_id", projectId,
+                "app_id", created.getId(),
+                "app_name", created.getName(),
+                "user_id", user.getId()));
         return new ResultNotified<>(true, "应用创建成功", toAppSummary(created));
     }
 
@@ -97,6 +107,7 @@ public class ProjectSettingsApiControl {
         String md5Pwd = DigestUtils.md5DigestAsHex(request.getPassword().getBytes(StandardCharsets.UTF_8));
         Assert.isTrue(user.getPassword().equalsIgnoreCase(md5Pwd), "删除失败!密码错误");
         appService.deleteApp(projectId, appId);
+        auditLogger.business("app.delete", LogFields.map("project_id", projectId, "app_id", appId, "user_id", user.getId()));
         return new ResultNotified<>(true, "应用已经被删除", appId);
     }
 
@@ -145,6 +156,10 @@ public class ProjectSettingsApiControl {
                 projectService.addProjectMember(projectId, userId);
             }
         }
+        auditLogger.business("project.member.add", LogFields.map(
+                "project_id", projectId,
+                "operator_id", user.getId(),
+                "member_count", request.getUserIds().size()));
         return members(projectId, user);
     }
 
@@ -154,6 +169,10 @@ public class ProjectSettingsApiControl {
                                                               @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
         projectService.deleteProjectMember(projectId, projectMemberId);
+        auditLogger.business("project.member.remove", LogFields.map(
+                "project_id", projectId,
+                "operator_id", user.getId(),
+                "project_member_id", projectMemberId));
         return members(projectId, user);
     }
 
@@ -166,6 +185,11 @@ public class ProjectSettingsApiControl {
         Assert.notNull(request, "请求体不能为空");
         Assert.hasText(request.getRole(), "role 不能为空");
         projectService.updateProjectMemberRole(projectId, projectMemberId, ProjectMemberVo.Role.valueOf(request.getRole()));
+        auditLogger.business("project.member.role.update", LogFields.map(
+                "project_id", projectId,
+                "operator_id", user.getId(),
+                "project_member_id", projectMemberId,
+                "role", request.getRole()));
         return members(projectId, user);
     }
 
@@ -217,6 +241,11 @@ public class ProjectSettingsApiControl {
             projectService.doSaveLabelGroup(groupVo);
         }
 
+        auditLogger.business("project.label.upsert", LogFields.map(
+                "project_id", projectId,
+                "user_id", user.getId(),
+                "label_type", request.getType(),
+                "label_name", request.getName()));
         return labels(projectId, user);
     }
 
@@ -238,6 +267,11 @@ public class ProjectSettingsApiControl {
         groupVo.setLabels(labels.toArray(new LabelGroup.Label[0]));
         projectService.doSaveLabelGroup(groupVo);
 
+        auditLogger.business("project.label.delete", LogFields.map(
+                "project_id", projectId,
+                "user_id", user.getId(),
+                "label_type", request.getType(),
+                "label_name", request.getName()));
         return labels(projectId, user);
     }
 

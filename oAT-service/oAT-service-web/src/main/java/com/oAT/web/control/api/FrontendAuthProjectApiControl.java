@@ -9,6 +9,9 @@ import com.oAT.web.api.context.FrontendContextPayloads.ProjectSummary;
 import com.oAT.web.api.context.FrontendContextPayloads.SaveProjectRequest;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.exceptions.UserOperationException;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogContext;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.SystemLogService;
@@ -40,15 +43,18 @@ public class FrontendAuthProjectApiControl {
     private final ProjectService projectService;
     private final AppService appService;
     private final SystemLogService systemLogService;
+    private final AuditLogger auditLogger;
 
     public FrontendAuthProjectApiControl(UserService userService,
                                          ProjectService projectService,
                                          AppService appService,
-                                         SystemLogService systemLogService) {
+                                         SystemLogService systemLogService,
+                                         AuditLogger auditLogger) {
         this.userService = userService;
         this.projectService = projectService;
         this.appService = appService;
         this.systemLogService = systemLogService;
+        this.auditLogger = auditLogger;
     }
 
     @GetMapping("/api/auth/me")
@@ -68,9 +74,12 @@ public class FrontendAuthProjectApiControl {
         try {
             user = userService.doLogin(request.getNameOrEmail(), request.getNameOrEmail(), request.getPassword());
         } catch (UserOperationException e) {
+            auditLogger.securityFailure("login", LogFields.map("principal", request.getNameOrEmail()));
             throw new UserOperationException("用户名或密码错误，请重新输入");
         }
         session.setAttribute("user", user);
+        LogContext.putUser(user);
+        auditLogger.securitySuccess("login", LogFields.map("user_id", user.getId(), "user_name", user.getName()));
         return ok("登录成功", toUserSummary(user));
     }
 
@@ -78,12 +87,18 @@ public class FrontendAuthProjectApiControl {
     public ResultNotified<String> register(@RequestBody UserRegisterVo request) {
         Assert.notNull(request, "请求体不能为空");
         userService.doRegister(request);
+        auditLogger.securitySuccess("register", LogFields.map("user_name", request.getName(), "email", request.getEmail()));
         return ok("注册成功", "OK");
     }
 
     @PostMapping("/api/auth/logout")
     public ResultNotified<String> logout(HttpSession session) {
+        UserVo user = (UserVo) session.getAttribute("user");
+        LogContext.putUser(user);
         session.removeAttribute("user");
+        if (user != null) {
+            auditLogger.securitySuccess("logout", LogFields.map("user_id", user.getId(), "user_name", user.getName()));
+        }
         return ok("注销成功", "OK");
     }
 
@@ -99,7 +114,10 @@ public class FrontendAuthProjectApiControl {
         Assert.hasText(request.getName(), "项目名称不能为空");
         ProjectService.CreateProjectParam param = new ProjectService.CreateProjectParam(request.getName(), request.getDescribe(), user.getId());
         param.userName = user.getName();
-        return ok("项目创建成功", toProjectSummary(projectService.createProject(param)));
+        ProjectSummary created = toProjectSummary(projectService.createProject(param));
+        LogContext.putProjectId(created.getId());
+        auditLogger.business("project.create", LogFields.map("project_id", created.getId(), "project_name", created.getName(), "user_id", user.getId()));
+        return ok("项目创建成功", created);
     }
 
     @PostMapping("/api/projects/{projectId}")
@@ -110,7 +128,9 @@ public class FrontendAuthProjectApiControl {
         ProjectVo project = projectService.getProject(projectId);
         project.setName(request.getName());
         project.setDescribe(request.getDescribe());
-        return ok("项目更新成功", toProjectSummary(projectService.updateProject(project)));
+        ProjectSummary updated = toProjectSummary(projectService.updateProject(project));
+        auditLogger.business("project.update", LogFields.map("project_id", projectId, "project_name", updated.getName(), "user_id", user.getId()));
+        return ok("项目更新成功", updated);
     }
 
     @PostMapping("/api/projects/{projectId}/delete")
@@ -119,6 +139,7 @@ public class FrontendAuthProjectApiControl {
                                                 @RequestBody DeleteProjectRequest request) throws UserOperationException {
         ensureProjectAccess(projectId, user);
         projectService.deleteProject(projectId, user.getId(), request == null ? null : request.getPassword());
+        auditLogger.business("project.delete", LogFields.map("project_id", projectId, "user_id", user.getId()));
         return ok("项目删除成功", projectId);
     }
 

@@ -4,6 +4,8 @@ import com.oAT.web.api.account.AccountApiPayloads.*;
 import com.oAT.web.api.common.ApiSummaries.*;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.exceptions.UserOperationException;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.UserService;
 import com.oAT.web.service.entity.UserVo;
 import jakarta.servlet.http.HttpSession;
@@ -15,14 +17,17 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.SessionAttribute;
 
+
 @RestController
 @RequestMapping("/api/account")
 public class AccountApiControl {
 
     private final UserService userService;
+    private final AuditLogger auditLogger;
 
-    public AccountApiControl(UserService userService) {
+    public AccountApiControl(UserService userService, AuditLogger auditLogger) {
         this.userService = userService;
+        this.auditLogger = auditLogger;
     }
 
     @GetMapping("/profile")
@@ -48,6 +53,7 @@ public class AccountApiControl {
 
         UserVo latest = userService.getUser(user.getId());
         session.setAttribute("user", latest);
+        auditLogger.business("account.profile.update", LogFields.map("user_id", user.getId()));
         return new ResultNotified<>(true, "账户信息更新成功", toUserSummary(latest));
     }
 
@@ -63,8 +69,10 @@ public class AccountApiControl {
         try {
             userService.changePassword(user.getId(), request.getOldPassword(), request.getNewPassword());
             session.setAttribute("user", userService.getUser(user.getId()));
+            auditLogger.securitySuccess("password.change", LogFields.map("user_id", user.getId()));
             return new ResultNotified<>(true, "密码修改成功", "OK");
         } catch (UserOperationException e) {
+            auditLogger.securityFailure("password.change", LogFields.map("user_id", user.getId(), "reason", e.getMessage()));
             ResultNotified<String> result = new ResultNotified<>(false, "密码修改失败");
             result.setErrorMessage(e.getMessage());
             return result;

@@ -5,6 +5,8 @@ import com.oAT.web.api.version.VersionCenterPayloadService;
 import com.oAT.web.api.version.VersionGitWorkflowService;
 import com.oAT.web.api.version.VersionReportDetailService;
 import com.oAT.web.control.entity.ResultNotified;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.SystemLog;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.ProjectService;
@@ -36,10 +38,13 @@ import org.springframework.web.bind.annotation.SessionAttribute;
 import java.io.File;
 import java.util.Collections;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/projects/{projectId}")
 public class VersionApiControl {
+    private static final Logger logger = LoggerFactory.getLogger(VersionApiControl.class);
 
     private final VersionService versionService;
     private final AppService appService;
@@ -50,6 +55,7 @@ public class VersionApiControl {
     private final ResourceService resourceService;
     private final SystemLogService systemLogService;
     private final VersionGitWorkflowService versionGitWorkflowService;
+    private final AuditLogger auditLogger;
 
     public VersionApiControl(VersionService versionService,
                              AppService appService,
@@ -59,7 +65,8 @@ public class VersionApiControl {
                              GitService gitService,
                              ResourceService resourceService,
                              SystemLogService systemLogService,
-                             VersionGitWorkflowService versionGitWorkflowService) {
+                             VersionGitWorkflowService versionGitWorkflowService,
+                             AuditLogger auditLogger) {
         this.versionService = versionService;
         this.appService = appService;
         this.projectService = projectService;
@@ -69,6 +76,7 @@ public class VersionApiControl {
         this.resourceService = resourceService;
         this.systemLogService = systemLogService;
         this.versionGitWorkflowService = versionGitWorkflowService;
+        this.auditLogger = auditLogger;
     }
 
     @GetMapping("/apps/{appId}/version-center")
@@ -111,6 +119,14 @@ public class VersionApiControl {
             }
         }
         versionService.addVersionItem(itemVo);
+        auditLogger.business("version.create", LogFields.map(
+                "project_id", projectId,
+                "app_id", appId,
+                "version_number", itemVo.getVersionNumber(),
+                "source_type", itemVo.getSourceType(),
+                "branch", itemVo.getRepoBranch(),
+                "commit_id", abbreviateCommit(itemVo.getRepoCommitId()),
+                "user_id", user.getId()));
         if ("on".equals(itemVo.getSetAsCurrent())) {
             AppVo app = appService.getApp(appId);
             app.setCurrentVersion(itemVo.getVersionNumber());
@@ -152,6 +168,13 @@ public class VersionApiControl {
         log.setProjectId(projectId);
         log.setAction(SystemLogService.Action.editApp.toString());
         systemLogService.addLog(log);
+        auditLogger.business("version.current.update", LogFields.map(
+                "project_id", projectId,
+                "app_id", appId,
+                "version_number", versionNumber,
+                "branch", branch,
+                "commit_id", abbreviateCommit(commitId),
+                "user_id", user.getId()));
         
         return new ResultNotified<>(true, "设置当前版本成功");
     }
@@ -163,6 +186,7 @@ public class VersionApiControl {
                                                 @RequestParam String id) {
         ensureProjectAccess(projectId, user);
         versionService.doDeleteVersionItem(id);
+        auditLogger.business("version.delete", LogFields.map("project_id", projectId, "app_id", appId, "version_id", id, "user_id", user.getId()));
         return new ResultNotified<>(true, "版本项目删除成功");
     }
 
@@ -173,6 +197,7 @@ public class VersionApiControl {
                                                       @RequestParam String reportId) {
         ensureProjectAccess(projectId, user);
         versionService.deleteCompareReport(projectId, reportId);
+        auditLogger.business("version.report.delete", LogFields.map("project_id", projectId, "app_id", appId, "report_id", reportId, "user_id", user.getId()));
         return new ResultNotified<>(true, "报告删除成功");
     }
 
@@ -183,6 +208,7 @@ public class VersionApiControl {
                                                     @RequestParam String filePath) {
         ensureProjectAccess(projectId, user);
         versionService.deleteCacheFile(filePath);
+        auditLogger.business("version.cache_file.delete", LogFields.map("project_id", projectId, "app_id", appId, "file_path_hash", Integer.toHexString(filePath.hashCode()), "user_id", user.getId()));
         return new ResultNotified<>(true, "本地文件已删除", filePath);
     }
 
@@ -199,6 +225,12 @@ public class VersionApiControl {
             GitPullEstimateVo estimate = versionGitWorkflowService.checkGitPull(appId, branch, commitId, versionNumber, excludePaths);
             return new ResultNotified<>(true, "检测通过", estimate);
         } catch (Exception e) {
+            logger.warn("event=git.pull_check.failed {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "app_id", appId,
+                    "branch", branch,
+                    "commit_id", abbreviateCommit(commitId),
+                    "reason", e.getMessage())));
             return new ResultNotified<>(false, "检测失败: " + e.getMessage(), null);
         }
     }
@@ -246,9 +278,28 @@ public class VersionApiControl {
                                                @RequestParam(required = false) String versionNumber) {
         ensureProjectAccess(projectId, user);
         try {
+            long started = System.nanoTime();
             String jobId = versionGitWorkflowService.startGitPull(appId, branch, commitId, excludePaths, versionNumber);
+            auditLogger.business("git.pull.start", LogFields.map(
+                    "project_id", projectId,
+                    "app_id", appId,
+                    "job_id", jobId,
+                    "branch", branch,
+                    "commit_id", abbreviateCommit(commitId),
+                    "version_number", versionNumber,
+                    "user_id", user.getId()));
+            auditLogger.performance("git.pull.submit", (System.nanoTime() - started) / 1_000_000, LogFields.map(
+                    "project_id", projectId,
+                    "app_id", appId,
+                    "job_id", jobId), false);
             return new ResultNotified<>(true, "开始拉取", jobId);
         } catch (Exception e) {
+            logger.warn("event=git.pull_start.failed {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "app_id", appId,
+                    "branch", branch,
+                    "commit_id", abbreviateCommit(commitId),
+                    "reason", e.getMessage())));
             return new ResultNotified<>(false, "远程代码拉取失败: " + e.getMessage(), null);
         }
     }

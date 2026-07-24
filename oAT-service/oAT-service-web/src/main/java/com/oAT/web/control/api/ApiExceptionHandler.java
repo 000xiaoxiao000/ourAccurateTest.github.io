@@ -1,5 +1,7 @@
 package com.oAT.web.control.api;
 
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.exceptions.BusinessException;
 import com.oAT.web.exceptions.FriendlyException;
@@ -16,9 +18,15 @@ import org.springframework.web.context.request.async.AsyncRequestNotUsableExcept
 @RestControllerAdvice(basePackages = "com.oAT.web.control.api")
 public class ApiExceptionHandler {
     private static final Logger logger = LoggerFactory.getLogger(ApiExceptionHandler.class);
+    private final AuditLogger auditLogger;
+
+    public ApiExceptionHandler(AuditLogger auditLogger) {
+        this.auditLogger = auditLogger;
+    }
 
     @ExceptionHandler(ServletRequestBindingException.class)
     public ResponseEntity<ResultNotified<Object>> handleSessionRequired(ServletRequestBindingException e) {
+        auditLogger.securityFailure("session.required", LogFields.map("reason", safeMessage(e.getMessage(), "missing session")));
         ResultNotified<Object> result = new ResultNotified<>(false, "未登录或登录已过期");
         result.setErrorMessage("AUTH_REQUIRED");
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(result);
@@ -26,6 +34,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ResultNotified<Object>> handleBadRequest(IllegalArgumentException e) {
+        logger.debug("event=api.bad_request {}", LogFields.of(LogFields.map("reason", safeMessage(e.getMessage(), "invalid request"))));
         ResultNotified<Object> result = new ResultNotified<>(false, e.getMessage() == null ? "请求参数不合法" : e.getMessage());
         result.setErrorMessage("BAD_REQUEST");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
@@ -33,6 +42,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(UserOperationException.class)
     public ResponseEntity<ResultNotified<Object>> handleUserOperation(UserOperationException e) {
+        logger.info("event=api.user_operation_failed {}", LogFields.of(LogFields.map("reason", safeMessage(e.getMessage(), "user operation failed"))));
         ResultNotified<Object> result = new ResultNotified<>(false, safeMessage(e.getMessage(), "操作失败，请检查输入后重试"));
         result.setErrorMessage("USER_OPERATION_FAILED");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
@@ -40,6 +50,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ResultNotified<Object>> handleBusiness(BusinessException e) {
+        logger.warn("event=api.business_error {}", LogFields.of(LogFields.map("reason", safeMessage(e.getMessage(), "business error"))));
         ResultNotified<Object> result = new ResultNotified<>(false, safeMessage(e.getMessage(), "业务处理失败，请稍后重试"));
         result.setErrorMessage("BUSINESS_ERROR");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);
@@ -47,6 +58,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(FriendlyException.class)
     public ResponseEntity<ResultNotified<Object>> handleFriendly(FriendlyException e) {
+        logger.info("event=api.friendly_error {}", LogFields.of(LogFields.map("reason", safeMessage(e.getMessage(), "friendly error"))));
         ResultNotified<Object> result = new ResultNotified<>(false, safeMessage(e.getMessage(), "请求处理失败，请稍后重试"));
         result.setErrorMessage("FRIENDLY_ERROR");
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(result);

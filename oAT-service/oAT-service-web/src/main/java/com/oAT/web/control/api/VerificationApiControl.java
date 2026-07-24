@@ -3,6 +3,9 @@ package com.oAT.web.control.api;
 import com.alibaba.excel.EasyExcel;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.coverage.universal.JacocoExecToXmlConverter;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogContext;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.ProjectService;
@@ -28,6 +31,8 @@ import com.oAT.web.verification.impact.ImpactTraceabilityMapper;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
@@ -68,6 +73,7 @@ import java.util.zip.ZipFile;
 @RestController
 @RequestMapping("/api/projects/{projectId}/verification")
 public class VerificationApiControl {
+    private static final Logger logger = LoggerFactory.getLogger(VerificationApiControl.class);
     private static final Set<String> SOURCE_EXTENSIONS = Set.of(
             ".java", ".kt", ".kts", ".scala", ".groovy",
             ".js", ".jsx", ".ts", ".tsx", ".vue",
@@ -95,6 +101,7 @@ public class VerificationApiControl {
     private final ConnectorRegistry connectorRegistry;
     private final JacocoExecToXmlConverter jacocoExecToXmlConverter;
     private final Executor verificationAiExecutor;
+    private final AuditLogger auditLogger;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
                                   AppService appService, GitService gitService,
@@ -105,6 +112,7 @@ public class VerificationApiControl {
                                   GraphService graphService,
                                   ConnectorRegistry connectorRegistry,
                                   JacocoExecToXmlConverter jacocoExecToXmlConverter,
+                                  AuditLogger auditLogger,
                                   @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.verificationService = verificationService;
         this.projectService = projectService;
@@ -117,6 +125,7 @@ public class VerificationApiControl {
         this.graphService = graphService;
         this.connectorRegistry = connectorRegistry;
         this.jacocoExecToXmlConverter = jacocoExecToXmlConverter;
+        this.auditLogger = auditLogger;
         this.verificationAiExecutor = verificationAiExecutor;
     }
 
@@ -156,6 +165,14 @@ public class VerificationApiControl {
         AssetSnapshot result = verificationService.importAsset(projectId, user.getId(), assetType,
                 file == null && sourceType == SourceType.FILE ? SourceType.PASTE : sourceType, fileName,
                 importedContent, externalId, externalUrl, sourceVersion, metadata);
+        auditLogger.business("verification.asset.import", LogFields.map(
+                "project_id", projectId,
+                "asset_id", result.id(),
+                "asset_type", assetType,
+                "source_type", sourceType,
+                "input_mode", metadata.get("inputMode"),
+                "content_bytes", importedContent.getBytes(StandardCharsets.UTF_8).length,
+                "user_id", user.getId()));
         return ok("资产快照导入成功", result);
     }
 
@@ -165,7 +182,13 @@ public class VerificationApiControl {
                                                      @SessionAttribute UserVo user,
                                                      @RequestBody UpdateAsset request) {
         ensureProjectAccess(projectId, user);
-        return ok("资料更新成功", verificationService.updateAsset(projectId, assetId, user.getId(), request));
+        AssetSnapshot updated = verificationService.updateAsset(projectId, assetId, user.getId(), request);
+        auditLogger.business("verification.asset.update", LogFields.map(
+                "project_id", projectId,
+                "asset_id", assetId,
+                "asset_type", updated.assetType(),
+                "user_id", user.getId()));
+        return ok("资料更新成功", updated);
     }
 
     @DeleteMapping("/assets/{assetId}")
@@ -174,6 +197,7 @@ public class VerificationApiControl {
                                               @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
         verificationService.deleteAsset(projectId, assetId);
+        auditLogger.business("verification.asset.delete", LogFields.map("project_id", projectId, "asset_id", assetId, "user_id", user.getId()));
         return ok("资料删除成功", assetId);
     }
 
@@ -224,6 +248,17 @@ public class VerificationApiControl {
             AssetSnapshot asset = verificationService.importAsset(projectId, user.getId(), AssetType.SOURCE,
                     SourceType.GIT, "git-source-" + commit + ".txt", source.content(), effectiveRequest.appId(),
                     credentials.repoUrl(), commit, metadata);
+            auditLogger.business("verification.git_source.import", LogFields.map(
+                    "project_id", projectId,
+                    "asset_id", asset.id(),
+                    "app_id", effectiveRequest.appId(),
+                    "branch", branch,
+                    "commit_id", abbreviateCommit(commit),
+                    "file_count", source.totalFileCount(),
+                    "sampled_file_count", source.sampledFileCount(),
+                    "truncated", source.truncated(),
+                    "content_bytes", source.content().getBytes(StandardCharsets.UTF_8).length,
+                    "user_id", user.getId()));
             return ok("Git源码快照导入成功", asset);
         } finally {
             Files.deleteIfExists(tempZip.toPath());
@@ -234,11 +269,25 @@ public class VerificationApiControl {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
 
+    private String abbreviateCommit(String commitId) {
+        if (!StringUtils.hasText(commitId)) {
+            return "-";
+        }
+        String trimmed = commitId.trim();
+        return trimmed.length() <= 8 ? trimmed : trimmed.substring(0, 8);
+    }
+
     @PostMapping("/baselines")
     public ResultNotified<Baseline> createBaseline(@PathVariable String projectId, @SessionAttribute UserVo user,
                                                     @RequestBody CreateBaseline request) {
         ensureProjectAccess(projectId, user);
-        return ok("分析基线创建成功", verificationService.createBaseline(projectId, user.getId(), request));
+        Baseline baseline = verificationService.createBaseline(projectId, user.getId(), request);
+        auditLogger.business("verification.baseline.create", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baseline.id(),
+                "baseline_name", baseline.name(),
+                "user_id", user.getId()));
+        return ok("分析基线创建成功", baseline);
     }
 
     @PutMapping("/baselines/{baselineId}")
@@ -247,7 +296,13 @@ public class VerificationApiControl {
                                                    @SessionAttribute UserVo user,
                                                    @RequestBody UpdateBaseline request) {
         ensureProjectAccess(projectId, user);
-        return ok("分析基线更新成功", verificationService.updateBaseline(projectId, baselineId, request));
+        Baseline baseline = verificationService.updateBaseline(projectId, baselineId, request);
+        auditLogger.business("verification.baseline.update", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "baseline_name", baseline.name(),
+                "user_id", user.getId()));
+        return ok("分析基线更新成功", baseline);
     }
 
     @DeleteMapping("/baselines/{baselineId}")
@@ -256,6 +311,7 @@ public class VerificationApiControl {
                                                  @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
         verificationService.deleteBaseline(projectId, baselineId);
+        auditLogger.business("verification.baseline.delete", LogFields.map("project_id", projectId, "baseline_id", baselineId, "user_id", user.getId()));
         return ok("分析基线删除成功", baselineId);
     }
 
@@ -270,7 +326,16 @@ public class VerificationApiControl {
     public ResultNotified<AnalysisJob> analyze(@PathVariable String projectId, @PathVariable String baselineId,
                                                @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
-        return ok("AI一致性分析任务已创建", verificationService.startAnalysis(projectId, baselineId, user.getId()));
+        long started = System.nanoTime();
+        AnalysisJob job = verificationService.startAnalysis(projectId, baselineId, user.getId());
+        auditLogger.business("verification.analysis.start", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "job_id", job.id(),
+                "user_id", user.getId()));
+        auditLogger.performance("verification.analysis.submit", (System.nanoTime() - started) / 1_000_000,
+                LogFields.map("project_id", projectId, "baseline_id", baselineId, "job_id", job.id()), false);
+        return ok("AI一致性分析任务已创建", job);
     }
 
     @GetMapping("/analysis-jobs/{jobId}")
@@ -307,6 +372,11 @@ public class VerificationApiControl {
                                          @SessionAttribute UserVo user, @RequestBody ReviewFinding request) {
         ensureProjectAccess(projectId, user);
         verificationService.reviewFinding(projectId, findingId, user.getId(), request);
+        auditLogger.business("verification.finding.review", LogFields.map(
+                "project_id", projectId,
+                "finding_id", findingId,
+                "status", request == null ? null : request.status(),
+                "user_id", user.getId()));
         return ok("分析问题审核成功", findingId);
     }
 
@@ -315,7 +385,14 @@ public class VerificationApiControl {
                                                      @SessionAttribute UserVo user,
                                                      @RequestBody WriteBackFinding request) {
         ensureProjectAccess(projectId, user);
-        return ok("AI回写内容已生成并记录", verificationService.writeBackFinding(projectId, findingId, user.getId(), request));
+        WriteBackAction action = verificationService.writeBackFinding(projectId, findingId, user.getId(), request);
+        auditLogger.business("verification.finding.writeback", LogFields.map(
+                "project_id", projectId,
+                "finding_id", findingId,
+                "connector_type", request == null ? null : request.connectorType(),
+                "writeback_id", action.id(),
+                "user_id", user.getId()));
+        return ok("AI回写内容已生成并记录", action);
     }
 
     @GetMapping("/baselines/{baselineId}/writebacks")
@@ -332,6 +409,11 @@ public class VerificationApiControl {
                                                   @RequestBody ReviewTraceLink request) {
         ensureProjectAccess(projectId, user);
         verificationService.reviewTraceLink(projectId, traceLinkId, request);
+        auditLogger.business("verification.trace_link.review", LogFields.map(
+                "project_id", projectId,
+                "trace_link_id", traceLinkId,
+                "status", request == null ? null : request.status(),
+                "user_id", user.getId()));
         return ok("追溯关系审核成功", traceLinkId);
     }
 
@@ -340,6 +422,7 @@ public class VerificationApiControl {
                                             @SessionAttribute UserVo user) {
         ensureProjectAccess(projectId, user);
         verificationService.markBaselineStale(projectId, baselineId);
+        auditLogger.business("verification.baseline.stale", LogFields.map("project_id", projectId, "baseline_id", baselineId, "user_id", user.getId()));
         return ok("分析基线已标记过期", baselineId);
     }
 
@@ -350,7 +433,13 @@ public class VerificationApiControl {
                                                           @SessionAttribute UserVo user,
                                                           @RequestBody QualityGatePolicy request) {
         ensureProjectAccess(projectId, user);
-        return ok("质量门禁策略已创建", qualityGateService.createPolicy(projectId, user.getId(), request));
+        QualityGatePolicy policy = qualityGateService.createPolicy(projectId, user.getId(), request);
+        auditLogger.business("quality_gate.policy.create", LogFields.map(
+                "project_id", projectId,
+                "policy_id", policy.id(),
+                "policy_name", policy.name(),
+                "user_id", user.getId()));
+        return ok("质量门禁策略已创建", policy);
     }
 
     @GetMapping("/quality-gate/policies")
@@ -367,8 +456,17 @@ public class VerificationApiControl {
                                                           @RequestBody EvaluateGateRequest request) {
         ensureProjectAccess(projectId, user);
         Assert.hasText(request.policyId(), "policyId 不能为空");
-        return ok("质量门禁评估完成",
-                qualityGateService.evaluate(projectId, baselineId, request.policyId(), user.getId()));
+        long started = System.nanoTime();
+        QualityGateResult result = qualityGateService.evaluate(projectId, baselineId, request.policyId(), user.getId());
+        auditLogger.business("quality_gate.evaluate", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "policy_id", request.policyId(),
+                "verdict", result.verdict(),
+                "user_id", user.getId()));
+        auditLogger.performance("quality_gate.evaluate", (System.nanoTime() - started) / 1_000_000,
+                LogFields.map("project_id", projectId, "baseline_id", baselineId, "policy_id", request.policyId()), false);
+        return ok("质量门禁评估完成", result);
     }
 
     @PostMapping("/baselines/{baselineId}/quality-gate/evaluate-mode")
@@ -381,8 +479,18 @@ public class VerificationApiControl {
         Assert.hasText(request.policyId(), "policyId 不能为空");
         QualityGateService.EnforcementMode mode = request.mode() == null
                 ? QualityGateService.EnforcementMode.HARD : request.mode();
-        return ok("质量门禁（" + mode.name() + " 模式）评估完成",
-                qualityGateService.evaluateWithMode(projectId, baselineId, request.policyId(), user.getId(), mode));
+        long started = System.nanoTime();
+        QualityGateService.GateDecision decision = qualityGateService.evaluateWithMode(projectId, baselineId, request.policyId(), user.getId(), mode);
+        auditLogger.business("quality_gate.evaluate_mode", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "policy_id", request.policyId(),
+                "mode", mode,
+                "decision", decision,
+                "user_id", user.getId()));
+        auditLogger.performance("quality_gate.evaluate_mode", (System.nanoTime() - started) / 1_000_000,
+                LogFields.map("project_id", projectId, "baseline_id", baselineId, "policy_id", request.policyId(), "mode", mode), false);
+        return ok("质量门禁（" + mode.name() + " 模式）评估完成", decision);
     }
 
     @GetMapping("/baselines/{baselineId}/quality-gate/results")
@@ -399,9 +507,15 @@ public class VerificationApiControl {
                                                          @SessionAttribute UserVo user,
                                                          @RequestBody ExemptionRequest request) {
         ensureProjectAccess(projectId, user);
-        return ok("质量门禁豁免已创建",
-                qualityGateService.createExemption(projectId, baselineId, request.ruleId(),
-                        request.reason(), user.getId(), request.expiresAt()));
+        GateExemption exemption = qualityGateService.createExemption(projectId, baselineId, request.ruleId(),
+                request.reason(), user.getId(), request.expiresAt());
+        auditLogger.business("quality_gate.exemption.create", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "rule_id", request.ruleId(),
+                "exemption_id", exemption.id(),
+                "user_id", user.getId()));
+        return ok("质量门禁豁免已创建", exemption);
     }
 
     @GetMapping("/baselines/{baselineId}/quality-gate/exemptions")
@@ -421,8 +535,16 @@ public class VerificationApiControl {
                                                             @RequestBody(required = false) ChangeImpactRequest request) {
         ensureProjectAccess(projectId, user);
         String desc = request != null ? request.changeDescription() : null;
-        return ok("变更影响分析完成",
-                changeImpactService.analyzeImpact(projectId, baselineId, desc, user.getId()));
+        long started = System.nanoTime();
+        ChangeImpactReport report = changeImpactService.analyzeImpact(projectId, baselineId, desc, user.getId());
+        auditLogger.business("verification.change_impact.analyze", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "report_id", report.id(),
+                "user_id", user.getId()));
+        auditLogger.performance("verification.change_impact.analyze", (System.nanoTime() - started) / 1_000_000,
+                LogFields.map("project_id", projectId, "baseline_id", baselineId, "report_id", report.id()), false);
+        return ok("变更影响分析完成", report);
     }
 
     @PostMapping("/baselines/{baselineId}/git-change-impact")
@@ -436,9 +558,21 @@ public class VerificationApiControl {
         Assert.hasText(request.baseCommit(), "baseCommit 不能为空");
         Assert.hasText(request.headCommit(), "headCommit 不能为空");
         AppVo app = resolveSourceApp(projectId, request.appId());
+        long started = System.nanoTime();
         var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit());
         var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
         var invalidation = graphService.applyGitChangeImpact(projectId, baselineId, report, traceability);
+        auditLogger.business("verification.git_change_impact.analyze", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "app_id", request.appId(),
+                "report_id", report.id(),
+                "base_commit", abbreviateCommit(request.baseCommit()),
+                "head_commit", abbreviateCommit(request.headCommit()),
+                "candidate_count", report.candidates().size(),
+                "user_id", user.getId()));
+        auditLogger.performance("verification.git_change_impact.analyze", (System.nanoTime() - started) / 1_000_000,
+                LogFields.map("project_id", projectId, "baseline_id", baselineId, "app_id", request.appId(), "report_id", report.id()), true);
         return ok("Git 变更影响分析完成，当前基线图谱已标记过期", new GitChangeImpactResponse(report, traceability, invalidation));
     }
 
@@ -464,6 +598,15 @@ public class VerificationApiControl {
         LocalDateTime now = LocalDateTime.now();
         updateGitImpactJob(new GitImpactAnalysisJob(jobId, projectId, baselineId, GitImpactJobStatus.PENDING,
                 "PENDING", 1, "分析任务已创建", null, null, now, now));
+        LogContext.putProjectId(projectId);
+        auditLogger.business("verification.git_change_impact.job.start", LogFields.map(
+                "project_id", projectId,
+                "baseline_id", baselineId,
+                "app_id", request.appId(),
+                "job_id", jobId,
+                "base_commit", abbreviateCommit(request.baseCommit()),
+                "head_commit", abbreviateCommit(request.headCommit()),
+                "user_id", user.getId()));
         CompletableFuture.runAsync(() -> runGitImpactJob(jobId, projectId, baselineId, app, request), verificationAiExecutor);
         return ok("Git 变更影响分析任务已创建", gitImpactJobs.get(jobId));
     }
@@ -488,7 +631,14 @@ public class VerificationApiControl {
     }
 
     private void runGitImpactJob(String jobId, String projectId, String baselineId, AppVo app, GitChangeImpactRequest request) {
+        LogContext.putProjectId(projectId);
+        long started = System.nanoTime();
         try {
+            logger.info("event=verification.git_change_impact.job.running {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "app_id", request.appId(),
+                    "job_id", jobId)));
             updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, "STARTING", 3, "正在启动 Git 影响分析", null, null));
             var report = gitImpactAnalysisService.analyze(app, request.baseCommit(), request.headCommit(), progress ->
                     updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.RUNNING, progress.stage(), progress.percent(), progress.message(), null, null)));
@@ -496,8 +646,23 @@ public class VerificationApiControl {
             var traceability = impactTraceabilityMapper.map(baselineId, report.candidates());
             var invalidation = graphService.applyGitChangeImpact(projectId, baselineId, report, traceability);
             updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.COMPLETED, "COMPLETED", 100, "Git 影响分析完成，当前基线图谱已标记过期", new GitChangeImpactResponse(report, traceability, invalidation), null));
+            auditLogger.performance("verification.git_change_impact.job", (System.nanoTime() - started) / 1_000_000,
+                    LogFields.map(
+                            "project_id", projectId,
+                            "baseline_id", baselineId,
+                            "app_id", request.appId(),
+                            "job_id", jobId,
+                            "report_id", report.id(),
+                            "candidate_count", report.candidates().size()),
+                    true);
         } catch (RuntimeException exception) {
             updateGitImpactJob(progressJob(jobId, GitImpactJobStatus.FAILED, "FAILED", 100, "Git 影响分析失败", null, exception.getMessage()));
+            logger.error("event=verification.git_change_impact.job.failed {}", LogFields.of(LogFields.map(
+                    "project_id", projectId,
+                    "baseline_id", baselineId,
+                    "app_id", request.appId(),
+                    "job_id", jobId,
+                    "reason", exception.getMessage())), exception);
         }
     }
 

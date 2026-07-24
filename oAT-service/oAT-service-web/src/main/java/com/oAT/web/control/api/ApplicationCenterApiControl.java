@@ -5,6 +5,8 @@ import com.oAT.web.api.app.ApplicationCenterApiPayloads.*;
 import com.oAT.web.collector.CollectorSource;
 import com.oAT.web.collector.CollectorSourceService;
 import com.oAT.web.control.entity.ResultNotified;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.AppService;
 import com.oAT.web.service.GitService;
 import com.oAT.web.service.ProjectService;
@@ -35,15 +37,18 @@ public class ApplicationCenterApiControl {
     private final ProjectService projectService;
     private final GitService gitService;
     private final CollectorSourceService collectorSourceService;
+    private final AuditLogger auditLogger;
 
     public ApplicationCenterApiControl(AppService appService,
                                        ProjectService projectService,
                                        GitService gitService,
-                                       CollectorSourceService collectorSourceService) {
+                                       CollectorSourceService collectorSourceService,
+                                       AuditLogger auditLogger) {
         this.appService = appService;
         this.projectService = projectService;
         this.gitService = gitService;
         this.collectorSourceService = collectorSourceService;
+        this.auditLogger = auditLogger;
     }
 
     @GetMapping("/collector-sources")
@@ -94,6 +99,11 @@ public class ApplicationCenterApiControl {
         existingApp.setCurrentCommitId(request.getCurrentCommitId());
 
         appService.updateApp(projectId, existingApp);
+        auditLogger.business("app.settings.update", LogFields.map(
+                "project_id", projectId,
+                "app_id", appId,
+                "app_name", existingApp.getName(),
+                "user_id", user.getId()));
         return appSettings(projectId, appId, user);
     }
 
@@ -122,6 +132,12 @@ public class ApplicationCenterApiControl {
         existingApp.setRepoUserName(request.getRepoUserName());
         existingApp.setRepoPassword(request.getRepoPassword());
         appService.updateApp(projectId, existingApp);
+        auditLogger.business("app.repository.update", LogFields.map(
+                "project_id", projectId,
+                "app_id", appId,
+                "repo_configured", StringUtils.hasText(request.getRepoAddress()),
+                "repo_url_hash", Integer.toHexString(String.valueOf(request.getRepoAddress()).hashCode()),
+                "user_id", user.getId()));
         return repository(projectId, appId, user);
     }
 

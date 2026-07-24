@@ -1,9 +1,11 @@
 package com.oAT.web.control;
 
 import com.oAT.web.config.FrontendProperties;
+import com.oAT.web.logging.AuditLogger;
+import com.oAT.web.logging.LogContext;
+import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.entity.UserVo;
 import org.jetbrains.annotations.NotNull;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -19,8 +21,13 @@ import static com.oAT.web.common.UtilJson.JSON_MAPPER;
 
 @Component
 public class LoginInterceptor implements HandlerInterceptor {
-    @Autowired
-    private FrontendProperties frontendProperties;
+    private final FrontendProperties frontendProperties;
+    private final AuditLogger auditLogger;
+
+    public LoginInterceptor(FrontendProperties frontendProperties, AuditLogger auditLogger) {
+        this.frontendProperties = frontendProperties;
+        this.auditLogger = auditLogger;
+    }
 
     @Override
     public boolean preHandle(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull Object handler) {
@@ -31,6 +38,11 @@ public class LoginInterceptor implements HandlerInterceptor {
         UserVo user = (UserVo) request.getSession().getAttribute("user");
         if (user == null) {
             try {
+                auditLogger.securityFailure("auth.required", LogFields.map(
+                        "method", request.getMethod(),
+                        "path", request.getRequestURI(),
+                        "client_ip", LogContext.clientIp(request),
+                        "api_request", isApiRequest(request)));
                 if (isApiRequest(request)) {
                     writeUnauthorizedApiResponse(response);
                     return false;
@@ -42,6 +54,7 @@ public class LoginInterceptor implements HandlerInterceptor {
                 throw new RuntimeException("登录重定向失败!", e);
             }
         }
+        LogContext.putUser(user);
         return true;
     }
 
