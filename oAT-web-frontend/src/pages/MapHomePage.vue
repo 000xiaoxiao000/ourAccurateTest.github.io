@@ -46,6 +46,7 @@
     <div class="trace-controls">
       <label class="search-box">
         <input ref="searchInput" v-model.trim="map.keyword.value" placeholder="搜索需求、用例、文件、类、方法" />
+        <button v-if="map.keyword.value" type="button" aria-label="清空搜索内容" title="清空" @click="clearMainKeyword">×</button>
       </label>
       <div class="filter-tabs">
         <button v-for="item in filters" :key="item.value" :class="{ active: map.filter.value === item.value }" type="button" @click="map.filter.value = item.value">
@@ -323,6 +324,7 @@
                 </div>
                 <div class="coverage-method-filter">
                   <input v-model.trim="coverageMethodKeyword" type="search" placeholder="搜索方法名或行号" aria-label="搜索当前文件方法" />
+                  <button v-if="coverageMethodKeyword" type="button" aria-label="清空方法搜索内容" title="清空" @click="coverageMethodKeyword = ''">×</button>
                 </div>
                 <div v-if="!selectedCoverageMethodRows.length" class="coverage-method-empty">当前文件暂无方法级覆盖数据。</div>
                 <div v-else-if="!filteredCoverageMethodRows.length" class="coverage-method-empty">没有匹配的方法。</div>
@@ -331,9 +333,9 @@
                     v-for="row in filteredCoverageMethodRows"
                     :key="row.id"
                     type="button"
-                    :class="['coverage-method-item', { active: row.id === selectedCoverageRow?.id }]"
+                    :class="['coverage-method-item', { active: row.id === selectedCoverageMethodId || row.id === selectedCoverageRow?.id }]"
                     :title="coverageRowTitle(row)"
-                    @click="selectCodeNode(row.id)"
+                    @click="selectCoverageMethod(row.id)"
                   >
                     <span>
                       <strong :title="row.label">{{ row.label }}</strong>
@@ -594,6 +596,7 @@ const aiCallAnalysisEnabled = ref(false)
 const searchInput = ref<HTMLInputElement | null>(null)
 const coverageSourceScroll = ref<HTMLElement | null>(null)
 const coverageMethodKeyword = ref('')
+const selectedCoverageMethodId = ref('')
 let slowLoadingTimer: number | undefined
 
 watch([activeTab, callViewMode], () => {
@@ -887,6 +890,11 @@ const coverageMetricCards = computed(() => [
 ])
 const selectedCoverageRow = computed(() => {
   if (!coverageRows.value.length || !map.focusId.value) return null
+  if (selectedCoverageMethodId.value) {
+    const methodNode = map.nodeById.value.get(selectedCoverageMethodId.value)
+    const methodRow = methodNode?.kind === 'CODE_METHOD' ? toCoverageRow(methodNode) : null
+    if (methodRow && (methodRow.hasReport || methodRow.sourceContent)) return methodRow
+  }
   const focused = coverageRows.value.find((row) => row.id === map.focusId.value)
   return focused && (focused.hasReport || focused.sourceContent) ? focused : null
 })
@@ -1023,6 +1031,7 @@ async function reloadBaseline() {
   selectedTraceId.value = ''
   selectedTraceIds.value = new Set()
   selectedCallGraphId.value = ''
+  selectedCoverageMethodId.value = ''
   callGraphGlobalEnabled.value = false
   loadedCodeDataKey.value = ''
   loadingCodeDataKey.value = ''
@@ -1198,7 +1207,13 @@ function clearCallGraphSelection() {
   selectedCallGraphId.value = ''
 }
 
+function clearMainKeyword() {
+  map.keyword.value = ''
+  searchInput.value?.focus()
+}
+
 async function selectCodeNode(id: string) {
+  selectedCoverageMethodId.value = ''
   selectedCallGraphId.value = id
   selectedMiniGraphId.value = ''
   miniGraphFocusHighlightDisabled.value = false
@@ -1209,6 +1224,17 @@ async function selectCodeNode(id: string) {
     await loadCodeData(id)
     openAncestors(id, map.codeTree.value)
   }
+  await nextTick()
+  scrollToCoverageLine(id)
+}
+
+async function selectCoverageMethod(id: string) {
+  selectedCoverageMethodId.value = id
+  selectedCallGraphId.value = id
+  selectedMiniGraphId.value = ''
+  miniGraphFocusHighlightDisabled.value = false
+  callGraphGlobalEnabled.value = false
+  openAncestors(id, map.codeTree.value)
   await nextTick()
   scrollToCoverageLine(id)
 }
@@ -1226,6 +1252,7 @@ async function showGlobalCoverageOverview() {
   map.focusId.value = ''
   selectedCallGraphId.value = ''
   selectedMiniGraphId.value = ''
+  selectedCoverageMethodId.value = ''
   miniGraphFocusHighlightDisabled.value = false
   callGraphGlobalEnabled.value = false
   coverageMethodKeyword.value = ''
@@ -2710,8 +2737,30 @@ onBeforeUnmount(() => {
 .summary-strip strong { color:#172033; font-size:18px; }
 .summary-strip span { color:#64748b; font-size:12px; font-weight:700; }
 .trace-controls { display:flex; gap:10px; align-items:center; margin-bottom:12px; }
-.search-box { flex:1; }
-.search-box input { width:100%; box-sizing:border-box; border:1px solid #e2e8f0; border-radius:10px; padding:9px 11px; outline:0; background:#fff; }
+.search-box { position:relative; flex:1; display:block; }
+.search-box input { width:100%; box-sizing:border-box; border:1px solid #e2e8f0; border-radius:10px; padding:9px 44px 9px 11px; outline:0; background:#fff; }
+.search-box button,
+.coverage-method-filter button {
+  position:absolute;
+  top:50%;
+  right:8px;
+  transform:translateY(-50%);
+  width:26px;
+  height:26px;
+  display:grid;
+  place-items:center;
+  border:1px solid transparent;
+  border-radius:5px;
+  background:#fff;
+  color:#ef4444;
+  font-size:18px;
+  line-height:1;
+  cursor:pointer;
+}
+.search-box button:hover,
+.coverage-method-filter button:hover { border-color:#fecaca; background:#fef2f2; }
+.search-box button:focus-visible,
+.coverage-method-filter button:focus-visible { outline:2px solid #fecaca; outline-offset:1px; }
 .filter-tabs { display:flex; flex-wrap:wrap; gap:6px; }
 .filter-tabs button { border:1px solid #e2e8f0; border-radius:9px; padding:8px 10px; background:#fff; color:#475569; font-weight:800; cursor:pointer; }
 .filter-tabs button.active { border-color:#0f766e; background:#f0fdfa; color:#0f766e; }
@@ -3089,8 +3138,10 @@ onBeforeUnmount(() => {
 .coverage-list-head span { color:#64748b; font-size:11px; font-weight:900; }
 .coverage-list-head.method-head { border-top:1px solid #e5e7eb; }
 .coverage-file-list, .coverage-method-list { min-height:0; overflow:auto; padding:8px; }
-.coverage-method-filter { padding:7px 8px; border-bottom:1px solid #e5e7eb; background:#fff; }
-.coverage-method-filter input { width:100%; height:30px; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:5px; padding:0 9px; outline:none; color:#172033; font-size:12px; }
+.coverage-method-filter { position:relative; padding:7px 8px; border-bottom:1px solid #e5e7eb; background:#fff; }
+.coverage-method-filter input { width:100%; height:30px; box-sizing:border-box; border:1px solid #cbd5e1; border-radius:5px; padding:0 38px 0 9px; outline:none; color:#172033; font-size:12px; }
+.coverage-method-filter input::-webkit-search-cancel-button { display:none; }
+.coverage-method-filter button { right:12px; width:22px; height:22px; font-size:16px; }
 .coverage-method-filter input:focus { border-color:#14b8a6; box-shadow:0 0 0 2px rgba(20,184,166,.14); }
 .coverage-node-item, .coverage-method-item { display:grid; width:100%; min-width:0; gap:8px; border:1px solid transparent; border-radius:7px; background:#fff; padding:9px 10px; text-align:left; cursor:pointer; }
 .coverage-node-item { grid-template-columns:minmax(0,1fr) auto; }
