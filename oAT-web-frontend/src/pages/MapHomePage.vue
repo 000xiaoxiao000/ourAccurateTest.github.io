@@ -879,11 +879,11 @@ const coverageComplexityMetric = computed(() => {
   return { covered, total }
 })
 const coverageMetricCards = computed(() => [
-  coverageCountCard('class', '类覆盖率', coverageClassMetric.value.covered, coverageClassMetric.value.total, 'class'),
-  coverageCountCard('method', '方法覆盖率', coverageMethodMetric.value.covered, coverageMethodMetric.value.total, 'method'),
-  coverageCountCard('branch', '分支覆盖率', coverageBranchMetric.value.covered, coverageBranchMetric.value.total, 'branch'),
-  coverageCountCard('line', '行覆盖率', coverageLineMetric.value.covered, coverageLineMetric.value.total, 'line'),
-  coverageCountCard('complexity', '圈复杂度', coverageComplexityMetric.value.covered, coverageComplexityMetric.value.total, 'complexity'),
+  coverageCountCard('class', '类覆盖率', coverageClassMetric.value.covered, coverageClassMetric.value.total),
+  coverageCountCard('method', '方法覆盖率', coverageMethodMetric.value.covered, coverageMethodMetric.value.total),
+  coverageCountCard('branch', '分支覆盖率', coverageBranchMetric.value.covered, coverageBranchMetric.value.total),
+  coverageCountCard('line', '行覆盖率', coverageLineMetric.value.covered, coverageLineMetric.value.total),
+  coverageCountCard('complexity', '圈复杂度', coverageComplexityMetric.value.covered, coverageComplexityMetric.value.total),
 ])
 const selectedCoverageRow = computed(() => {
   if (!coverageRows.value.length || !map.focusId.value) return null
@@ -1640,8 +1640,9 @@ function coverageNodeMetric(kind: 'CODE_CLASS' | 'CODE_METHOD') {
   }
 }
 
-function coverageCountCard(key: string, label: string, covered: number, total: number, tone: string) {
+function coverageCountCard(key: string, label: string, covered: number, total: number) {
   const missed = Math.max(total - covered, 0)
+  const tone = coverageMetricTone(covered, total)
   return {
     key,
     label,
@@ -1653,9 +1654,20 @@ function coverageCountCard(key: string, label: string, covered: number, total: n
   }
 }
 
+function coverageMetricTone(covered: number, total: number) {
+  if (!total) return 'neutral'
+  if (covered <= 0) return 'missed'
+  return covered >= total ? 'covered' : 'partial'
+}
+
 function coverageMetricTooltip(label: string, covered: number, total: number) {
   const missed = Math.max(total - covered, 0)
-  return `${label}\n状态：${total ? '已覆盖' : '暂无数据'}\n覆盖数：${covered}\n总数：${total}\n未覆盖数：${missed}`
+  const tone = coverageMetricTone(covered, total)
+  const status = tone === 'covered' ? '全部覆盖'
+    : tone === 'partial' ? '部分覆盖'
+      : tone === 'missed' ? '未覆盖'
+        : '暂无数据'
+  return `${label}\n状态：${status}\n覆盖数：${covered}\n总数：${total}\n未覆盖数：${missed}`
 }
 
 function coverageComplexity(metadata: Record<string, unknown>) {
@@ -2981,11 +2993,10 @@ onBeforeUnmount(() => {
 .coverage-data-panel { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:auto; background:#fff; }
 .coverage-overview-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
 .coverage-metric-card { display:grid; gap:8px; min-width:0; min-height:82px; padding:10px 12px; border:1px solid transparent; border-radius:8px; background:#fff; box-sizing:border-box; }
-.coverage-metric-card.class { background:#fff3e2; border-color:#fed7aa; }
-.coverage-metric-card.method { background:#ecfdf5; border-color:#bbf7d0; }
-.coverage-metric-card.branch { background:#ecfeff; border-color:#bae6fd; }
-.coverage-metric-card.line { background:#eff6ff; border-color:#bfdbfe; }
-.coverage-metric-card.complexity { background:#f3e8ff; border-color:#ddd6fe; }
+.coverage-metric-card.covered { background:#ecfdf5; border-color:#86efac; }
+.coverage-metric-card.partial { background:#fffbeb; border-color:#fcd34d; }
+.coverage-metric-card.missed { background:#fef2f2; border-color:#fca5a5; }
+.coverage-metric-card.neutral { background:#f8fafc; border-color:#cbd5e1; }
 .coverage-metric-main { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; }
 .coverage-metric-main span { min-width:0; color:#64748b; font-size:12px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .coverage-metric-main strong { flex:0 0 auto; color:#020617; font-size:17px; line-height:1.1; font-weight:950; }
