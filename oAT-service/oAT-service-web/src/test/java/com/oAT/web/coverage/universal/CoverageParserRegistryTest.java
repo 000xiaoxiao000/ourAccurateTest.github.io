@@ -139,11 +139,64 @@ class CoverageParserRegistryTest {
 
         assertEquals(1, files.size());
         assertEquals("web3Server/controller/Web302Controller.java", files.get(0).getFilePath());
-        assertEquals(2, files.get(0).getLines().size());
+        assertEquals(3, files.get(0).getLines().size());
         com.oAT.web.persistence.entity.ClassCoverageIndex index = files.get(0).toClassCoverageIndex("app");
-        assertEquals(2, index.getTotalLines());
-        assertEquals(List.of(27, 29), index.getTotalLineNumbers());
+        assertEquals(3, index.getTotalLines());
+        assertEquals(List.of(27, 28, 29), index.getTotalLineNumbers());
         assertEquals(List.of(27, 29), index.getCoveredLineNumbers());
+    }
+
+    @Test
+    void parsesExactJacocoHtmlReportTotalsAndMissedLines() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                多语言覆盖率资料
+
+                // COVERAGE_FILE: index.html
+                <html><body><table><tfoot><tr><td>Total</td><td class="bar">6,932 of 7,285</td><td>4%</td>
+                <td class="bar">864 of 868</td><td>0%</td><td>736</td><td>793</td><td>1,390</td><td>1,498</td>
+                <td>300</td><td>357</td><td>20</td><td>41</td></tr></tfoot></table></body></html>
+
+                // COVERAGE_FILE: web3Server.controller/Web302Controller.java.html
+                <html><body><pre>
+                <span class="nc" id="L27">missed</span>
+                <span class="fc" id="L28">covered</span>
+                <span class="pc bpc" id="L29" title="1 of 2 branches missed.">partial</span>
+                <span class="nc bnc" id="L30" title="All 4 branches missed.">missed branches</span>
+                </pre></body></html>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        assertEquals(List.of(27, 28, 29, 30), file.getLines().stream().map(UniversalCoverageFile.LineCoverage::getLine).toList());
+        assertEquals(2, file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count());
+        assertEquals(6, file.getBranches().size());
+        assertEquals(1, file.getBranches().stream().filter(branch -> branch.getCoveredCount() > 0).count());
+        assertEquals(41, file.getReportTotalClasses());
+        assertEquals(21, file.getReportCoveredClasses());
+        assertEquals(357, file.getReportTotalMethods());
+        assertEquals(57, file.getReportCoveredMethods());
+        assertEquals(868, file.getReportTotalBranches());
+        assertEquals(4, file.getReportCoveredBranches());
+        assertEquals(1498, file.getReportTotalLines());
+        assertEquals(108, file.getReportCoveredLines());
+        assertEquals(793, file.getReportTotalComplexity());
+    }
+
+    @Test
+    void parsesStandaloneJacocoHtmlIndexReportTotals() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                <html><body><table><tfoot><tr><td>Total</td><td class="bar">6,932 of 7,285</td><td>4%</td>
+                <td class="bar">864 of 868</td><td>0%</td><td>736</td><td>793</td><td>1,390</td><td>1,498</td>
+                <td>300</td><td>357</td><td>20</td><td>41</td></tr></tfoot></table></body></html>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        assertEquals(41, file.getReportTotalClasses());
+        assertEquals(21, file.getReportCoveredClasses());
+        assertEquals(357, file.getReportTotalMethods());
+        assertEquals(57, file.getReportCoveredMethods());
+        assertEquals(868, file.getReportTotalBranches());
+        assertEquals(4, file.getReportCoveredBranches());
+        assertEquals(1498, file.getReportTotalLines());
+        assertEquals(108, file.getReportCoveredLines());
+        assertEquals(793, file.getReportTotalComplexity());
     }
 
     @Test

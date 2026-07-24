@@ -730,7 +730,7 @@ const callViewMeta = computed(() => {
     const mapped = `已匹配 ${coverageFileRows.value.length} / ${totalFiles} 个源码文件`
     return {
       title: '覆盖率数据',
-      description: '所有指标严格按当前源码基线统计，未匹配源码的报告条目不参与计算',
+      description: '概览按 JaCoCo 报表原始总计；文件和方法明细仅展示与当前源码基线匹配的覆盖数据',
       count: mapped,
     }
   }

@@ -1,6 +1,8 @@
 package com.oAT.web.api.map;
 
 import com.oAT.web.persistence.entity.ClassCoverageIndex;
+import com.oAT.web.coverage.universal.JacocoCoverageParser;
+import com.oAT.web.coverage.universal.UniversalCoverageFile;
 import com.oAT.web.service.AppService;
 import com.oAT.web.verification.VerificationRepository;
 import com.oAT.web.verification.model.VerificationModels;
@@ -14,6 +16,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.LocalDateTime;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +31,37 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class TraceabilityMapServiceSourceParsingTest {
+
+    @Test
+    void sumsPerFileJacocoXmlCountersWithoutTreatingThemAsOneGlobalHtmlTotal() throws Exception {
+        List<UniversalCoverageFile> files = new JacocoCoverageParser().parse("""
+                <report><package name="demo">
+                  <class name="demo/First" sourcefilename="First.java">
+                    <counter type="METHOD" missed="2" covered="1"/>
+                    <counter type="CLASS" missed="0" covered="1"/>
+                    <counter type="COMPLEXITY" missed="3" covered="2"/>
+                  </class>
+                  <class name="demo/Second" sourcefilename="Second.java">
+                    <counter type="METHOD" missed="3" covered="2"/>
+                    <counter type="CLASS" missed="1" covered="0"/>
+                    <counter type="COMPLEXITY" missed="4" covered="3"/>
+                  </class>
+                  <sourcefile name="First.java"><line nr="1" ci="1"/></sourcefile>
+                  <sourcefile name="Second.java"><line nr="1" ci="0"/></sourcefile>
+                </package></report>
+                """.getBytes(StandardCharsets.UTF_8));
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Method summarize = TraceabilityMapService.class.getDeclaredMethod("summarizeCoverageReport", List.class);
+        summarize.setAccessible(true);
+
+        Object overview = summarize.invoke(service, files);
+
+        assertThat(value(overview, "totalClasses")).isEqualTo(2);
+        assertThat(value(overview, "coveredClasses")).isEqualTo(1);
+        assertThat(value(overview, "totalMethods")).isEqualTo(8);
+        assertThat(value(overview, "coveredMethods")).isEqualTo(3);
+        assertThat(value(overview, "totalComplexity")).isEqualTo(12);
+    }
 
     @Test
     void fallsBackToCurrentProjectBaselineWhenRequestedBaselineIsMissing() {
@@ -193,6 +227,60 @@ class TraceabilityMapServiceSourceParsingTest {
                 (Map<String, TraceabilityMapPayloads.TraceabilityNode>) nodesField.get(codeIndex);
         assertThat(nodes.get(methodId).coverage().coveredLines()).isZero();
         assertThat(nodes.get(methodId).coverage().totalLines()).isEqualTo(17);
+    }
+
+    @Test
+    void marksOnlyMethodsWithMatchedCoverageAsDynamic() throws Exception {
+        TraceabilityMapService service = new TraceabilityMapService(null, null, null, new CodeSymbolNormalizer(), null, null, null);
+        Class<?> codeIndexType = Arrays.stream(TraceabilityMapService.class.getDeclaredClasses())
+                .filter(type -> type.getSimpleName().equals("CodeIndex"))
+                .findFirst()
+                .orElseThrow();
+        Constructor<?> constructor = codeIndexType.getDeclaredConstructor(TraceabilityMapService.class);
+        constructor.setAccessible(true);
+        Object codeIndex = constructor.newInstance(service);
+        Method putCodeNode = codeIndexType.getDeclaredMethod("putCodeNode", TraceabilityMapPayloads.TraceabilityNode.class);
+        putCodeNode.setAccessible(true);
+
+        String path = "src/main/java/demo/Example.java";
+        String fileId = "code:java:" + path;
+        String classId = fileId + "#demo.Example";
+        String coveredMethodId = classId + ".covered()";
+        String missedMethodId = classId + ".missed()";
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(fileId, CODE_FILE, "Example.java", path, path,
+                "CODE", "java", path, null, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(classId, CODE_CLASS, "Example", "demo.Example", path,
+                "CODE", "java", "demo.Example", fileId, STATIC, null, Map.of()));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(coveredMethodId, CODE_METHOD, "covered", "covered()", path + ":10",
+                "CODE", "java", "demo.Example#covered", classId, STATIC, null, Map.of("line", 10)));
+        putCodeNode.invoke(codeIndex, new TraceabilityMapPayloads.TraceabilityNode(missedMethodId, CODE_METHOD, "missed", "missed()", path + ":20",
+                "CODE", "java", "demo.Example#missed", classId, STATIC, null, Map.of("line", 20)));
+
+        ClassCoverageIndex index = new ClassCoverageIndex();
+        index.setSourcePath(path);
+        ClassCoverageIndex.MethodCoverageDetail covered = coverageMethod("demo/Example", "covered", 10, 1, 1);
+        ClassCoverageIndex.MethodCoverageDetail missed = coverageMethod("demo/Example", "missed", 20, 0, 1);
+        index.setMethods(List.of(covered, missed));
+        Method applyMethodCoverage = codeIndexType.getDeclaredMethod("applyMethodCoverage", ClassCoverageIndex.class);
+        applyMethodCoverage.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        java.util.Set<String> coveredIds = (java.util.Set<String>) applyMethodCoverage.invoke(codeIndex, index);
+        assertThat(coveredIds).containsExactly(coveredMethodId);
+    }
+
+    private static ClassCoverageIndex.MethodCoverageDetail coverageMethod(String className, String name, int line, int coveredLines, int totalLines) {
+        ClassCoverageIndex.MethodCoverageDetail method = new ClassCoverageIndex.MethodCoverageDetail();
+        method.setClassName(className);
+        method.setMethodName(name);
+        method.setMethodDesc("()");
+        method.setStartLine(line);
+        method.setCoveredLines(coveredLines);
+        method.setTotalLines(totalLines);
+        method.setCoveredLineNumbers(coveredLines > 0 ? List.of(line) : List.of());
+        method.setTotalLineNumbers(List.of(line));
+        method.setCovered(coveredLines > 0);
+        return method;
     }
 
     private static Object value(Object record, String accessor) {

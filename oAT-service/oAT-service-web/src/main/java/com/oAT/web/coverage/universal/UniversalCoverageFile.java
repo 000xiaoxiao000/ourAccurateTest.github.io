@@ -24,6 +24,10 @@ public class UniversalCoverageFile implements Serializable {
     private int reportCoveredClasses;
     private int reportTotalMethods;
     private int reportCoveredMethods;
+    private int reportTotalBranches;
+    private int reportCoveredBranches;
+    private int reportTotalLines;
+    private int reportCoveredLines;
     private int reportTotalComplexity;
     private Map<Integer, List<ClassCoverageIndex.CoverageFootprintRecord>> lineFootprints = new LinkedHashMap<>();
     private Map<String, List<ClassCoverageIndex.CoverageFootprintRecord>> branchFootprints = new LinkedHashMap<>();
@@ -203,6 +207,14 @@ public class UniversalCoverageFile implements Serializable {
     public void setReportTotalMethods(int reportTotalMethods) { this.reportTotalMethods = reportTotalMethods; }
     public int getReportCoveredMethods() { return reportCoveredMethods; }
     public void setReportCoveredMethods(int reportCoveredMethods) { this.reportCoveredMethods = reportCoveredMethods; }
+    public int getReportTotalBranches() { return reportTotalBranches; }
+    public void setReportTotalBranches(int reportTotalBranches) { this.reportTotalBranches = reportTotalBranches; }
+    public int getReportCoveredBranches() { return reportCoveredBranches; }
+    public void setReportCoveredBranches(int reportCoveredBranches) { this.reportCoveredBranches = reportCoveredBranches; }
+    public int getReportTotalLines() { return reportTotalLines; }
+    public void setReportTotalLines(int reportTotalLines) { this.reportTotalLines = reportTotalLines; }
+    public int getReportCoveredLines() { return reportCoveredLines; }
+    public void setReportCoveredLines(int reportCoveredLines) { this.reportCoveredLines = reportCoveredLines; }
     public int getReportTotalComplexity() { return reportTotalComplexity; }
     public void setReportTotalComplexity(int reportTotalComplexity) { this.reportTotalComplexity = reportTotalComplexity; }
 

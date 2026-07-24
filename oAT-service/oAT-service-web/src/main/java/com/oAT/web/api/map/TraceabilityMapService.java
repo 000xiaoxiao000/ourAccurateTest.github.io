@@ -751,7 +751,7 @@ public class TraceabilityMapService {
                     String nodeId = codeIndex.resolveCoverageNode(index);
                     if (nodeId != null) {
                         codeIndex.applyCoverageSummaryWithParents(nodeId, coverageSummary(index), coverageMetadata(index));
-                        codeIndex.applyMethodCoverage(index);
+                        covered.addAll(codeIndex.applyMethodCoverage(index));
                     }
                     if (index.getCoveredLines() <= 0 && index.getCoveredBranchTargets() <= 0 && index.getCoveredMethods() <= 0) {
                         continue;
@@ -1003,6 +1003,11 @@ public class TraceabilityMapService {
 
     private CoverageReportOverview buildCoverageOverview(String projectId, Baseline baseline, CodeIndex codeIndex,
                                                          List<String> warnings) {
+        List<UniversalCoverageFile> reportFiles = loadCoverageFiles(projectId, baseline, warnings);
+        CoverageReportOverview reportOverview = summarizeCoverageReport(reportFiles);
+        if (hasReportCounters(reportFiles)) {
+            return reportOverview;
+        }
         List<ClassCoverageIndex> indexes = loadCoverageIndexes(projectId, baseline, warnings);
         int totalClasses = (int) codeIndex.nodes.values().stream()
                 .filter(node -> node.kind() == NodeKind.CODE_CLASS)
@@ -1066,6 +1071,15 @@ public class TraceabilityMapService {
         return parseCoverageFilesFromAsset(coverageAsset.orElse(null), baseline.sourceAppId(), warnings);
     }
 
+    private boolean hasReportCounters(List<UniversalCoverageFile> files) {
+        return files.stream().anyMatch(file -> file != null && (
+                file.getReportTotalClasses() > 0
+                        || file.getReportTotalMethods() > 0
+                        || file.getReportTotalBranches() > 0
+                        || file.getReportTotalLines() > 0
+                        || file.getReportTotalComplexity() > 0));
+    }
+
     private CoverageReportOverview summarizeCoverageReport(List<UniversalCoverageFile> files) {
         int coveredClasses = 0;
         int totalClasses = 0;
@@ -1076,6 +1090,7 @@ public class TraceabilityMapService {
         int coveredLines = 0;
         int totalLines = 0;
         int totalComplexity = 0;
+        boolean hasGlobalReportTotals = files.stream().anyMatch(file -> file != null && file.getReportTotalLines() > 0);
         for (UniversalCoverageFile file : files) {
             if (file == null) continue;
             totalClasses += file.getReportTotalClasses() > 0 ? file.getReportTotalClasses() : 1;
@@ -1086,11 +1101,34 @@ public class TraceabilityMapService {
             coveredMethods += file.getReportTotalMethods() > 0
                     ? file.getReportCoveredMethods()
                     : (int) file.getFunctions().stream().filter(function -> function.getCoveredCount() > 0).count();
-            coveredBranches += file.getBranches().stream().filter(branch -> branch.getCoveredCount() > 0).count();
-            totalBranches += file.getBranches().size();
-            coveredLines += file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count();
-            totalLines += file.getLines().size();
+            coveredBranches += file.getReportTotalBranches() > 0 ? file.getReportCoveredBranches()
+                    : file.getBranches().stream().filter(branch -> branch.getCoveredCount() > 0).count();
+            totalBranches += file.getReportTotalBranches() > 0 ? file.getReportTotalBranches() : file.getBranches().size();
+            coveredLines += file.getReportTotalLines() > 0 ? file.getReportCoveredLines()
+                    : file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count();
+            totalLines += file.getReportTotalLines() > 0 ? file.getReportTotalLines() : file.getLines().size();
             totalComplexity += file.getReportTotalComplexity();
+        }
+        if (hasGlobalReportTotals) {
+            // Report totals are attached to one logical file. Files without them still provide drill-down
+            // data and must not be added to the report-wide denominator a second time.
+            UniversalCoverageFile summary = files.stream()
+                    .filter(file -> file != null && file.getReportTotalLines() > 0).findFirst().orElse(null);
+            if (summary != null) {
+                coveredClasses = summary.getReportCoveredClasses();
+                totalClasses = summary.getReportTotalClasses();
+                coveredMethods = summary.getReportCoveredMethods();
+                totalMethods = summary.getReportTotalMethods();
+                if (summary.getReportTotalBranches() > 0) {
+                    coveredBranches = summary.getReportCoveredBranches();
+                    totalBranches = summary.getReportTotalBranches();
+                }
+                if (summary.getReportTotalLines() > 0) {
+                    coveredLines = summary.getReportCoveredLines();
+                    totalLines = summary.getReportTotalLines();
+                }
+                totalComplexity = summary.getReportTotalComplexity();
+            }
         }
         return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
                 coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
@@ -1592,8 +1630,9 @@ public class TraceabilityMapService {
             }
         }
 
-        void applyMethodCoverage(ClassCoverageIndex index) {
-            if (index == null || index.getMethods() == null) return;
+        Set<String> applyMethodCoverage(ClassCoverageIndex index) {
+            Set<String> coveredMethodIds = new LinkedHashSet<>();
+            if (index == null || index.getMethods() == null) return coveredMethodIds;
             for (ClassCoverageIndex.MethodCoverageDetail method : index.getMethods()) {
                 if (method == null || !StringUtils.hasText(method.getMethodName())) continue;
                 String methodId = resolveCoverageMethod(index, method);
@@ -1606,7 +1645,11 @@ public class TraceabilityMapService {
                 metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
                 metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines(method)));
                 applyCoverageSummary(methodId, coverage, metadata);
+                if (method.getCoveredLines() > 0 || method.getCoveredBranchTargets() > 0 || method.isCovered()) {
+                    coveredMethodIds.add(methodId);
+                }
             }
+            return coveredMethodIds;
         }
 
         String resolveCoverageMethod(ClassCoverageIndex index, ClassCoverageIndex.MethodCoverageDetail method) {
@@ -1751,6 +1794,11 @@ public class TraceabilityMapService {
                 }
                 for (InvocationCandidate invocation : caller.invocations()) {
                     for (MethodSpan callee : methodsByName.getOrDefault(invocation.name(), List.of())) {
+                        // A method name alone cannot safely identify a target outside its declaring type.
+                        // Cross-type edges are emitted only by the bytecode/static invocation index.
+                        if (!caller.className().equals(callee.className())) {
+                            continue;
+                        }
                         if (invocation.argumentCount() >= 0 && !methodArityMatches(callee, invocation.argumentCount())) {
                             continue;
                         }

@@ -815,7 +815,7 @@ public class VerificationApiControl {
             for (ZipEntry entry : entries) {
                 String content = new String(zip.getInputStream(entry).readAllBytes(), StandardCharsets.UTF_8);
                 builder.append("\n\n// COVERAGE_FILE: ").append(entry.getName()).append('\n')
-                        .append(content, 0, Math.min(content.length(), 20_000));
+                        .append(content);
                 count++;
             }
         }
