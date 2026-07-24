@@ -86,6 +86,7 @@ public class TraceabilityMapService {
     private static final int MAX_DEPTH = 8;
     private static final int MAX_NODES = 700;
     private static final int MAX_EDGES = 1200;
+    private static final int MAX_CODE_TREE_NODES = 4000;
     private static final Pattern SOURCE_FILE_PATTERN = Pattern.compile("//\\s*SOURCE_FILE:\\s*(.+)");
     private static final Pattern CONTENT_FILE_PATTERN = Pattern.compile("//\\s*FILE:\\s*(.+)");
     private static final Pattern CLASS_PATTERN = Pattern.compile("(?:class|interface|enum|record)\\s+([A-Za-z_$][\\w$]*)");
@@ -188,7 +189,7 @@ public class TraceabilityMapService {
         }
 
         GraphView clipped = graph.focus(focusId, direction, depth, MAX_NODES, MAX_EDGES, warnings);
-        List<CodeTreeNode> codeTree = includeCodeTree ? buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes) : List.of();
+        List<CodeTreeNode> codeTree = includeCodeTree ? buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes, warnings) : List.of();
         // The graph viewport may be narrowed to a focused node, while the summary, code tree,
         // and coverage report all describe the selected baseline.  Keep the summary on that
         // same baseline-wide scope so selecting a node cannot change its totals.
@@ -960,13 +961,21 @@ public class TraceabilityMapService {
                 testcases.size() - tcWithCode.size(), dynamicEvidence, staticBridge, clipped);
     }
 
-    private List<CodeTreeNode> buildCodeTree(CodeIndex index, Set<String> visibleNodeIds, Set<String> dynamicNodes) {
+    private List<CodeTreeNode> buildCodeTree(CodeIndex index, Set<String> visibleNodeIds, Set<String> dynamicNodes,
+                                                List<String> warnings) {
         Map<String, MutableTreeNode> dirs = new LinkedHashMap<>();
         Map<String, MutableTreeNode> roots = new LinkedHashMap<>();
+        int includedFiles = 0;
+        int totalFiles = 0;
         for (TraceabilityNode node : index.nodes.values()) {
             if (node.kind() != NodeKind.CODE_FILE || (!visibleNodeIds.isEmpty() && !visibleNodeIds.contains(node.id()))) {
                 continue;
             }
+            totalFiles++;
+            if (includedFiles >= MAX_CODE_TREE_NODES) {
+                continue;
+            }
+            includedFiles++;
             String path = node.locator();
             String[] parts = path.split("/");
             String parentKey = "";
@@ -985,6 +994,9 @@ public class TraceabilityMapService {
             file.coverage = node.coverage();
             currentLevel.put(node.id(), file);
             attachCodeChildren(index, file, node.id(), dynamicNodes);
+        }
+        if (totalFiles > includedFiles) {
+            warnings.add("代码树文件数超过 " + MAX_CODE_TREE_NODES + "，仅加载前 " + includedFiles + "/" + totalFiles + " 个文件；请使用搜索或缩小源码范围后查看其余内容。");
         }
         return roots.values().stream().map(MutableTreeNode::toPayload).toList();
     }
@@ -1045,10 +1057,27 @@ public class TraceabilityMapService {
             totalBranches += index.getTotalBranchTargets();
             coveredLines += index.getCoveredLines();
             totalLines += index.getTotalLines();
+            coveredComplexity += coveredComplexity(index);
             totalComplexity += index.getTotalComplexity();
         }
         return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
                 coveredBranches, totalBranches, coveredLines, totalLines, coveredComplexity, totalComplexity);
+    }
+
+    private int coveredComplexity(ClassCoverageIndex index) {
+        if (index == null) return 0;
+        if (index.getMethods() != null && !index.getMethods().isEmpty()) {
+            return index.getMethods().stream()
+                    .filter(method -> method != null && (method.isCovered()
+                            || method.getCoveredLines() > 0
+                            || method.getCoveredBranches() > 0
+                            || method.getCoveredBranchTargets() > 0))
+                    .mapToInt(ClassCoverageIndex.MethodCoverageDetail::getComplexity)
+                    .sum();
+        }
+        return index.getCoveredLines() > 0 || index.getCoveredBranches() > 0 || index.getCoveredBranchTargets() > 0
+                ? index.getTotalComplexity()
+                : 0;
     }
 
     private boolean hasCoveredMeasurements(TraceabilityNode node) {

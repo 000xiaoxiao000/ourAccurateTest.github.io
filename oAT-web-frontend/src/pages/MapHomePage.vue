@@ -262,6 +262,7 @@
                 v-for="card in coverageMetricCards"
                 :key="card.key"
                 :class="['coverage-metric-card', card.tone]"
+                :title="card.tooltip"
               >
                 <div class="coverage-metric-main">
                   <span>{{ card.label }}</span>
@@ -311,7 +312,7 @@
                     </span>
                     <em :class="['coverage-pill', row.tone]">{{ row.stateText }}</em>
                     <div class="coverage-meter compact">
-                      <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
+                      <span>{{ row.lineText }} · 分支 {{ row.branchText }} · 圈复杂度 {{ row.complexityText }}</span>
                       <i><b :style="{ width: row.lineWidth }"></b></i>
                     </div>
                   </button>
@@ -339,7 +340,7 @@
                       <small :title="row.locator">{{ row.locator }}</small>
                     </span>
                     <div class="coverage-meter compact">
-                      <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
+                      <span>{{ row.lineText }} · 分支 {{ row.branchText }} · 圈复杂度 {{ row.complexityText }}</span>
                       <i><b :style="{ width: row.lineWidth }"></b></i>
                     </div>
                   </button>
@@ -472,6 +473,7 @@
           <div>
             <strong>代码树</strong>
             <span>{{ codeTreeSummaryText }}</span>
+            <small v-if="treeExpandLimited" class="tree-protection-notice">为避免浏览器卡顿，仅展开前 {{ maxExpandedTreeNodes }} 个节点；可使用搜索或逐级展开。</small>
           </div>
           <div class="tree-actions">
             <button type="button" :disabled="!map.focusId.value" @click="showGlobalCoverageOverview">全局概览</button>
@@ -564,6 +566,8 @@ const baselines = ref<VerificationBaseline[]>([])
 const selectedBaselineId = ref('')
 const openDirs = ref<Set<string>>(new Set())
 const openClasses = ref<Set<string>>(new Set())
+const maxExpandedTreeNodes = 600
+const treeExpandLimited = ref(false)
 const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
 const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
@@ -869,24 +873,17 @@ const coverageComplexityMetric = computed(() => {
   if (!hasCoverageScope.value && raw && raw.totalComplexity > 0) {
     return { covered: raw.coveredComplexity ?? 0, total: raw.totalComplexity }
   }
-  const total = coverageAggregateRows.value.reduce((sum, row) => sum + row.complexity, 0)
-  return { covered: 0, total }
+  const rows = coverageMethodRows.value.length ? coverageMethodRows.value : coverageAggregateRows.value
+  const total = rows.reduce((sum, row) => sum + row.complexity, 0)
+  const covered = rows.reduce((sum, row) => sum + row.coveredComplexity, 0)
+  return { covered, total }
 })
 const coverageMetricCards = computed(() => [
   coverageCountCard('class', '类覆盖率', coverageClassMetric.value.covered, coverageClassMetric.value.total, 'class'),
   coverageCountCard('method', '方法覆盖率', coverageMethodMetric.value.covered, coverageMethodMetric.value.total, 'method'),
   coverageCountCard('branch', '分支覆盖率', coverageBranchMetric.value.covered, coverageBranchMetric.value.total, 'branch'),
   coverageCountCard('line', '行覆盖率', coverageLineMetric.value.covered, coverageLineMetric.value.total, 'line'),
-  {
-    key: 'complexity',
-    label: '圈复杂度',
-    value: coverageComplexityMetric.value.total
-      ? coveragePercent(coverageComplexityMetric.value.covered / coverageComplexityMetric.value.total)
-      : '-',
-    missedText: `未覆盖数 ${Math.max(coverageComplexityMetric.value.total - coverageComplexityMetric.value.covered, 0)}`,
-    detailText: `覆盖数/总数 ${coverageComplexityMetric.value.covered} / ${coverageComplexityMetric.value.total}`,
-    tone: 'complexity',
-  },
+  coverageCountCard('complexity', '圈复杂度', coverageComplexityMetric.value.covered, coverageComplexityMetric.value.total, 'complexity'),
 ])
 const selectedCoverageRow = computed(() => {
   if (!coverageRows.value.length || !map.focusId.value) return null
@@ -1263,20 +1260,24 @@ function toggleClass(id: string) {
 function expandTree() {
   const dirs = new Set<string>()
   const classes = new Set<string>()
-  treeNodes.value.forEach((node) => collectTreeOpenKeys(node, dirs, classes))
+  const budget = { remaining: maxExpandedTreeNodes }
+  treeNodes.value.forEach((node) => collectTreeOpenKeys(node, dirs, classes, budget))
   openDirs.value = dirs
   openClasses.value = classes
+  treeExpandLimited.value = budget.remaining === 0
 }
 
 function collapseTree() {
   openDirs.value = new Set()
   openClasses.value = new Set()
+  treeExpandLimited.value = false
 }
 
-function collectTreeOpenKeys(node: TreeNode, dirs: Set<string>, classes: Set<string>) {
+function collectTreeOpenKeys(node: TreeNode, dirs: Set<string>, classes: Set<string>, budget?: { remaining: number }) {
+  if (budget && budget.remaining-- <= 0) return
   if (node.isDir) {
     dirs.add(node.key)
-    node.children.forEach((child) => collectTreeOpenKeys(child, dirs, classes))
+    node.children.forEach((child) => collectTreeOpenKeys(child, dirs, classes, budget))
     return
   }
   if (node.file) classes.add(node.file.id)
@@ -1303,7 +1304,14 @@ function openAncestors(id: string, nodes: CodeTreeNode[], parents: string[] = []
 
 function toTreeNode(node: CodeTreeNode): TreeNode {
   if (node.kind === 'DIRECTORY') {
-    return { key: node.id, name: node.label, displayName: node.label, isDir: true, children: node.children.map(toTreeNode) }
+    const directory = collapseDirectoryChain(node)
+    return {
+      key: directory.id,
+      name: directory.label,
+      displayName: directory.labels.join('/'),
+      isDir: true,
+      children: directory.children.map(toTreeNode),
+    }
   }
   if (node.kind === 'FILE' || node.kind === 'CLASS') {
     const methodNodes = flattenMethods(node.children)
@@ -1317,6 +1325,16 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
     }
   }
   return { key: node.id, name: node.label, displayName: node.label, isDir: false, children: [] }
+}
+
+function collapseDirectoryChain(node: CodeTreeNode) {
+  let current = node
+  const labels = [node.label]
+  while (current.kind === 'DIRECTORY' && current.children.length === 1 && current.children[0].kind === 'DIRECTORY') {
+    current = current.children[0]
+    labels.push(current.label)
+  }
+  return { id: current.id, label: current.label, labels, children: current.children }
 }
 
 function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNode[] {
@@ -1371,6 +1389,8 @@ function toCoverageRow(node: TraceabilityNode) {
   const totalBranches = coverage?.totalBranches ?? 0
   const hasReport = Boolean(coverage && (totalLines > 0 || totalBranches > 0))
   const isCovered = coveredLines > 0 || coveredBranches > 0 || node.evidenceState === 'DYNAMIC' || node.evidenceState === 'BOTH'
+  const complexity = coverageComplexity(metadata)
+  const coveredComplexity = isCovered ? complexity : 0
   return {
     id: node.id,
     label: node.label || node.symbol || node.id,
@@ -1387,7 +1407,9 @@ function toCoverageRow(node: TraceabilityNode) {
     branchText: coverageRatioText(coveredBranches, totalBranches, coverage?.branchRate),
     lineWidth: coverageWidth(coverage?.lineRate, coveredLines, totalLines),
     branchWidth: coverageWidth(coverage?.branchRate, coveredBranches, totalBranches),
-    complexity: coverageComplexity(metadata),
+    complexity,
+    coveredComplexity,
+    complexityText: coverageRatioText(coveredComplexity, complexity),
     sourceContent: source.content,
     sourceStartLine: source.content ? source.startLine : lineFromLocator(node.locator) || numberMetadata(metadata.line) || 1,
     totalLineNumbers: numberArrayMetadata(metadata.coverageTotalLines),
@@ -1403,7 +1425,7 @@ function coverageRowTitle(row: ReturnType<typeof toCoverageRow>) {
     `状态：${row.stateText}`,
     `行覆盖：${row.lineText}`,
     `分支覆盖：${row.branchText}`,
-    `圈复杂度：${row.complexity || '-'}`,
+    `圈复杂度：${row.complexityText}`,
   ].join('\n')
 }
 
@@ -1602,8 +1624,14 @@ function coverageCountCard(key: string, label: string, covered: number, total: n
     value: total ? coveragePercent(covered / total) : '-',
     missedText: `未覆盖数 ${missed}`,
     detailText: `覆盖数/总数 ${covered} / ${total}`,
+    tooltip: coverageMetricTooltip(label, covered, total),
     tone,
   }
+}
+
+function coverageMetricTooltip(label: string, covered: number, total: number) {
+  const missed = Math.max(total - covered, 0)
+  return `${label}\n状态：${total ? '已覆盖' : '暂无数据'}\n覆盖数：${covered}\n总数：${total}\n未覆盖数：${missed}`
 }
 
 function coverageComplexity(metadata: Record<string, unknown>) {
@@ -2415,8 +2443,15 @@ function traceNodeTitle(node: TraceabilityNode) {
     node.metadata?.staticMethod === true ? '方法类型：静态方法' : '',
     node.metadata?.visibility ? `可见性：${node.metadata.visibility}` : '',
     node.metadata?.recursive === true ? '递归：是' : '',
+    nodeComplexityText(node),
     `ID：${node.id}`,
   ].filter(Boolean).join('\n')
+}
+
+function nodeComplexityText(node: TraceabilityNode) {
+  const total = coverageComplexity(node.metadata || {})
+  if (!total) return ''
+  return `圈复杂度：${coverageRatioText(codeNodeHasDynamicCoverage(node) ? total : 0, total)}`
 }
 
 function traceEdgeTitle(edge: TraceabilityEdge) {
@@ -2701,6 +2736,7 @@ onBeforeUnmount(() => {
 .pane-head { display:flex; justify-content:space-between; gap:8px; padding:14px 15px; border-bottom:1px solid #eef2f5; color:#172033; font-size:14px; }
 .pane-head > div { display:grid; gap:3px; min-width:0; }
 .pane-head span { color:#64748b; font-size:11px; font-weight:700; }
+.tree-protection-notice { color:#b45309 !important; font-size:10.5px !important; line-height:1.4; }
 .call-head { display:grid; gap:10px; padding:14px 15px 12px; border-bottom:1px solid #eef2f5; color:#172033; }
 .call-head-main { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; min-width:0; }
 .call-head-main > div { display:grid; gap:3px; min-width:0; }

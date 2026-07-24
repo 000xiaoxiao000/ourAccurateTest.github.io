@@ -177,6 +177,10 @@ class CoverageParserRegistryTest {
         assertEquals(4, file.getReportCoveredBranches());
         assertEquals(1498, file.getReportTotalLines());
         assertEquals(108, file.getReportCoveredLines());
+        assertEquals(1498, file.toClassCoverageIndex("app").getTotalLines());
+        assertEquals(108, file.toClassCoverageIndex("app").getCoveredLines());
+        assertEquals(868, file.toClassCoverageIndex("app").getTotalBranchTargets());
+        assertEquals(4, file.toClassCoverageIndex("app").getCoveredBranchTargets());
         assertEquals(793, file.getReportTotalComplexity());
     }
 

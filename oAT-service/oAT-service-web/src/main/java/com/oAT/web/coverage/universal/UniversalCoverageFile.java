@@ -71,8 +71,10 @@ public class UniversalCoverageFile implements Serializable {
         index.setSourcePath(filePath);
         index.setSourceType(sourceType == null ? null : sourceType.name());
         index.setLanguage(sourceType == null ? null : sourceType.name());
-        index.setTotalLines(lines.size());
-        index.setCoveredLines((int) lines.stream().filter(line -> line.coveredCount > 0).count());
+        int parsedTotalLines = lines.size();
+        int parsedCoveredLines = (int) lines.stream().filter(line -> line.coveredCount > 0).count();
+        index.setTotalLines(reportTotalLines > 0 ? reportTotalLines : parsedTotalLines);
+        index.setCoveredLines(reportTotalLines > 0 ? Math.min(reportCoveredLines, reportTotalLines) : parsedCoveredLines);
         index.setLineRate(rate(index.getCoveredLines(), index.getTotalLines()));
         index.setTotalLineNumbers(lines.stream()
                 .map(LineCoverage::getLine)
@@ -85,8 +87,10 @@ public class UniversalCoverageFile implements Serializable {
                 .distinct()
                 .sorted()
                 .collect(Collectors.toCollection(ArrayList::new)));
-        index.setTotalBranchTargets(branches.size());
-        index.setCoveredBranchTargets((int) branches.stream().filter(branch -> branch.coveredCount > 0).count());
+        int parsedTotalBranchTargets = branches.size();
+        int parsedCoveredBranchTargets = (int) branches.stream().filter(branch -> branch.coveredCount > 0).count();
+        index.setTotalBranchTargets(reportTotalBranches > 0 ? reportTotalBranches : parsedTotalBranchTargets);
+        index.setCoveredBranchTargets(reportTotalBranches > 0 ? Math.min(reportCoveredBranches, reportTotalBranches) : parsedCoveredBranchTargets);
         index.setTotalBranches((int) branches.stream().map(BranchCoverage::branchGroupKey).distinct().count());
         index.setCoveredBranches((int) branches.stream().filter(branch -> branch.coveredCount > 0)
                 .map(BranchCoverage::branchGroupKey).distinct().count());
