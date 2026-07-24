@@ -129,6 +129,51 @@ class CoverageParserRegistryTest {
     }
 
     @Test
+    void usesJacocoMethodCountersInsteadOfLineRangeInference() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                <report><package name="web3Server/controller">
+                  <class name="web3Server/controller/Web3Controller" sourcefilename="Web3Controller.java">
+                    <method name="setNum" desc="(I)I" line="524">
+                      <counter type="INSTRUCTION" missed="34" covered="0"/>
+                      <counter type="BRANCH" missed="4" covered="0"/>
+                      <counter type="LINE" missed="9" covered="0"/>
+                      <counter type="COMPLEXITY" missed="3" covered="0"/>
+                      <counter type="METHOD" missed="1" covered="0"/>
+                    </method>
+                    <method name="processField" desc="(Ljava/lang/Object;)Ljava/lang/Object;" line="536">
+                      <counter type="INSTRUCTION" missed="0" covered="3"/>
+                      <counter type="LINE" missed="0" covered="1"/>
+                      <counter type="COMPLEXITY" missed="0" covered="1"/>
+                      <counter type="METHOD" missed="0" covered="1"/>
+                    </method>
+                  </class>
+                  <sourcefile name="Web3Controller.java">
+                    <line nr="524" mi="5" ci="0" mb="0" cb="0"/>
+                    <line nr="525" mi="4" ci="0" mb="0" cb="0"/>
+                    <line nr="526" mi="4" ci="0" mb="0" cb="0"/>
+                    <line nr="527" mi="2" ci="0" mb="0" cb="0"/>
+                    <line nr="528" mi="2" ci="0" mb="2" cb="0"/>
+                    <line nr="529" mi="4" ci="0" mb="0" cb="0"/>
+                    <line nr="531" mi="6" ci="0" mb="2" cb="0"/>
+                    <line nr="532" mi="5" ci="0" mb="0" cb="0"/>
+                    <line nr="533" mi="2" ci="0" mb="0" cb="0"/>
+                    <line nr="536" mi="0" ci="3" mb="0" cb="0"/>
+                  </sourcefile>
+                </package></report>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        com.oAT.web.persistence.entity.ClassCoverageIndex.MethodCoverageDetail method =
+                file.toClassCoverageIndex("app").getMethods().get(0);
+        assertEquals("setNum", method.getMethodName());
+        assertEquals(0, method.getCoveredLines());
+        assertEquals(9, method.getTotalLines());
+        assertEquals(0, method.getCoveredBranchTargets());
+        assertEquals(4, method.getTotalBranchTargets());
+        assertEquals(0, method.getCoveredInstructions());
+        assertEquals(34, method.getTotalInstructions());
+    }
+
+    @Test
     void parsesJacocoHtmlSourcePagesFromUploadedArchiveSummary() {
         List<UniversalCoverageFile> files = new JacocoCoverageParser().parse("""
                 多语言覆盖率资料

@@ -95,13 +95,14 @@ public class UniversalCoverageFile implements Serializable {
         index.setCoveredBranches((int) branches.stream().filter(branch -> branch.coveredCount > 0)
                 .map(BranchCoverage::branchGroupKey).distinct().count());
         index.setBranchRate(rate(index.getCoveredBranchTargets(), index.getTotalBranchTargets()));
-        List<ClassCoverageIndex.MethodCoverageDetail> methods = functions.stream()
-                .map(function -> function.toMethodCoverageDetail(lines))
-                .peek(method -> {
-                    method.setLineFootprints(lineFootprintsFor(method));
-                    applyBranchesToMethod(method);
-                })
-                .collect(Collectors.toCollection(ArrayList::new));
+        List<ClassCoverageIndex.MethodCoverageDetail> methods = new ArrayList<>();
+        for (FunctionCoverage function : functions) {
+            ClassCoverageIndex.MethodCoverageDetail method = function.toMethodCoverageDetail(lines);
+            method.setLineFootprints(lineFootprintsFor(method));
+            applyBranchesToMethod(method);
+            function.applyReportCoverage(method);
+            methods.add(method);
+        }
         if (methods.isEmpty()) {
             Set<Integer> totalLines = lines.stream().map(LineCoverage::getLine).collect(Collectors.toCollection(LinkedHashSet::new));
             Set<Integer> coveredLines = lines.stream().filter(line -> line.coveredCount > 0)
@@ -250,6 +251,10 @@ public class UniversalCoverageFile implements Serializable {
         private int coveredComplexity;
         private Integer reportTotalLines;
         private Integer reportCoveredLines;
+        private Integer reportTotalBranchTargets;
+        private Integer reportCoveredBranchTargets;
+        private Integer reportTotalInstructions;
+        private Integer reportCoveredInstructions;
         public FunctionCoverage() {}
         public FunctionCoverage(String name, int startLine, int endLine, int coveredCount) {
             this(name, startLine, endLine, coveredCount, 0);
@@ -295,6 +300,22 @@ public class UniversalCoverageFile implements Serializable {
             detail.setCovered(!covered.isEmpty() || coveredCount > 0);
             return detail;
         }
+        void applyReportCoverage(ClassCoverageIndex.MethodCoverageDetail detail) {
+            if (reportTotalBranchTargets != null) {
+                detail.setTotalBranchTargets(reportTotalBranchTargets);
+                detail.setCoveredBranchTargets(reportCoveredBranchTargets == null ? 0 : Math.min(reportCoveredBranchTargets, reportTotalBranchTargets));
+                detail.setBranchRate(rate(detail.getCoveredBranchTargets(), detail.getTotalBranchTargets()));
+            }
+            if (reportTotalInstructions != null) {
+                detail.setTotalInstructions(reportTotalInstructions);
+                detail.setCoveredInstructions(reportCoveredInstructions == null ? 0 : Math.min(reportCoveredInstructions, reportTotalInstructions));
+                detail.setInstructionRate(rate(detail.getCoveredInstructions(), detail.getTotalInstructions()));
+            }
+            detail.setCovered(detail.isCovered()
+                    || detail.getCoveredLines() > 0
+                    || detail.getCoveredBranchTargets() > 0
+                    || detail.getCoveredInstructions() > 0);
+        }
         String key() { return className + ":" + name + ":" + descriptor + ":" + startLine + ":" + endLine; }
         public String getClassName() { return className; }
         public void setClassName(String className) { this.className = className; }
@@ -315,6 +336,14 @@ public class UniversalCoverageFile implements Serializable {
         public void setReportLineCoverage(int coveredLines, int totalLines) {
             this.reportCoveredLines = coveredLines;
             this.reportTotalLines = totalLines;
+        }
+        public void setReportBranchCoverage(int coveredBranchTargets, int totalBranchTargets) {
+            this.reportCoveredBranchTargets = coveredBranchTargets;
+            this.reportTotalBranchTargets = totalBranchTargets;
+        }
+        public void setReportInstructionCoverage(int coveredInstructions, int totalInstructions) {
+            this.reportCoveredInstructions = coveredInstructions;
+            this.reportTotalInstructions = totalInstructions;
         }
     }
 

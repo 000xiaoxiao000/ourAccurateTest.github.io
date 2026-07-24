@@ -102,6 +102,9 @@ public class ClassCoverageIndex implements Serializable {
         private int coveredBranchTargets;
         private Double branchRate;
         private int coveredComplexity;
+        private int totalInstructions;
+        private int coveredInstructions;
+        private Double instructionRate;
         private boolean hasCodeChanges;
 
         public String getClassName() { return className; }
@@ -146,6 +149,12 @@ public class ClassCoverageIndex implements Serializable {
         public void setBranchRate(Double branchRate) { this.branchRate = branchRate; }
         public int getCoveredComplexity() { return coveredComplexity; }
         public void setCoveredComplexity(int coveredComplexity) { this.coveredComplexity = coveredComplexity; }
+        public int getTotalInstructions() { return totalInstructions; }
+        public void setTotalInstructions(int totalInstructions) { this.totalInstructions = totalInstructions; }
+        public int getCoveredInstructions() { return coveredInstructions; }
+        public void setCoveredInstructions(int coveredInstructions) { this.coveredInstructions = coveredInstructions; }
+        public Double getInstructionRate() { return instructionRate; }
+        public void setInstructionRate(Double instructionRate) { this.instructionRate = instructionRate; }
         public boolean isHasCodeChanges() { return hasCodeChanges; }
         public void setHasCodeChanges(boolean hasCodeChanges) { this.hasCodeChanges = hasCodeChanges; }
     }

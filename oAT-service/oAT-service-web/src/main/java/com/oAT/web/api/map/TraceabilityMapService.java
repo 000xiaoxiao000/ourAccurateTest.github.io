@@ -809,6 +809,13 @@ public class TraceabilityMapService {
                         && method.getComplexity() <= 0) {
                     return true;
                 }
+                if ("JAVA".equalsIgnoreCase(index.getSourceType())
+                        && method != null
+                        && !"file".equals(method.getMethodDesc())
+                        && method.getTotalLines() > 0
+                        && method.getTotalInstructions() <= 0) {
+                    return true;
+                }
             }
             if (!index.getMethods().isEmpty() && !hasMethodDetail
                     && (index.getTotalLines() > 0 || index.getTotalBranchTargets() > 0)) {

@@ -171,6 +171,8 @@ public class JacocoCoverageParser implements CoverageParser {
                         Math.max(method.line(), nextLine - 1), method.coveredLines() > 0 ? 1 : 0,
                         method.totalComplexity(), method.coveredComplexity());
                 function.setReportLineCoverage(method.coveredLines(), method.totalLines());
+                function.setReportBranchCoverage(method.coveredBranchTargets(), method.totalBranchTargets());
+                function.setReportInstructionCoverage(method.coveredInstructions(), method.totalInstructions());
                 file.getFunctions().add(function);
             }
         });
@@ -188,11 +190,17 @@ public class JacocoCoverageParser implements CoverageParser {
             if (!link.find()) continue;
             int line = integer(link.group(1));
             String name = stripHtml(link.group(2));
+            int[] instructions = missedAndTotal(cells.get(1));
+            int coveredInstructions = Math.max(instructions[1] - instructions[0], 0);
+            int[] branches = missedAndTotal(cells.get(3));
+            int coveredBranches = Math.max(branches[1] - branches[0], 0);
             int totalComplexity = number(stripHtml(cells.get(6)));
             int coveredComplexity = Math.max(totalComplexity - number(stripHtml(cells.get(5))), 0);
             int totalLines = number(stripHtml(cells.get(8)));
             int coveredLines = Math.max(totalLines - number(stripHtml(cells.get(7))), 0);
-            result.add(new HtmlMethod(nameBeforeParameters(name), line, coveredLines, totalLines, totalComplexity, coveredComplexity));
+            result.add(new HtmlMethod(nameBeforeParameters(name), line, coveredLines, totalLines,
+                    coveredBranches, branches[1], totalComplexity, coveredComplexity,
+                    coveredInstructions, instructions[1]));
         }
         result.sort(Comparator.comparingInt(HtmlMethod::line));
         return result;
@@ -214,7 +222,10 @@ public class JacocoCoverageParser implements CoverageParser {
         return value.replaceAll("<[^>]+>", "").replace("&lt;", "<").replace("&gt;", ">").trim();
     }
 
-    private record HtmlMethod(String name, int line, int coveredLines, int totalLines, int totalComplexity, int coveredComplexity) {}
+    private record HtmlMethod(String name, int line, int coveredLines, int totalLines,
+                              int coveredBranchTargets, int totalBranchTargets,
+                              int totalComplexity, int coveredComplexity,
+                              int coveredInstructions, int totalInstructions) {}
 
     private void applyHtmlReportTotals(Map<String, String> files, List<UniversalCoverageFile> result) {
         if (result.isEmpty()) return;
@@ -351,12 +362,25 @@ public class JacocoCoverageParser implements CoverageParser {
             int nextLine = methodIndex + 1 < methodsForFile.size() ? methodsForFile.get(methodIndex + 1).line() : lastFileLine + 1;
             Element methodCounter = counter(item.element(), "METHOD");
             int covered = methodCounter == null ? 0 : integer(methodCounter.getAttribute("covered"));
+            Element lineCounter = directCounter(item.element(), "LINE");
+            int totalLines = lineCounter == null ? 0 : counterTotal(lineCounter);
+            int coveredLines = lineCounter == null ? 0 : integer(lineCounter.getAttribute("covered"));
+            Element branchCounter = directCounter(item.element(), "BRANCH");
+            int totalBranchTargets = branchCounter == null ? 0 : counterTotal(branchCounter);
+            int coveredBranchTargets = branchCounter == null ? 0 : integer(branchCounter.getAttribute("covered"));
+            Element instructionCounter = directCounter(item.element(), "INSTRUCTION");
+            int totalInstructions = instructionCounter == null ? 0 : counterTotal(instructionCounter);
+            int coveredInstructions = instructionCounter == null ? 0 : integer(instructionCounter.getAttribute("covered"));
             Element complexityCounter = directCounter(item.element(), "COMPLEXITY");
             int complexity = complexityCounter == null ? 0 : counterTotal(complexityCounter);
             int coveredComplexity = complexityCounter == null ? (covered > 0 ? complexity : 0) : integer(complexityCounter.getAttribute("covered"));
-            file.getFunctions().add(new UniversalCoverageFile.FunctionCoverage(
+            UniversalCoverageFile.FunctionCoverage function = new UniversalCoverageFile.FunctionCoverage(
                     item.className(), item.element().getAttribute("name"), item.element().getAttribute("desc"),
-                    item.line(), Math.max(item.line(), nextLine - 1), covered, complexity, coveredComplexity));
+                    item.line(), Math.max(item.line(), nextLine - 1), covered, complexity, coveredComplexity);
+            if (lineCounter != null) function.setReportLineCoverage(coveredLines, totalLines);
+            if (branchCounter != null) function.setReportBranchCoverage(coveredBranchTargets, totalBranchTargets);
+            if (instructionCounter != null) function.setReportInstructionCoverage(coveredInstructions, totalInstructions);
+            file.getFunctions().add(function);
         }
     }
 
