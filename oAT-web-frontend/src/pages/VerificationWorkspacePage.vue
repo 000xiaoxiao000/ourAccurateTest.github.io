@@ -883,7 +883,7 @@ const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeho
   { type: 'TESTCASE', label: '测试用例', hint: 'XMind脑图 / Excel / CSV / JSON / 文本', placeholder: '粘贴用例ID、步骤、预期结果...' },
   { type: 'SOURCE', label: '源码', hint: '上传源码包 / 粘贴源码 / 从源码工程导入', placeholder: '粘贴 Controller / Service / 核心逻辑...' },
   { type: 'DEFECT', label: '缺陷 / Bug', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴 Bug、缺陷、生产问题或外部任务摘要...' },
-  { type: 'EXECUTION', label: '执行报告', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
+  { type: 'EXECUTION', label: '执行依据', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
   { type: 'COVERAGE', label: '覆盖率', hint: 'JaCoCo / Istanbul / LCOV / Cobertura / Go / Python 等', placeholder: '粘贴多语言覆盖率报告摘要...' },
 ]
 
