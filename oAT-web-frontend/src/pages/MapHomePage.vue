@@ -432,7 +432,8 @@
               />
               <rect v-else :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
               <text :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 34 : 27)">{{ node.label }}</text>
-              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 57 : 50)">{{ node.subtitle }}</text>
+              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 57 : 47)">{{ node.subtitle }}</text>
+              <text v-if="node.subtitle2" class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 75 : 63)">{{ node.subtitle2 }}</text>
             </g>
             <g
               v-for="edge in controlFlowGraph.edges.filter((item) => item.label)"
@@ -594,7 +595,7 @@ interface SvgEdge {
   labelWidth: number
   raw: TraceabilityEdge
 }
-interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean; shape?: 'rect' | 'diamond'; precise?: boolean; coverageState?: string }
+interface MiniGraphNode { id: string; x: number; y: number; width: number; height: number; label: string; subtitle?: string; subtitle2?: string; fullLabel?: string; fullSubtitle?: string; tone: string; nodeId?: string; executed?: boolean; shape?: 'rect' | 'diamond'; precise?: boolean; coverageState?: string }
 interface MiniGraphEdge { id: string; source: string; target: string; path: string; label?: string; labelX?: number; labelY?: number; labelWidth?: number; precise?: boolean; coverageState?: string }
 
 const route = useRoute()
@@ -2071,20 +2072,24 @@ function buildControlFlowGraph(graphs: ControlFlowGraph[] | undefined, steps: Ar
   const visible = source
     .filter((step) => !keyword || normalizeSearch([step.methodId, step.methodLabel, step.kind, step.expression].join(' ')).includes(keyword))
     .slice(0, 80)
-  const graphNodes: MiniGraphNode[] = visible.map((step, index) => ({
-    id: `${step.methodId}:${step.order}`,
-    x: 90 + (index % 2) * 440,
-    y: 52 + Math.floor(index / 2) * 110,
-    width: 360,
-    height: 78,
-    label: `${step.kind} · ${shorten(step.methodLabel, 22)}`,
-    subtitle: shorten(readableCodeText(step.expression || '代码块'), 34),
-    fullLabel: `${step.kind} · ${step.methodLabel}`,
-    fullSubtitle: step.expression || '代码块',
-    tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
-    nodeId: step.methodId,
-    executed: codeNodeHasDynamicCoverageById(allNodes, step.methodId),
-  }))
+  const graphNodes: MiniGraphNode[] = visible.map((step, index) => {
+    const [subtitle, subtitle2] = codeSummaryLines(step.expression || '代码块', 44, 42)
+    return {
+      id: `${step.methodId}:${step.order}`,
+      x: 90 + (index % 2) * 440,
+      y: 52 + Math.floor(index / 2) * 110,
+      width: 360,
+      height: 78,
+      label: `${step.kind} · ${shorten(step.methodLabel, 22)}`,
+      subtitle,
+      subtitle2,
+      fullLabel: `${step.kind} · ${step.methodLabel}`,
+      fullSubtitle: readableCodeText(step.expression || '代码块'),
+      tone: step.kind === 'IF' || step.kind === 'ELSE IF' ? 'branch' : step.kind === 'RETURN' || step.kind === 'THROW' ? 'exit' : 'flow',
+      nodeId: step.methodId,
+      executed: codeNodeHasDynamicCoverageById(allNodes, step.methodId),
+    }
+  })
   const edges: MiniGraphEdge[] = []
   for (let index = 1; index < graphNodes.length; index++) {
     const source = graphNodes[index - 1]
@@ -2128,6 +2133,7 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
     const depthOffset = Math.max(-2, Math.min(2, node.depth || 0)) * 92
     const width = controlFlowDiamondNode(node.type) ? 300 : nodeWidth
     const height = controlFlowDiamondNode(node.type) ? 118 : nodeHeight
+    const [subtitle, subtitle2] = codeSummaryLines(node.expression || '', controlFlowDiamondNode(node.type) ? 34 : 46, controlFlowDiamondNode(node.type) ? 32 : 44)
     positioned.set(node.id, {
       id: node.id,
       x: centerX - width / 2 + depthOffset,
@@ -2135,7 +2141,8 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
       width,
       height,
       label: controlFlowNodeLabel(node.type, node.label),
-      subtitle: shorten(readableCodeText(node.expression || ''), controlFlowDiamondNode(node.type) ? 26 : 34),
+      subtitle,
+      subtitle2,
       fullLabel: `${controlFlowNodeLabel(node.type, node.label)} · ${graph.methodLabel}`,
       fullSubtitle: [
         readableCodeText(node.expression || ''),
@@ -2158,14 +2165,26 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
     .map((edge) => {
       const source = positioned.get(edge.source)!
       const target = positioned.get(edge.target)!
-      const startX = source.x + source.width / 2
-      const startY = source.y + source.height
-      const endX = target.x + target.width / 2
+      const branchSide = edge.type === 'TRUE' ? -1 : edge.type === 'FALSE' ? 1 : 0
+      const isBranchEdge = branchSide !== 0 && source.shape === 'diamond'
+      const startX = isBranchEdge
+        ? source.x + source.width / 2 + branchSide * source.width * 0.24
+        : source.x + source.width / 2
+      const startY = isBranchEdge
+        ? source.y + source.height * 0.72
+        : source.y + source.height
+      const endX = isBranchEdge
+        ? target.x + target.width / 2 + branchSide * Math.min(82, target.width * 0.26)
+        : target.x + target.width / 2
       const endY = target.y
       const midY = (startY + endY) / 2
       const gap = endY - startY
-      const labelOffsetX = edge.type === 'TRUE' ? -58 : edge.type === 'FALSE' ? 58 : 0
-      const labelY = edge.type === 'TRUE' || edge.type === 'FALSE'
+      const branchBend = branchSide * 92
+      const path = isBranchEdge
+        ? `M ${startX} ${startY} C ${startX + branchBend} ${midY}, ${endX + branchBend} ${midY}, ${endX} ${endY}`
+        : `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`
+      const labelOffsetX = edge.type === 'TRUE' ? -42 : edge.type === 'FALSE' ? 42 : 0
+      const labelY = isBranchEdge
         ? startY + Math.max(30, Math.min(48, gap / 2))
         : midY - 8
       const label = edge.label && !['继续', '下一步'].includes(edge.label) ? edge.label : ''
@@ -2173,9 +2192,9 @@ function buildPreciseControlFlowGraph(graph: ControlFlowGraph, allNodes: Traceab
         id: edge.id,
         source: edge.source,
         target: edge.target,
-        path: `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`,
+        path,
         label,
-        labelX: (startX + endX) / 2 + labelOffsetX,
+        labelX: isBranchEdge ? startX + branchSide * 54 : (startX + endX) / 2 + labelOffsetX,
         labelY,
         labelWidth: label ? Math.max(42, edgeLabelWidth(label) - 16) : 0,
         precise: edge.precise,
@@ -2948,6 +2967,22 @@ function readableCodeText(value: string) {
     .replace(/\\t/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function codeSummaryLines(value: string, firstMax: number, secondMax: number) {
+  const text = readableCodeText(value)
+  if (!text) return ['', '']
+  if (text.length <= firstMax) return [text, '']
+  const first = trimCodeLine(text, firstMax)
+  const rest = text.slice(first.length).trim()
+  return [first, shorten(rest, secondMax)]
+}
+
+function trimCodeLine(value: string, max: number) {
+  if (value.length <= max) return value
+  const slice = value.slice(0, max)
+  const breakAt = Math.max(slice.lastIndexOf(' '), slice.lastIndexOf(','), slice.lastIndexOf(';'))
+  return (breakAt >= Math.floor(max * 0.55) ? slice.slice(0, breakAt + 1) : slice).trim()
 }
 
 function shorten(value: string, max: number) {
