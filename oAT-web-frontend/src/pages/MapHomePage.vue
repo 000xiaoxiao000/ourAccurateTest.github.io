@@ -255,107 +255,97 @@
           <small>{{ slowLoading ? '源码文件较多时需要更长时间；可等待完成，或稍后刷新当前基线。' : '正在读取当前基线的源码树、调用边、依赖和控制流。' }}</small>
         </div>
         <div v-else-if="callViewMode === 'coverage'" class="coverage-data-panel">
-          <div v-if="!coverageRows.length" class="empty-card">暂无可展示的覆盖率数据。请在分析基线中选择覆盖率或执行资产。</div>
+          <div v-if="!hasCoverageData" class="empty-card">暂无可展示的覆盖率数据。请在分析基线中选择覆盖率或执行资产。</div>
           <template v-else>
-            <template v-if="selectedCoverageRow">
-              <section class="coverage-overview-grid" aria-label="覆盖率概览">
-                <article>
-                  <strong>{{ coverageOverview.coveredNodes }} / {{ coverageOverview.totalNodes }}</strong>
-                  <span>动态命中节点</span>
-                </article>
-                <article>
-                  <strong>{{ coveragePercent(coverageOverview.lineRate) }}</strong>
-                  <span>行覆盖 · {{ coverageOverview.coveredLines }} / {{ coverageOverview.totalLines }}</span>
-                </article>
-                <article>
-                  <strong>{{ coveragePercent(coverageOverview.branchRate) }}</strong>
-                  <span>分支覆盖 · {{ coverageOverview.coveredBranches }} / {{ coverageOverview.totalBranches }}</span>
-                </article>
-                <article>
-                  <strong>{{ coverageOverview.reportNodes }}</strong>
-                  <span>含覆盖报告节点</span>
-                </article>
-              </section>
-              <section class="coverage-workbench">
-                <div v-if="coverageSourceLines.length" class="coverage-source-view">
-                  <div class="coverage-source-head">
-                    <strong :title="coverageSourceTitle">{{ coverageSourceTitle }}</strong>
-                    <span :title="selectedCoverageRow ? coverageRowTitle(selectedCoverageRow) : ''">{{ selectedCoverageRow?.lineText || '无行覆盖数据' }} · {{ selectedCoverageRow?.branchText || '无分支覆盖数据' }}</span>
-                  </div>
-                  <div ref="coverageSourceScroll" class="source-code-scroll">
-                    <div
-                      v-for="line in coverageSourceLines"
-                      :key="line.number"
-                      :class="['source-line', line.state, { located: line.number === selectedCoverageLine }]"
-                      :data-line="line.number"
-                      :title="`L${line.number}: ${line.text || ''}`"
-                    >
-                      <span class="source-line-no">{{ line.number }}</span>
-                      <code>{{ line.text || ' ' }}</code>
-                    </div>
+            <section class="coverage-overview-grid" aria-label="覆盖率概览">
+              <article
+                v-for="card in coverageMetricCards"
+                :key="card.key"
+                :class="['coverage-metric-card', card.tone]"
+              >
+                <div class="coverage-metric-main">
+                  <span>{{ card.label }}</span>
+                  <strong>{{ card.value }}</strong>
+                </div>
+                <p v-if="card.missedText">{{ card.missedText }}</p>
+                <small v-if="card.detailText">{{ card.detailText }}</small>
+              </article>
+            </section>
+            <section v-if="selectedCoverageRow" class="coverage-workbench">
+              <div v-if="coverageSourceLines.length" class="coverage-source-view">
+                <div class="coverage-source-head">
+                  <strong :title="coverageSourceTitle">{{ coverageSourceTitle }}</strong>
+                  <span :title="selectedCoverageRow ? coverageRowTitle(selectedCoverageRow) : ''">{{ selectedCoverageRow?.lineText || '无行覆盖数据' }} · {{ selectedCoverageRow?.branchText || '无分支覆盖数据' }}</span>
+                </div>
+                <div ref="coverageSourceScroll" class="source-code-scroll">
+                  <div
+                    v-for="line in coverageSourceLines"
+                    :key="line.number"
+                    :class="['source-line', line.state, { located: line.number === selectedCoverageLine }]"
+                    :data-line="line.number"
+                    :title="`L${line.number}: ${line.text || ''}`"
+                  >
+                    <span class="source-line-no">{{ line.number }}</span>
+                    <code>{{ line.text || ' ' }}</code>
                   </div>
                 </div>
-                <div v-else class="coverage-source-view empty-card">暂无源码内容。请确认当前基线已绑定源码静态索引。</div>
-                <aside class="coverage-node-panel">
-                  <div class="coverage-list-head">
-                    <strong>文件覆盖</strong>
-                    <span>{{ coverageListRows.length }} 项</span>
-                  </div>
-                  <div class="coverage-file-list">
-                    <button
-                      v-for="row in coverageListRows"
-                      :key="row.id"
-                      type="button"
-                      :class="['coverage-node-item', { active: row.id === selectedCoverageFileId || row.id === selectedCoverageRow?.id }]"
-                      :title="coverageRowTitle(row)"
-                      @click="selectCodeNode(row.id)"
-                    >
-                      <span>
-                        <strong :title="row.label">{{ row.label }}</strong>
-                        <small :title="row.locator">{{ row.locator }}</small>
-                      </span>
-                      <em :class="['coverage-pill', row.tone]">{{ row.stateText }}</em>
-                      <div class="coverage-meter compact">
-                        <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
-                        <i><b :style="{ width: row.lineWidth }"></b></i>
-                      </div>
-                    </button>
-                  </div>
-                  <div class="coverage-list-head method-head">
-                    <strong>当前文件方法</strong>
-                    <span>{{ filteredCoverageMethodRows.length }} / {{ selectedCoverageMethodRows.length }} 项</span>
-                  </div>
-                  <div class="coverage-method-filter">
-                    <input v-model.trim="coverageMethodKeyword" type="search" placeholder="搜索方法名或行号" aria-label="搜索当前文件方法" />
-                  </div>
-                  <div v-if="!selectedCoverageMethodRows.length" class="coverage-method-empty">当前文件暂无方法级覆盖数据。</div>
-                  <div v-else-if="!filteredCoverageMethodRows.length" class="coverage-method-empty">没有匹配的方法。</div>
-                  <div v-else class="coverage-method-list">
-                    <button
-                      v-for="row in filteredCoverageMethodRows"
-                      :key="row.id"
-                      type="button"
-                      :class="['coverage-method-item', { active: row.id === selectedCoverageRow?.id }]"
-                      :title="coverageRowTitle(row)"
-                      @click="selectCodeNode(row.id)"
-                    >
-                      <span>
-                        <strong :title="row.label">{{ row.label }}</strong>
-                        <small :title="row.locator">{{ row.locator }}</small>
-                      </span>
-                      <div class="coverage-meter compact">
-                        <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
-                        <i><b :style="{ width: row.lineWidth }"></b></i>
-                      </div>
-                    </button>
-                  </div>
-                </aside>
-              </section>
-            </template>
-            <div v-else class="coverage-unselected-state">
-              <strong>请选择代码节点</strong>
-              <span>选择左侧代码树中的文件、类或方法后，再展示覆盖率概览、源码着色和方法明细。</span>
-            </div>
+              </div>
+              <div v-else class="coverage-source-view empty-card">暂无源码内容。请确认当前基线已绑定源码静态索引。</div>
+              <aside class="coverage-node-panel">
+                <div class="coverage-list-head">
+                  <strong>文件覆盖</strong>
+                  <span>{{ coverageListRows.length }} 项</span>
+                </div>
+                <div class="coverage-file-list">
+                  <button
+                    v-for="row in coverageListRows"
+                    :key="row.id"
+                    type="button"
+                    :class="['coverage-node-item', { active: row.id === selectedCoverageFileId || row.id === selectedCoverageRow?.id }]"
+                    :title="coverageRowTitle(row)"
+                    @click="selectCodeNode(row.id)"
+                  >
+                    <span>
+                      <strong :title="row.label">{{ row.label }}</strong>
+                      <small :title="row.locator">{{ row.locator }}</small>
+                    </span>
+                    <em :class="['coverage-pill', row.tone]">{{ row.stateText }}</em>
+                    <div class="coverage-meter compact">
+                      <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
+                      <i><b :style="{ width: row.lineWidth }"></b></i>
+                    </div>
+                  </button>
+                </div>
+                <div class="coverage-list-head method-head">
+                  <strong>当前文件方法</strong>
+                  <span>{{ filteredCoverageMethodRows.length }} / {{ selectedCoverageMethodRows.length }} 项</span>
+                </div>
+                <div class="coverage-method-filter">
+                  <input v-model.trim="coverageMethodKeyword" type="search" placeholder="搜索方法名或行号" aria-label="搜索当前文件方法" />
+                </div>
+                <div v-if="!selectedCoverageMethodRows.length" class="coverage-method-empty">当前文件暂无方法级覆盖数据。</div>
+                <div v-else-if="!filteredCoverageMethodRows.length" class="coverage-method-empty">没有匹配的方法。</div>
+                <div v-else class="coverage-method-list">
+                  <button
+                    v-for="row in filteredCoverageMethodRows"
+                    :key="row.id"
+                    type="button"
+                    :class="['coverage-method-item', { active: row.id === selectedCoverageRow?.id }]"
+                    :title="coverageRowTitle(row)"
+                    @click="selectCodeNode(row.id)"
+                  >
+                    <span>
+                      <strong :title="row.label">{{ row.label }}</strong>
+                      <small :title="row.locator">{{ row.locator }}</small>
+                    </span>
+                    <div class="coverage-meter compact">
+                      <span>{{ row.lineText }} · 分支 {{ row.branchText }}</span>
+                      <i><b :style="{ width: row.lineWidth }"></b></i>
+                    </div>
+                  </button>
+                </div>
+              </aside>
+            </section>
           </template>
         </div>
         <div v-else-if="callViewMode === 'dependency'" class="code-analysis-panel">
@@ -741,7 +731,9 @@ const callViewMeta = computed(() => {
       description: '展示覆盖率和执行记录匹配到的代码节点',
       count: coverageFileRows.value.length
         ? `${coverageFileRows.value.length} 个文件 · ${coverageRows.value.length} 条节点`
-        : `${coverageRows.value.length} 条数据`,
+        : rawCoverageOverview.value?.totalClasses
+          ? `${rawCoverageOverview.value.totalClasses} 个类`
+          : `${coverageRows.value.length} 条数据`,
     }
   }
   return {
@@ -785,6 +777,9 @@ const coverageRows = computed(() => {
 const coverageFileRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_FILE'))
 const coverageMethodRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_METHOD'))
 const coverageListRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
+const coverageAggregateRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
+const rawCoverageOverview = computed(() => map.response.value?.coverageOverview)
+const hasCoverageData = computed(() => coverageRows.value.length > 0 || coverageReportHasData())
 const selectedCoverageFileId = computed(() => {
   const row = selectedCoverageRow.value
   if (!row) return ''
@@ -810,8 +805,7 @@ const filteredCoverageMethodRows = computed(() => {
   ].join(' ')).includes(keyword))
 })
 const coverageOverview = computed(() => {
-  const selected = selectedCoverageRow.value
-  const rows = selected ? [selected] : []
+  const rows = coverageAggregateRows.value
   const coveredLines = rows.reduce((total, row) => total + row.coveredLines, 0)
   const totalLines = rows.reduce((total, row) => total + row.totalLines, 0)
   const coveredBranches = rows.reduce((total, row) => total + row.coveredBranches, 0)
@@ -828,6 +822,50 @@ const coverageOverview = computed(() => {
     branchRate: totalBranches ? coveredBranches / totalBranches : undefined,
   }
 })
+const coverageClassMetric = computed(() => {
+  const raw = rawCoverageOverview.value
+  return raw && raw.totalClasses > 0
+    ? { covered: raw.coveredClasses, total: raw.totalClasses }
+    : coverageNodeMetric('CODE_CLASS')
+})
+const coverageMethodMetric = computed(() => {
+  const raw = rawCoverageOverview.value
+  return raw && raw.totalMethods > 0
+    ? { covered: raw.coveredMethods, total: raw.totalMethods }
+    : coverageNodeMetric('CODE_METHOD')
+})
+const coverageBranchMetric = computed(() => {
+  const raw = rawCoverageOverview.value
+  return raw && raw.totalBranches > 0
+    ? { covered: raw.coveredBranches, total: raw.totalBranches }
+    : { covered: coverageOverview.value.coveredBranches, total: coverageOverview.value.totalBranches }
+})
+const coverageLineMetric = computed(() => {
+  const raw = rawCoverageOverview.value
+  return raw && raw.totalLines > 0
+    ? { covered: raw.coveredLines, total: raw.totalLines }
+    : { covered: coverageOverview.value.coveredLines, total: coverageOverview.value.totalLines }
+})
+const coverageComplexityTotal = computed(() => {
+  const raw = rawCoverageOverview.value
+  if (raw && raw.totalComplexity > 0) return raw.totalComplexity
+  const total = coverageAggregateRows.value.reduce((sum, row) => sum + row.complexity, 0)
+  return total > 0 ? total : undefined
+})
+const coverageMetricCards = computed(() => [
+  coverageCountCard('class', '类覆盖率', coverageClassMetric.value.covered, coverageClassMetric.value.total, 'class'),
+  coverageCountCard('method', '方法覆盖率', coverageMethodMetric.value.covered, coverageMethodMetric.value.total, 'method'),
+  coverageCountCard('branch', '分支覆盖率', coverageBranchMetric.value.covered, coverageBranchMetric.value.total, 'branch'),
+  coverageCountCard('line', '行覆盖率', coverageLineMetric.value.covered, coverageLineMetric.value.total, 'line'),
+  {
+    key: 'complexity',
+    label: '圈复杂度',
+    value: coverageComplexityTotal.value === undefined ? '-' : String(coverageComplexityTotal.value),
+    missedText: '',
+    detailText: '',
+    tone: 'complexity',
+  },
+])
 const selectedCoverageRow = computed(() => {
   if (!coverageRows.value.length || !map.focusId.value) return null
   const focused = coverageRows.value.find((row) => row.id === map.focusId.value)
@@ -1314,6 +1352,7 @@ function toCoverageRow(node: TraceabilityNode) {
     branchText: coverageRatioText(coveredBranches, totalBranches, coverage?.branchRate),
     lineWidth: coverageWidth(coverage?.lineRate, coveredLines, totalLines),
     branchWidth: coverageWidth(coverage?.branchRate, coveredBranches, totalBranches),
+    complexity: coverageComplexity(metadata),
     sourceContent: source.content,
     sourceStartLine: source.content ? source.startLine : lineFromLocator(node.locator) || numberMetadata(metadata.line) || 1,
     totalLineNumbers: numberArrayMetadata(metadata.coverageTotalLines),
@@ -1492,6 +1531,48 @@ function coverageWidth(rate: number | undefined, covered: number, total: number)
 
 function coveragePercent(value?: number) {
   return value === undefined || Number.isNaN(value) ? '-' : `${Math.round(value * 100)}%`
+}
+
+function coverageReportHasData() {
+  const raw = rawCoverageOverview.value
+  return Boolean(raw && (
+    raw.totalClasses > 0 ||
+    raw.totalMethods > 0 ||
+    raw.totalBranches > 0 ||
+    raw.totalLines > 0 ||
+    raw.totalComplexity > 0
+  ))
+}
+
+function coverageNodeMetric(kind: 'CODE_CLASS' | 'CODE_METHOD') {
+  const nodes = map.nodes.value
+    .filter((node) => node.kind === kind)
+    .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
+    .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
+  return {
+    total: nodes.length,
+    covered: nodes.filter((node) => codeNodeHasDynamicCoverage(node, map.nodes.value)).length,
+  }
+}
+
+function coverageCountCard(key: string, label: string, covered: number, total: number, tone: string) {
+  const missed = Math.max(total - covered, 0)
+  return {
+    key,
+    label,
+    value: total ? coveragePercent(covered / total) : '-',
+    missedText: `未覆盖数 ${missed}`,
+    detailText: `覆盖数/总数 ${covered} / ${total}`,
+    tone,
+  }
+}
+
+function coverageComplexity(metadata: Record<string, unknown>) {
+  return numberMetadata(metadata.coverageComplexity)
+    ?? numberMetadata(metadata.totalComplexity)
+    ?? numberMetadata(metadata.complexity)
+    ?? numberMetadata(metadata.cyclomaticComplexity)
+    ?? 0
 }
 
 function stringMetadata(value: unknown) {
@@ -2745,14 +2826,20 @@ onBeforeUnmount(() => {
 .call-map-scroll.large.fullscreen .call-graph-viewport { height:calc(100vh - 58px); }
 :global(body.trace-call-graph-fullscreen) { overflow:hidden; }
 .coverage-data-panel { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; overflow:auto; background:#fff; }
-.coverage-overview-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
-.coverage-overview-grid article { display:grid; gap:3px; min-width:0; padding:9px 10px; border:1px solid #e2e8f0; border-radius:8px; background:#fff; }
-.coverage-overview-grid strong { color:#172033; font-size:18px; line-height:1.1; }
-.coverage-overview-grid span { color:#64748b; font-size:11px; font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.coverage-overview-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; padding:10px 12px; border-bottom:1px solid #e5e7eb; background:#f8fafc; }
+.coverage-metric-card { display:grid; gap:8px; min-width:0; min-height:82px; padding:10px 12px; border:1px solid transparent; border-radius:8px; background:#fff; box-sizing:border-box; }
+.coverage-metric-card.class { background:#fff3e2; border-color:#fed7aa; }
+.coverage-metric-card.method { background:#ecfdf5; border-color:#bbf7d0; }
+.coverage-metric-card.branch { background:#ecfeff; border-color:#bae6fd; }
+.coverage-metric-card.line { background:#eff6ff; border-color:#bfdbfe; }
+.coverage-metric-card.complexity { background:#f3e8ff; border-color:#ddd6fe; }
+.coverage-metric-main { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; min-width:0; }
+.coverage-metric-main span { min-width:0; color:#64748b; font-size:12px; font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.coverage-metric-main strong { flex:0 0 auto; color:#020617; font-size:17px; line-height:1.1; font-weight:950; }
+.coverage-metric-card p,
+.coverage-metric-card small { display:flex; justify-content:space-between; gap:8px; margin:0; color:#64748b; font-size:12px; font-weight:800; line-height:1.25; }
+.coverage-metric-card p { color:#334155; }
 .coverage-workbench { display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:10px; padding:10px 12px; align-items:stretch; flex:1; min-height:0; }
-.coverage-unselected-state { display:flex; min-height:540px; align-items:center; justify-content:center; flex-direction:column; gap:7px; padding:24px; box-sizing:border-box; color:#94a3b8; text-align:center; }
-.coverage-unselected-state strong { color:#475569; font-size:14px; }
-.coverage-unselected-state span { max-width:520px; font-size:12px; line-height:1.6; }
 .code-analysis-panel { position:relative; flex:1; min-height:560px; overflow:auto; background:#f8fafc radial-gradient(circle at 1px 1px, rgba(100,116,139,.14) 1px, transparent 0); background-size:22px 22px; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
 .mini-graph-tooltip,
@@ -2884,7 +2971,7 @@ onBeforeUnmount(() => {
 .call-svg-node .call-node-subtitle { fill:#64748b; font-size:10px; font-weight:800; }
 .code-tree-head { border-top:1px solid #eef2f5; }
 .tree-scroll { flex:1; min-height:160px; overflow-y:auto; padding:8px 6px 12px; }
-@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { min-height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
+@media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-overview-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { min-height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
 @media(max-width:980px) { .trace-tab { grid-template-columns:1fr; } .trace-list-pane { min-height:420px; max-height:560px; } }
-@media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
+@media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip, .coverage-overview-grid { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
 </style>

@@ -43,6 +43,9 @@ class CoverageParserRegistryTest {
                       <method name="create" desc="()V" line="7">
                         <counter type="METHOD" missed="0" covered="1"/>
                       </method>
+                      <counter type="METHOD" missed="2" covered="1"/>
+                      <counter type="CLASS" missed="0" covered="1"/>
+                      <counter type="COMPLEXITY" missed="3" covered="2"/>
                     </class>
                     <sourcefile name="Order.java">
                       <line nr="7" mi="0" ci="3" mb="1" cb="1"/>
@@ -60,6 +63,39 @@ class CoverageParserRegistryTest {
         assertEquals(List.of(7), index.getTotalLineNumbers());
         assertEquals(List.of(7), index.getCoveredLineNumbers());
         assertEquals(2, index.getTotalBranchTargets());
+        assertEquals(1, files.get(0).getReportTotalClasses());
+        assertEquals(1, files.get(0).getReportCoveredClasses());
+        assertEquals(3, files.get(0).getReportTotalMethods());
+        assertEquals(1, files.get(0).getReportCoveredMethods());
+        assertEquals(5, files.get(0).getReportTotalComplexity());
+        assertEquals(5, index.getTotalComplexity());
+    }
+
+    @Test
+    void keepsReportCountersWhenSeveralClassesShareOneSourceFile() {
+        UniversalCoverageFile file = new JacocoCoverageParser().parse("""
+                <report><package name="demo">
+                  <class name="demo/Order" sourcefilename="Order.java">
+                    <counter type="METHOD" missed="1" covered="2"/>
+                    <counter type="CLASS" missed="0" covered="1"/>
+                    <counter type="COMPLEXITY" missed="2" covered="4"/>
+                  </class>
+                  <class name="demo/Order$Item" sourcefilename="Order.java">
+                    <counter type="METHOD" missed="2" covered="1"/>
+                    <counter type="CLASS" missed="1" covered="0"/>
+                    <counter type="COMPLEXITY" missed="3" covered="2"/>
+                  </class>
+                  <sourcefile name="Order.java">
+                    <line nr="7" ci="1"/>
+                  </sourcefile>
+                </package></report>
+                """.getBytes(StandardCharsets.UTF_8)).get(0);
+
+        assertEquals(2, file.getReportTotalClasses());
+        assertEquals(1, file.getReportCoveredClasses());
+        assertEquals(6, file.getReportTotalMethods());
+        assertEquals(3, file.getReportCoveredMethods());
+        assertEquals(11, file.getReportTotalComplexity());
     }
 
     @Test

@@ -17,6 +17,7 @@ public final class TraceabilityMapPayloads {
             List<TraceabilityEdge> edges,
             List<CodeTreeNode> codeTree,
             CodeGraphData codeGraph,
+            CoverageReportOverview coverageOverview,
             List<String> warnings) {
     }
 
@@ -100,6 +101,18 @@ public final class TraceabilityMapPayloads {
             Integer coveredBranches,
             Integer totalBranches,
             Double branchRate) {
+    }
+
+    public record CoverageReportOverview(
+            int coveredClasses,
+            int totalClasses,
+            int coveredMethods,
+            int totalMethods,
+            int coveredBranches,
+            int totalBranches,
+            int coveredLines,
+            int totalLines,
+            int totalComplexity) {
     }
 
     public record CodeTreeNode(

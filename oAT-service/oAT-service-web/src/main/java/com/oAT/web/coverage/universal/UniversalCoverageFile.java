@@ -19,6 +19,12 @@ public class UniversalCoverageFile implements Serializable {
     private List<FunctionCoverage> functions = new ArrayList<>();
     private List<LineCoverage> lines = new ArrayList<>();
     private List<BranchCoverage> branches = new ArrayList<>();
+    // These retain report-level counter semantics which cannot be reconstructed from source lines.
+    private int reportTotalClasses;
+    private int reportCoveredClasses;
+    private int reportTotalMethods;
+    private int reportCoveredMethods;
+    private int reportTotalComplexity;
     private Map<Integer, List<ClassCoverageIndex.CoverageFootprintRecord>> lineFootprints = new LinkedHashMap<>();
     private Map<String, List<ClassCoverageIndex.CoverageFootprintRecord>> branchFootprints = new LinkedHashMap<>();
 
@@ -99,6 +105,7 @@ public class UniversalCoverageFile implements Serializable {
         index.setTotalMethods(methods.size());
         index.setCoveredMethods((int) methods.stream().filter(ClassCoverageIndex.MethodCoverageDetail::isCovered).count());
         index.setMethodRate(rate(index.getCoveredMethods(), index.getTotalMethods()));
+        index.setTotalComplexity(reportTotalComplexity);
         return index;
     }
 
@@ -188,6 +195,16 @@ public class UniversalCoverageFile implements Serializable {
     public void setLineFootprints(Map<Integer, List<ClassCoverageIndex.CoverageFootprintRecord>> lineFootprints) { this.lineFootprints = lineFootprints; }
     public Map<String, List<ClassCoverageIndex.CoverageFootprintRecord>> getBranchFootprints() { return branchFootprints; }
     public void setBranchFootprints(Map<String, List<ClassCoverageIndex.CoverageFootprintRecord>> branchFootprints) { this.branchFootprints = branchFootprints; }
+    public int getReportTotalClasses() { return reportTotalClasses; }
+    public void setReportTotalClasses(int reportTotalClasses) { this.reportTotalClasses = reportTotalClasses; }
+    public int getReportCoveredClasses() { return reportCoveredClasses; }
+    public void setReportCoveredClasses(int reportCoveredClasses) { this.reportCoveredClasses = reportCoveredClasses; }
+    public int getReportTotalMethods() { return reportTotalMethods; }
+    public void setReportTotalMethods(int reportTotalMethods) { this.reportTotalMethods = reportTotalMethods; }
+    public int getReportCoveredMethods() { return reportCoveredMethods; }
+    public void setReportCoveredMethods(int reportCoveredMethods) { this.reportCoveredMethods = reportCoveredMethods; }
+    public int getReportTotalComplexity() { return reportTotalComplexity; }
+    public void setReportTotalComplexity(int reportTotalComplexity) { this.reportTotalComplexity = reportTotalComplexity; }
 
     interface Merger<T> { T merge(T left, T right); }
 

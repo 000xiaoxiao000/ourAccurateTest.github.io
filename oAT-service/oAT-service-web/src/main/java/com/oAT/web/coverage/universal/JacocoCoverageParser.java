@@ -3,6 +3,7 @@ package com.oAT.web.coverage.universal;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.EntityResolver;
 import org.xml.sax.InputSource;
@@ -70,6 +71,7 @@ public class JacocoCoverageParser implements CoverageParser {
                     }
                     applyCounterFallbacks(file, sourceFile);
                     addMethodCoverage(file, packageNode, sourceFile.getAttribute("name"));
+                    applyReportCounters(file, packageNode, sourceFile.getAttribute("name"));
                     result.add(file);
                 }
             }
@@ -183,15 +185,78 @@ public class JacocoCoverageParser implements CoverageParser {
         }
     }
 
+    private void applyReportCounters(UniversalCoverageFile file, Element packageNode, String sourceFileName) {
+        NodeList classes = packageNode.getElementsByTagName("class");
+        int totalClasses = 0;
+        int coveredClasses = 0;
+        int totalMethods = 0;
+        int coveredMethods = 0;
+        int totalComplexity = 0;
+        for (int classIndex = 0; classIndex < classes.getLength(); classIndex++) {
+            Element classNode = (Element) classes.item(classIndex);
+            if (!sourceFileName.equals(classNode.getAttribute("sourcefilename"))) continue;
+            totalClasses++;
+            Element classCounter = directCounter(classNode, "CLASS");
+            if (classCounter != null) {
+                coveredClasses += integer(classCounter.getAttribute("covered"));
+            } else if (hasCoveredMethod(classNode)) {
+                // Older/minimal JaCoCo XML can omit the class counter.
+                coveredClasses++;
+            }
+            Element methodCounter = directCounter(classNode, "METHOD");
+            if (methodCounter != null) {
+                totalMethods += counterTotal(methodCounter);
+                coveredMethods += integer(methodCounter.getAttribute("covered"));
+            } else {
+                NodeList methods = classNode.getElementsByTagName("method");
+                totalMethods += methods.getLength();
+                for (int methodIndex = 0; methodIndex < methods.getLength(); methodIndex++) {
+                    Element methodCounterFallback = directCounter((Element) methods.item(methodIndex), "METHOD");
+                    if (methodCounterFallback != null && integer(methodCounterFallback.getAttribute("covered")) > 0) {
+                        coveredMethods++;
+                    }
+                }
+            }
+            Element complexityCounter = directCounter(classNode, "COMPLEXITY");
+            if (complexityCounter != null) totalComplexity += counterTotal(complexityCounter);
+        }
+        file.setReportTotalClasses(totalClasses);
+        file.setReportCoveredClasses(coveredClasses);
+        file.setReportTotalMethods(totalMethods);
+        file.setReportCoveredMethods(coveredMethods);
+        file.setReportTotalComplexity(totalComplexity);
+    }
+
+    private boolean hasCoveredMethod(Element classNode) {
+        NodeList methods = classNode.getElementsByTagName("method");
+        for (int methodIndex = 0; methodIndex < methods.getLength(); methodIndex++) {
+            Element methodCounter = directCounter((Element) methods.item(methodIndex), "METHOD");
+            if (methodCounter != null && integer(methodCounter.getAttribute("covered")) > 0) return true;
+        }
+        return false;
+    }
+
     private record JacocoMethod(String className, Element element, int line) {}
 
     private Element counter(Element parent, String type) {
-        NodeList counters = parent.getElementsByTagName("counter");
-        for (int i = 0; i < counters.getLength(); i++) {
-            Element counter = (Element) counters.item(i);
-            if (type.equals(counter.getAttribute("type"))) return counter;
+        return directCounter(parent, type);
+    }
+
+    private Element directCounter(Element parent, String type) {
+        NodeList children = parent.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            Node child = children.item(i);
+            if (child instanceof Element counter
+                    && "counter".equals(counter.getTagName())
+                    && type.equals(counter.getAttribute("type"))) {
+                return counter;
+            }
         }
         return null;
+    }
+
+    private int counterTotal(Element counter) {
+        return integer(counter.getAttribute("missed")) + integer(counter.getAttribute("covered"));
     }
 
     private int integer(String value) { try { return Integer.parseInt(value); } catch (NumberFormatException ignored) { return 0; } }

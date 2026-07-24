@@ -16,6 +16,7 @@ import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.coverage.universal.CoverageReportService;
+import com.oAT.web.coverage.universal.UniversalCoverageFile;
 import com.oAT.web.persistence.ClassCoverageIndexRepository;
 import com.oAT.web.persistence.StaticInfoRepository;
 import com.oAT.web.persistence.entity.ClassCoverageIndex;
@@ -65,6 +66,7 @@ import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeTreeNode;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeGraphData;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CodeDependency;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.ControlFlowStep;
+import static com.oAT.web.api.map.TraceabilityMapPayloads.CoverageReportOverview;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.CoverageSummary;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.EdgeEvidence;
 import static com.oAT.web.api.map.TraceabilityMapPayloads.EvidenceState;
@@ -187,6 +189,7 @@ public class TraceabilityMapService {
         GraphView clipped = graph.focus(focusId, direction, depth, MAX_NODES, MAX_EDGES, warnings);
         List<CodeTreeNode> codeTree = includeCodeTree ? buildCodeTree(codeIndex, Set.of(), graph.dynamicNodes) : List.of();
         TraceabilitySummary summary = summarize(criteria, testcases, clipped.nodes(), clipped.edges(), graph.dynamicNodes, warnings);
+        CoverageReportOverview coverageOverview = buildCoverageOverview(projectId, baseline, warnings);
 
         return new TraceabilityMapResponse(
                 new TraceabilityMapPayloads.BaselineInfo(
@@ -199,6 +202,7 @@ public class TraceabilityMapService {
                 clipped.edges(),
                 codeTree,
                 includeCodeGraph ? new CodeGraphData(codeIndex.dependencies, codeIndex.controlFlows) : null,
+                coverageOverview,
                 warnings);
     }
 
@@ -406,6 +410,7 @@ public class TraceabilityMapService {
             methodMetadata.put("line", line == null ? "" : line);
             methodMetadata.put("descriptor", value(desc));
             methodMetadata.put("recursive", Boolean.TRUE.equals(method == null ? null : method.getRecursiveMap()));
+            methodMetadata.put("complexity", method == null || method.getCyclomaticComplexityMap() == null ? 0 : method.getCyclomaticComplexityMap());
             index.putCodeNode(new TraceabilityNode(methodId, NodeKind.CODE_METHOD, methodName, desc, line == null ? path : path + ":" + line,
                     "CODE", CodeSymbolNormalizer.DEFAULT_LANGUAGE, className + "#" + methodName, classId, EvidenceState.STATIC,
                     null, methodMetadata));
@@ -792,13 +797,17 @@ public class TraceabilityMapService {
     }
 
     private List<ClassCoverageIndex> parseCoverageIndexesFromAsset(AssetSnapshot asset, String appId, List<String> warnings) {
+        return parseCoverageFilesFromAsset(asset, appId, warnings).stream()
+                .map(file -> file.toClassCoverageIndex(appId))
+                .toList();
+    }
+
+    private List<UniversalCoverageFile> parseCoverageFilesFromAsset(AssetSnapshot asset, String appId, List<String> warnings) {
         if (asset == null || !StringUtils.hasText(appId)) return List.of();
         try {
             AppVo app = appService.getApp(appId);
             if (app == null) return List.of();
-            return coverageReportService.parse(app, assetContent(asset).getBytes(StandardCharsets.UTF_8)).stream()
-                    .map(file -> file.toClassCoverageIndex(appId))
-                    .toList();
+            return coverageReportService.parse(app, assetContent(asset).getBytes(StandardCharsets.UTF_8));
         } catch (RuntimeException exception) {
             warnings.add("覆盖率报告即时解析失败：" + exception.getMessage());
             return List.of();
@@ -988,6 +997,92 @@ public class TraceabilityMapService {
                 index.getCoveredBranchTargets(), index.getTotalBranchTargets(), index.getBranchRate());
     }
 
+    private CoverageReportOverview buildCoverageOverview(String projectId, Baseline baseline, List<String> warnings) {
+        List<UniversalCoverageFile> reportFiles = loadCoverageFiles(projectId, baseline, warnings);
+        if (!reportFiles.isEmpty()) {
+            return summarizeCoverageReport(reportFiles);
+        }
+        List<ClassCoverageIndex> indexes = loadCoverageIndexes(projectId, baseline, warnings);
+        if (indexes.isEmpty()) {
+            return new CoverageReportOverview(0, 0, 0, 0, 0, 0, 0, 0, 0);
+        }
+        int coveredClasses = 0;
+        int totalClasses = 0;
+        int coveredMethods = 0;
+        int totalMethods = 0;
+        int coveredBranches = 0;
+        int totalBranches = 0;
+        int coveredLines = 0;
+        int totalLines = 0;
+        int totalComplexity = 0;
+        for (ClassCoverageIndex index : indexes) {
+            if (index == null) continue;
+            totalClasses += 1;
+            if (index.getCoveredLines() > 0 || index.getCoveredMethods() > 0 || index.getCoveredBranches() > 0
+                    || index.getCoveredBranchTargets() > 0) {
+                coveredClasses += 1;
+            }
+            coveredMethods += index.getCoveredMethods();
+            totalMethods += index.getTotalMethods();
+            coveredBranches += index.getCoveredBranchTargets();
+            totalBranches += index.getTotalBranchTargets();
+            coveredLines += index.getCoveredLines();
+            totalLines += index.getTotalLines();
+            totalComplexity += index.getTotalComplexity();
+        }
+        return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
+                coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
+    }
+
+    private List<UniversalCoverageFile> loadCoverageFiles(String projectId, Baseline baseline, List<String> warnings) {
+        if (baseline == null || !StringUtils.hasText(baseline.coverageAssetId())) return List.of();
+        Optional<AssetSnapshot> coverageAsset = verificationRepository.findAsset(projectId, baseline.coverageAssetId());
+        return parseCoverageFilesFromAsset(coverageAsset.orElse(null), baseline.sourceAppId(), warnings);
+    }
+
+    private CoverageReportOverview summarizeCoverageReport(List<UniversalCoverageFile> files) {
+        int coveredClasses = 0;
+        int totalClasses = 0;
+        int coveredMethods = 0;
+        int totalMethods = 0;
+        int coveredBranches = 0;
+        int totalBranches = 0;
+        int coveredLines = 0;
+        int totalLines = 0;
+        int totalComplexity = 0;
+        for (UniversalCoverageFile file : files) {
+            if (file == null) continue;
+            totalClasses += file.getReportTotalClasses() > 0 ? file.getReportTotalClasses() : 1;
+            coveredClasses += file.getReportTotalClasses() > 0
+                    ? file.getReportCoveredClasses()
+                    : (file.getLines().stream().anyMatch(line -> line.getCoveredCount() > 0) ? 1 : 0);
+            totalMethods += file.getReportTotalMethods() > 0 ? file.getReportTotalMethods() : file.getFunctions().size();
+            coveredMethods += file.getReportTotalMethods() > 0
+                    ? file.getReportCoveredMethods()
+                    : (int) file.getFunctions().stream().filter(function -> function.getCoveredCount() > 0).count();
+            coveredBranches += file.getBranches().stream().filter(branch -> branch.getCoveredCount() > 0).count();
+            totalBranches += file.getBranches().size();
+            coveredLines += file.getLines().stream().filter(line -> line.getCoveredCount() > 0).count();
+            totalLines += file.getLines().size();
+            totalComplexity += file.getReportTotalComplexity();
+        }
+        return new CoverageReportOverview(coveredClasses, totalClasses, coveredMethods, totalMethods,
+                coveredBranches, totalBranches, coveredLines, totalLines, totalComplexity);
+    }
+
+    private List<ClassCoverageIndex> loadCoverageIndexes(String projectId, Baseline baseline, List<String> warnings) {
+        if (baseline == null || !StringUtils.hasText(baseline.coverageAssetId())) {
+            return List.of();
+        }
+        List<ClassCoverageIndex> indexes = classCoverageIndexRepository.findByReportId(baseline.coverageAssetId());
+        if (!indexes.isEmpty() && !requiresMethodCoverageRefresh(indexes)) {
+            return indexes;
+        }
+        Optional<AssetSnapshot> coverageAsset = verificationRepository.findAsset(projectId, baseline.coverageAssetId());
+        List<ClassCoverageIndex> parsed = parseCoverageIndexesFromAsset(coverageAsset.orElse(null), baseline.sourceAppId(), warnings);
+        return parsed.isEmpty() ? indexes : parsed;
+    }
+
     private Map<String, Object> coverageMetadata(ClassCoverageIndex index) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         Set<Integer> totalLines = new LinkedHashSet<>();
@@ -1003,6 +1098,7 @@ public class TraceabilityMapService {
                 partialBranchLines.addAll(partialBranchLines(method));
             }
         }
+        metadata.put("coverageComplexity", index.getTotalComplexity());
         metadata.put("coverageTotalLines", new ArrayList<>(totalLines));
         metadata.put("coverageCoveredLines", new ArrayList<>(coveredLines));
         metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines));
@@ -1479,6 +1575,7 @@ public class TraceabilityMapService {
                 CoverageSummary coverage = new CoverageSummary(method.getCoveredLines(), method.getTotalLines(), rate(method.getCoveredLines(), method.getTotalLines()),
                         method.getCoveredBranchTargets(), method.getTotalBranchTargets(), method.getBranchRate());
                 Map<String, Object> metadata = new LinkedHashMap<>();
+                metadata.put("coverageComplexity", method.getComplexity());
                 metadata.put("coverageTotalLines", method.getTotalLineNumbers() == null ? List.of() : method.getTotalLineNumbers());
                 metadata.put("coverageCoveredLines", method.getCoveredLineNumbers() == null ? List.of() : method.getCoveredLineNumbers());
                 metadata.put("coveragePartialBranchLines", new ArrayList<>(partialBranchLines(method)));

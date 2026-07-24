@@ -50,6 +50,18 @@ export interface CoverageSummary {
   branchRate?: number
 }
 
+export interface CoverageReportOverview {
+  coveredClasses: number
+  totalClasses: number
+  coveredMethods: number
+  totalMethods: number
+  coveredBranches: number
+  totalBranches: number
+  coveredLines: number
+  totalLines: number
+  totalComplexity: number
+}
+
 export interface TraceabilityNode {
   id: string
   kind: TraceNodeKind
@@ -109,6 +121,7 @@ export interface TraceabilityMapResponse {
   edges: TraceabilityEdge[]
   codeTree: CodeTreeNode[]
   codeGraph?: CodeGraphData | null
+  coverageOverview?: CoverageReportOverview
   warnings: string[]
 }
 
