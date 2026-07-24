@@ -242,18 +242,25 @@ public class UniversalCoverageFile implements Serializable {
         private int startLine;
         private int endLine;
         private int coveredCount;
+        private int complexity;
         public FunctionCoverage() {}
         public FunctionCoverage(String name, int startLine, int endLine, int coveredCount) {
-            this.name = name; this.startLine = startLine; this.endLine = endLine; this.coveredCount = coveredCount;
+            this(name, startLine, endLine, coveredCount, 0);
+        }
+        public FunctionCoverage(String name, int startLine, int endLine, int coveredCount, int complexity) {
+            this.name = name; this.startLine = startLine; this.endLine = endLine; this.coveredCount = coveredCount; this.complexity = complexity;
         }
         public FunctionCoverage(String className, String name, String descriptor, int startLine, int endLine, int coveredCount) {
-            this(name, startLine, endLine, coveredCount);
+            this(className, name, descriptor, startLine, endLine, coveredCount, 0);
+        }
+        public FunctionCoverage(String className, String name, String descriptor, int startLine, int endLine, int coveredCount, int complexity) {
+            this(name, startLine, endLine, coveredCount, complexity);
             this.className = className;
             this.descriptor = descriptor;
         }
         FunctionCoverage merge(FunctionCoverage other) {
             return new FunctionCoverage(className, name, descriptor, Math.min(startLine, other.startLine),
-                    Math.max(endLine, other.endLine), coveredCount + other.coveredCount);
+                    Math.max(endLine, other.endLine), coveredCount + other.coveredCount, Math.max(complexity, other.complexity));
         }
         ClassCoverageIndex.MethodCoverageDetail toMethodCoverageDetail(List<LineCoverage> fileLines) {
             ClassCoverageIndex.MethodCoverageDetail detail = new ClassCoverageIndex.MethodCoverageDetail();
@@ -271,6 +278,7 @@ public class UniversalCoverageFile implements Serializable {
             detail.setTotalLines(total.size());
             detail.setCoveredLineNumbers(covered);
             detail.setCoveredLines(covered.size());
+            detail.setComplexity(complexity);
             detail.setCovered(!covered.isEmpty() || coveredCount > 0);
             return detail;
         }
@@ -287,6 +295,8 @@ public class UniversalCoverageFile implements Serializable {
         public void setEndLine(int endLine) { this.endLine = endLine; }
         public int getCoveredCount() { return coveredCount; }
         public void setCoveredCount(int coveredCount) { this.coveredCount = coveredCount; }
+        public int getComplexity() { return complexity; }
+        public void setComplexity(int complexity) { this.complexity = complexity; }
     }
 
     public static class BranchCoverage implements Serializable {

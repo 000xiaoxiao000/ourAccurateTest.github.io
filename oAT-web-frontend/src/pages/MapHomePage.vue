@@ -318,7 +318,7 @@
                 </div>
                 <div class="coverage-list-head method-head">
                   <strong>当前文件方法</strong>
-                  <span>{{ filteredCoverageMethodRows.length }} / {{ selectedCoverageMethodRows.length }} 项</span>
+                  <span>{{ filteredCoverageMethodRows.length }} / {{ allCurrentFileMethodRows.length }} 项</span>
                 </div>
                 <div class="coverage-method-filter">
                   <input v-model.trim="coverageMethodKeyword" type="search" placeholder="搜索方法名或行号" aria-label="搜索当前文件方法" />
@@ -777,8 +777,22 @@ const coverageRows = computed(() => {
 })
 const coverageFileRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_FILE'))
 const coverageMethodRows = computed(() => coverageRows.value.filter((row) => map.nodeById.value.get(row.id)?.kind === 'CODE_METHOD'))
+const allCurrentFileMethodRows = computed(() => {
+  const fileId = selectedCoverageFileId.value
+  if (!fileId) return []
+  return map.nodes.value
+    .filter((node) => node.kind === 'CODE_METHOD' && nearestCodeFileId(node) === fileId)
+    .filter((node) => codeNodeInCurrentScope(node, map.nodes.value, map.focusId.value))
+    .filter((node) => !codeKeyword.value || searchableCodeNode(node).includes(codeKeyword.value))
+    .map(toCoverageRow)
+    .sort((left, right) => (lineFromLocator(left.locator) || Number.MAX_SAFE_INTEGER) - (lineFromLocator(right.locator) || Number.MAX_SAFE_INTEGER)
+      || left.label.localeCompare(right.label))
+})
 const coverageListRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
-const coverageAggregateRows = computed(() => coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value)
+const coverageAggregateRows = computed(() => {
+  if (map.focusId.value && coverageMethodRows.value.length) return coverageMethodRows.value
+  return coverageFileRows.value.length ? coverageFileRows.value : coverageRows.value
+})
 const rawCoverageOverview = computed(() => map.response.value?.coverageOverview)
 const coverageScopeNode = computed(() => map.focusId.value ? map.nodeById.value.get(map.focusId.value) : undefined)
 const hasCoverageScope = computed(() => Boolean(coverageScopeNode.value?.kind.startsWith('CODE_')))
@@ -794,7 +808,7 @@ const selectedCoverageFileId = computed(() => {
 const selectedCoverageMethodRows = computed(() => {
   const fileId = selectedCoverageFileId.value
   if (!fileId) return []
-  return coverageMethodRows.value.filter((row) => {
+  return allCurrentFileMethodRows.value.filter((row) => {
     const node = map.nodeById.value.get(row.id)
     return node ? nearestCodeFileId(node) === fileId : false
   })
@@ -1389,6 +1403,7 @@ function coverageRowTitle(row: ReturnType<typeof toCoverageRow>) {
     `状态：${row.stateText}`,
     `行覆盖：${row.lineText}`,
     `分支覆盖：${row.branchText}`,
+    `圈复杂度：${row.complexity || '-'}`,
   ].join('\n')
 }
 
@@ -2796,9 +2811,57 @@ onBeforeUnmount(() => {
 .tlc-rel.derived { background:#f1f5f9; color:#475569; }
 .trace-empty-links { color:#94a3b8; font-size:13px; text-align:center; padding:24px 0; }
 .legend-row { display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid #eef2f5; color:#64748b; font-size:11px; font-weight:800; }
-.tree-actions { display:flex !important; grid-template-columns:none !important; gap:6px; justify-content:flex-end; }
-.tree-actions button { border:1px solid #dbe4ee; border-radius:7px; padding:5px 8px; background:#fff; color:#475569; font-size:11px; font-weight:900; cursor:pointer; }
-.tree-actions button:hover { border-color:#0f766e; color:#0f766e; }
+.code-side-pane > .pane-head {
+  align-items:flex-start;
+  flex-direction:column;
+  gap:10px;
+}
+.tree-actions {
+  display:grid !important;
+  grid-template-columns:repeat(3, minmax(0, 1fr));
+  width:100%;
+  gap:8px;
+}
+.tree-actions button {
+  display:inline-flex;
+  min-width:0;
+  min-height:34px;
+  align-items:center;
+  justify-content:center;
+  border:1px solid #dbe4ee;
+  border-radius:8px;
+  padding:7px 10px;
+  background:#fff;
+  color:#475569;
+  font-size:12px;
+  font-weight:800;
+  line-height:1;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.tree-actions button:hover:not(:disabled) {
+  border-color:#14b8a6;
+  background:#f0fdfa;
+  color:#0f766e;
+  box-shadow:0 4px 10px rgba(15,118,110,.12);
+  transform:translateY(-1px);
+}
+.tree-actions button:focus-visible {
+  outline:0;
+  border-color:#0f766e;
+  box-shadow:0 0 0 3px rgba(20,184,166,.2);
+}
+.tree-actions button:active:not(:disabled) {
+  transform:translateY(0);
+  box-shadow:none;
+}
+.tree-actions button:disabled {
+  border-color:#e2e8f0;
+  background:#f8fafc;
+  color:#94a3b8;
+  cursor:not-allowed;
+}
 .code-node-detail { display:grid; gap:4px; margin:10px 12px 0; padding:10px 12px; border:1px solid; border-radius:10px; }
 .code-node-detail p { margin:2px 0 0; color:#475569; font-size:12px; }
 .legend-row span { display:flex; align-items:center; gap:5px; }
@@ -2997,5 +3060,5 @@ onBeforeUnmount(() => {
 .tree-scroll { flex:1; min-height:160px; overflow-y:auto; padding:8px 6px 12px; }
 @media(max-width:1180px) { .summary-strip { grid-template-columns:repeat(3,minmax(0,1fr)); } .calls-tab, .trace-reference-grid { grid-template-columns:1fr; } .calls-tab { grid-template-areas:'graph' 'tree'; } .code-side-pane { min-height:420px; } .coverage-overview-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } .coverage-workbench { grid-template-columns:1fr; } .coverage-node-panel { min-height:620px; grid-template-rows:auto minmax(150px,1fr) auto auto minmax(180px,1.25fr); } }
 @media(max-width:980px) { .trace-tab { grid-template-columns:1fr; } .trace-list-pane { min-height:420px; max-height:560px; } }
-@media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip, .coverage-overview-grid { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } }
+@media(max-width:760px) { .workspace-toolbar, .trace-controls { flex-direction:column; align-items:stretch; } .summary-strip, .coverage-overview-grid { grid-template-columns:1fr; } .map-legend { justify-content:flex-start; } .workspace-tabs { overflow-x:auto; } .workspace-tabs button { white-space:nowrap; } .tree-actions { grid-template-columns:1fr; } }
 </style>

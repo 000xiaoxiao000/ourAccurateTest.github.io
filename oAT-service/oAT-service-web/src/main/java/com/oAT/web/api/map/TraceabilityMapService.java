@@ -10,6 +10,7 @@ import com.github.javaparser.ast.body.CallableDeclaration;
 import com.github.javaparser.ast.body.ClassOrInterfaceDeclaration;
 import com.github.javaparser.ast.body.ConstructorDeclaration;
 import com.github.javaparser.ast.body.EnumDeclaration;
+import com.github.javaparser.ast.body.InitializerDeclaration;
 import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.RecordDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
@@ -795,6 +796,12 @@ public class TraceabilityMapService {
                         && method.getTotalBranchTargetProbeMap() == null) {
                     return true;
                 }
+                if (index.getTotalComplexity() > 0
+                        && method != null
+                        && !"file".equals(method.getMethodDesc())
+                        && method.getComplexity() <= 0) {
+                    return true;
+                }
             }
         }
         return false;
@@ -1368,6 +1375,10 @@ public class TraceabilityMapService {
                     .toList()) {
                 callable.getRange().ifPresent(range -> methods.add(parsedMethod(callable, range.begin.line)));
             }
+            type.getMembers().stream()
+                    .filter(InitializerDeclaration.class::isInstance)
+                    .map(InitializerDeclaration.class::cast)
+                    .forEach(initializer -> initializer.getRange().ifPresent(range -> methods.add(parsedInitializer(initializer, range.begin.line))));
             classes.add(new ParsedSourceClass(className, methods));
         }
         return classes;
@@ -1387,6 +1398,15 @@ public class TraceabilityMapService {
                 .map(call -> new InvocationCandidate(call.getNameAsString(), call.getArguments().size()))
                 .toList();
         return new ParsedSourceMethod(methodName, descriptor, signature, line, visibility, staticMethod, body, invocations);
+    }
+
+    private ParsedSourceMethod parsedInitializer(InitializerDeclaration initializer, int line) {
+        String name = initializer.isStatic() ? "<clinit>" : "<init>";
+        String body = initializer.toString();
+        List<InvocationCandidate> invocations = initializer.findAll(MethodCallExpr.class).stream()
+                .map(call -> new InvocationCandidate(call.getNameAsString(), call.getArguments().size()))
+                .toList();
+        return new ParsedSourceMethod(name, "()", name, line, "PACKAGE", initializer.isStatic(), body, invocations);
     }
 
     private String qualifiedTypeName(String packageName, TypeDeclaration<?> type) {
@@ -1663,7 +1683,7 @@ public class TraceabilityMapService {
             int startLine = method.getStartLine();
             return nodes.values().stream()
                     .filter(node -> node.kind() == NodeKind.CODE_METHOD)
-                    .filter(node -> methodName.equals(node.label()))
+                    .filter(node -> coverageMethodNameMatches(methodName, node))
                     .filter(node -> {
                         String locator = normalizer.normalizePath(value(node.locator()).replaceFirst(":\\d+$", ""));
                         String owner = value(node.symbol()).replace('#', '.').replace('$', '.').toLowerCase(Locale.ROOT);
@@ -1679,6 +1699,18 @@ public class TraceabilityMapService {
                     .filter(node -> startLine <= 0 || methodLineDistance(node, startLine) <= 2)
                     .map(TraceabilityNode::id)
                     .orElse(null);
+        }
+
+        private boolean coverageMethodNameMatches(String coverageName, TraceabilityNode node) {
+            if (!StringUtils.hasText(coverageName) || node == null) return false;
+            if (coverageName.equals(node.label())) return true;
+            if (!"<init>".equals(coverageName)) return false;
+            String symbol = value(node.symbol());
+            int separator = symbol.indexOf('#');
+            String owner = separator < 0 ? symbol : symbol.substring(0, separator);
+            int dot = Math.max(owner.lastIndexOf('.'), owner.lastIndexOf('$'));
+            String simpleOwner = dot < 0 ? owner : owner.substring(dot + 1);
+            return simpleOwner.equals(node.label());
         }
 
         int methodLineDistance(TraceabilityNode node, int expectedLine) {
