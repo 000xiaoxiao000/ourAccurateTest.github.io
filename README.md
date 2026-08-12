@@ -9,12 +9,15 @@
 ```text
 ourAccurateTest/
 ├── oAT-service/
-│   ├── oAT-ai/                 # LLM 接入模块，jar
-│   ├── oAT-service-web/        # Spring Boot 后端主服务，war
+│   ├── oAT-service-web/        # Spring Boot 业务主服务，war
 │   └── pom.xml                 # 服务端 Maven 聚合构建
 ├── oAT-web-frontend/           # 平台 Web 前端
 ├── oAT-traffic-capture/        # Electron 桌面流量采集器
 └── docs/                       # 文档图片和交流资源
+
+独立 AI 平台（独立 git 仓库，见 https://github.com/your-org/ai-platform 或本地 ai-platform/）：
+├── ai-platform-service/        # 独立 AI 服务，jar（端口 8898，schema ai_platform）
+└── ai-platform-client/         # 业务侧薄客户端 artifact（Maven: com.aiplatform:ai-platform-client）
 ```
 
 ## 系统组成
@@ -27,7 +30,13 @@ oAT-service-web
         ├── PostgreSQL + Flyway：项目、应用、版本、用例、验证基线、追溯和门禁数据
         ├── Git：仓库、分支、Commit、Diff 和源码快照
         ├── 本地文件目录：源码缓存、大载荷和静态源码内容
-        └── oAT-ai：LLM 配置和文本生成能力
+        └── /api/ai-tools：向 ai-platform 暴露受控业务工具（经 ai-platform-client 接入）
+
+ai-platform（独立项目 ai-platform/，业务零 AI 代码）
+        ├── LangChain4j + DeepSeek/OpenAI 兼容模型：生成结构化 AI 草稿
+        ├── ai_platform schema：保存任务、草稿、会话、确认状态
+        ├── HTTP Tool Registry：读取业务资产，后续可平滑替换为 MCP
+        └── /admin 管理台：任务监控、草稿管理、会话记忆、配置与接入（X-Admin-Token 鉴权）
 
 oAT-traffic-capture
         ├── 本地代理：HTTP/HTTPS/WS/WSS 流量采集
@@ -78,8 +87,6 @@ oAT-traffic-capture
 export OAT_DB_URL='jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification'
 export OAT_DB_USERNAME='traceiq'
 export OAT_DB_PASSWORD='change-me'
-export AI_LLM_API_KEY='your-api-key'
-export AI_LLM_MODEL='deepseek-chat'
 ```
 
 数据库迁移由 Flyway 自动执行：
@@ -110,7 +117,24 @@ cd oAT-service-web
 http://localhost:8899
 ```
 
-### 3. 启动平台 Web 前端
+### 3. 启动独立 AI 平台（ai-platform，独立项目）
+
+AI 平台已拆分为独立 git 仓库（本地路径 `../ai-platform/`）。业务通过 `ai-platform-client` 接入，本仓库业务零 AI 代码。
+
+```bash
+cd ../ai-platform
+export AI_PLATFORM_API_KEY='your-api-key'          # 模型密钥（必填，否则 AI 走降级）
+export AI_PLATFORM_ADMIN_TOKEN='your-admin-token'  # 管理台 /admin 鉴权（可选）
+export AI_TOOL_GATEWAY_TOKEN='local-ai-tool-token' # 与业务端 OAT_AI_TOOL_TOKEN 保持一致
+export OAT_DB_URL='jdbc:postgresql://127.0.0.1:5432/ai_requirement_verification'
+export OAT_DB_USERNAME='traceiq'
+export OAT_DB_PASSWORD='change-me'
+java -jar ai-platform-service/target/ai-platform-service-0.1.0-SNAPSHOT.jar
+```
+
+AI 平台监听 `http://localhost:8898`，管理台 `http://localhost:8898/admin`（任务监控 / 草稿管理 / 会话记忆 / 配置与接入，需 `X-Admin-Token`）。
+
+### 4. 启动平台 Web 前端
 
 ```bash
 cd oAT-web-frontend
@@ -130,7 +154,7 @@ http://localhost:5176
 OAT_BACKEND_TARGET='http://127.0.0.1:8899' npm run dev
 ```
 
-### 4. 启动桌面流量采集器
+### 5. 启动桌面流量采集器
 
 ```bash
 cd oAT-traffic-capture
@@ -146,6 +170,8 @@ npm run dev
 | --- | --- | --- |
 | `oAT-service` | `./oAT-service-web/mvnw -f pom.xml test` | 运行服务端测试 |
 | `oAT-service` | `./oAT-service-web/mvnw -f pom.xml clean package -DskipTests` | 打包服务端 |
+| `../ai-platform` | `mvn -f pom.xml package` | 打包独立 AI 平台（service + client） |
+| `../ai-platform` | `java -jar ai-platform-service/target/ai-platform-service-0.1.0-SNAPSHOT.jar` | 启动独立 AI 平台 |
 | `oAT-web-frontend` | `npm run dev` | 启动平台 Web 前端 |
 | `oAT-web-frontend` | `npm run build` | 类型检查并构建 Web 前端 |
 | `oAT-traffic-capture` | `npm run dev` | 启动 Electron 采集器开发模式 |
@@ -157,6 +183,7 @@ npm run dev
 | 配置 | 文件 |
 | --- | --- |
 | 后端端口、数据库、Flyway、LLM、本地存储 | `oAT-service/oAT-service-web/src/main/resources/application.yml` |
+| AI 平台（端口 8898、模型、管理台 Token、业务回调） | `../ai-platform/ai-platform-service/src/main/resources/application.yml` |
 | Web 前端代理和端口 | `oAT-web-frontend/vite.config.ts` |
 | 流量采集器 Electron 打包 | `oAT-traffic-capture/package.json` |
 | 流量采集器 Vite 端口 | `oAT-traffic-capture/vite.config.ts` |
@@ -165,7 +192,7 @@ npm run dev
 
 - [服务端聚合模块](oAT-service/README.md)
 - [后端主服务](oAT-service/oAT-service-web/README.md)
-- [LLM 模块](oAT-service/oAT-ai/README.md)
+- [独立 AI 平台](../ai-platform/README.md)（独立仓库：ai-platform-service / ai-platform-client）
 - [平台 Web 前端](oAT-web-frontend/README.md)
 - [桌面流量采集器](oAT-traffic-capture/README.md)
 

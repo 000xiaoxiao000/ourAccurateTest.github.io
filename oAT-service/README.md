@@ -1,22 +1,26 @@
 # oAT-service
 
-`oAT-service` 是服务端 Maven 聚合模块，统一构建 `oAT-ai` 和 `oAT-service-web`。该目录本身不启动服务，运行入口在 `oAT-service-web`。
+`oAT-service` 是业务服务端 Maven 聚合模块，构建 `oAT-service-web`。AI 能力由独立项目 `ai-platform`（独立 git 仓库）提供，业务通过 `ai-platform-client` artifact 接入，本目录不再包含 AI 平台代码。
 
 ## 模块结构
 
 ```text
 oAT-service/
 ├── pom.xml
-├── oAT-ai/           # LLM 接入模块，打包为 jar
-└── oAT-service-web/  # 后端主服务，打包为 war
+└── oAT-service-web/  # 业务后端主服务，打包为 war
 ```
 
 ## 子模块职责
 
 | 模块 | 产物 | 职责 |
 | --- | --- | --- |
-| `oAT-ai` | `jar` | 绑定 `ai.llm.*` 配置，适配 OpenAI/DeepSeek/Ollama/自定义模型服务，提供 `LLMService` |
-| `oAT-service-web` | `war` | 提供平台 API、数据库迁移、项目/版本/用例、验证图谱、质量门禁和 Git 影响分析能力 |
+| `oAT-service-web` | `war` | 提供平台 API、数据库迁移、项目/版本/用例、验证图谱、质量门禁、Git 影响分析和 AI 业务工具能力（经 ai-platform-client 调用独立 AI 平台） |
+
+## AI 平台接入
+
+- 独立项目位置：`../ai-platform/`（独立 git 仓库，含 `ai-platform-service` + `ai-platform-client`）
+- 业务依赖：`com.aiplatform:ai-platform-client:0.1.0-SNAPSHOT`（需先 `mvn install` 安装到本地仓库）
+- 客户端由启动类 `@ComponentScan(basePackages = {"com.oAT.web", "com.aiplatform.client"})` 扫描
 
 ## 构建
 
@@ -59,4 +63,4 @@ java --enable-native-access=ALL-UNNAMED -Dio.netty.noUnsafe=true -jar target/oAT
 ## 相关文档
 
 - [oAT-service-web](oAT-service-web/README.md)
-- [oAT-ai](oAT-ai/README.md)
+- [独立 AI 平台](../ai-platform/README.md)

@@ -76,6 +76,13 @@ public class VerificationService {
     public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
                                      String fileName, String content, String externalId, String externalUrl,
                                      String sourceVersion, Map<String, Object> metadata) {
+        return importAsset(projectId, userId, assetType, sourceType, fileName, content, externalId, externalUrl,
+                sourceVersion, metadata, false);
+    }
+
+    public AssetSnapshot importAsset(String projectId, String userId, AssetType assetType, SourceType sourceType,
+                                     String fileName, String content, String externalId, String externalUrl,
+                                     String sourceVersion, Map<String, Object> metadata, boolean aiGenerated) {
         Assert.hasText(projectId, "projectId不能为空");
         Assert.notNull(assetType, "资产类型不能为空");
         Assert.hasText(content, "导入内容不能为空");
@@ -89,7 +96,7 @@ public class VerificationService {
                 fileName, contentHash, null, stored.storageType(), stored.storageKey(), stored.contentSize(),
                 stored.contentPreview(), metadata == null ? Map.of() : metadata,
                 sourceType == SourceType.API || sourceType == SourceType.AGENT ? Freshness.LIVE : Freshness.MANUAL,
-                userId, now);
+                userId, now, aiGenerated);
         repository.saveAsset(asset);
         indexCoverageAssetIfPossible(asset, content, appIdFrom(asset));
         return asset;
@@ -97,6 +104,10 @@ public class VerificationService {
 
     public List<AssetSnapshot> assets(String projectId, AssetType type) {
         return repository.findAssets(projectId, type).stream().map(this::withoutContent).toList();
+    }
+
+    public AssetSnapshot asset(String projectId, String assetId, AssetType type) {
+        return requiredAsset(projectId, assetId, type);
     }
 
     public AssetSnapshot updateAsset(String projectId, String assetId, String userId, UpdateAsset command) {
@@ -113,7 +124,7 @@ public class VerificationService {
                 textOrExisting(command.sourceVersion(), existing.sourceVersion()),
                 textOrExisting(command.fileName(), existing.fileName()), contentHash, null,
                 stored.storageType(), stored.storageKey(), stored.contentSize(), stored.contentPreview(),
-                existing.metadata(), existing.freshness(), userId, LocalDateTime.now());
+                existing.metadata(), existing.freshness(), userId, LocalDateTime.now(), existing.aiGenerated());
         Assert.isTrue(repository.updateAsset(updated), "找不到指定资料");
         invalidateBaselinesReferencingAsset(projectId, updated.id());
         indexCoverageAssetIfPossible(updated, content, appIdFrom(updated));
@@ -233,6 +244,12 @@ public class VerificationService {
         requiredBaseline(projectId, baselineId);
         return repository.findLatestAnalysisJob(projectId, baselineId)
                 .orElseThrow(() -> new IllegalArgumentException("该分析基线还没有AI分析任务"));
+    }
+
+    public AssetContentForTool loadAssetContentForTool(String projectId, String assetId, AssetType assetType) {
+        AssetSnapshot asset = requiredAsset(projectId, assetId, assetType);
+        return new AssetContentForTool(asset.id(), asset.projectId(), asset.assetType(), asset.fileName(), loadAssetContent(asset),
+                asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.metadata());
     }
 
     private void runAnalysisJob(String projectId, String baselineId, String jobId) {
@@ -547,7 +564,7 @@ public class VerificationService {
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
                 null, asset.storageType(), asset.storageKey(), asset.contentSize(),
                 StringUtils.hasText(asset.contentPreview()) ? asset.contentPreview() : preview(asset.content()),
-                asset.metadata(), asset.freshness(), asset.importedBy(), asset.capturedAt());
+                asset.metadata(), asset.freshness(), asset.importedBy(), asset.capturedAt(), asset.aiGenerated());
     }
 
     private String preview(String content) {
@@ -733,6 +750,10 @@ public class VerificationService {
             return new CoverageMetrics(0, 0, 0, 0, 0, 0, 0);
         }
     }
+
+    public record AssetContentForTool(String assetId, String projectId, AssetType assetType, String fileName,
+                                      String content, String externalId, String externalUrl, String sourceVersion,
+                                      Map<String, Object> metadata) {}
 
     public record CreateBaseline(String name, String requirementAssetId, String testcaseAssetId, String sourceAssetId,
                                  String executionAssetId, String coverageAssetId, String sourceAppId,

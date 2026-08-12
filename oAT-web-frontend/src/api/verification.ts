@@ -30,6 +30,7 @@ export interface VerificationAsset {
   freshness: Freshness
   capturedAt: string
   metadata?: Record<string, unknown>
+  aiGenerated?: boolean
 }
 
 export interface VerificationBaseline {

@@ -27,12 +27,12 @@ public class VerificationRepository {
                 INSERT INTO oat_verification_asset
                 (id, project_id, asset_type, source_type, external_id, external_url, source_version,
                  file_name, content_hash, content_text, storage_type, storage_key, content_size,
-                 content_preview, metadata_json, freshness, imported_by, captured_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)
+                 content_preview, metadata_json, freshness, imported_by, captured_at, ai_generated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?)
                 """, asset.id(), asset.projectId(), asset.assetType().name(), asset.sourceType().name(),
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
                 asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(), asset.contentPreview(),
-                json(asset.metadata()), asset.freshness().name(), asset.importedBy(), ts(asset.capturedAt()));
+                json(asset.metadata()), asset.freshness().name(), asset.importedBy(), ts(asset.capturedAt()), asset.aiGenerated());
     }
 
     public Optional<AssetSnapshot> findAsset(String projectId, String id) {
@@ -50,11 +50,11 @@ public class VerificationRepository {
                 UPDATE oat_verification_asset
                 SET external_id = ?, external_url = ?, source_version = ?, file_name = ?,
                     content_hash = ?, content_text = ?, storage_type = ?, storage_key = ?,
-                    content_size = ?, content_preview = ?, metadata_json = ?::jsonb, freshness = ?
+                    content_size = ?, content_preview = ?, metadata_json = ?::jsonb, freshness = ?, ai_generated = ?
                 WHERE project_id = ? AND id = ?
                 """, asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(),
                 asset.contentHash(), asset.content(), asset.storageType(), asset.storageKey(), asset.contentSize(),
-                asset.contentPreview(), json(asset.metadata()), asset.freshness().name(),
+                asset.contentPreview(), json(asset.metadata()), asset.freshness().name(), asset.aiGenerated(),
                 asset.projectId(), asset.id());
         return updated == 1;
     }
@@ -414,7 +414,7 @@ public class VerificationRepository {
                 nullableColumn(rs, "storage_type"), nullableColumn(rs, "storage_key"),
                 longColumn(rs, "content_size"), nullableColumn(rs, "content_preview"),
                 map(rs.getString("metadata_json")), Freshness.valueOf(rs.getString("freshness")),
-                rs.getString("imported_by"), time(rs.getTimestamp("captured_at")));
+                rs.getString("imported_by"), time(rs.getTimestamp("captured_at")), rs.getBoolean("ai_generated"));
     }
 
     private Baseline baseline(ResultSet rs, int row) throws SQLException {

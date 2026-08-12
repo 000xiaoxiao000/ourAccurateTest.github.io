@@ -1,7 +1,7 @@
 package com.oAT.web.verification.impact;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.oAT.ai.service.LLMService;
+import com.oAT.web.verification.AiGateway;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.logging.LogFields;
 import com.oAT.web.service.GitService;
@@ -36,21 +36,21 @@ public class GitImpactAnalysisService {
     private final List<LanguageAnalyzer> languageAnalyzers;
     private final StructuralDiffEngine structuralDiffEngine;
     private final ImpactPropagationEngine propagationEngine;
-    private final LLMService llmService;
+    private final AiGateway aiGateway;
     private final Executor verificationAiExecutor;
     private final GitImpactLlmReviewRepository llmReviewRepository;
     private final ConcurrentHashMap<String, LlmReviewProgress> llmReviews = new ConcurrentHashMap<>();
 
     public GitImpactAnalysisService(GitService gitService, List<LanguageAnalyzer> languageAnalyzers,
                                     StructuralDiffEngine structuralDiffEngine, ImpactPropagationEngine propagationEngine,
-                                    LLMService llmService,
+                                    AiGateway aiGateway,
                                     GitImpactLlmReviewRepository llmReviewRepository,
                                     @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
         this.gitService = gitService;
         this.languageAnalyzers = List.copyOf(languageAnalyzers);
         this.structuralDiffEngine = structuralDiffEngine;
         this.propagationEngine = propagationEngine;
-        this.llmService = llmService;
+        this.aiGateway = aiGateway;
         this.llmReviewRepository = llmReviewRepository;
         this.verificationAiExecutor = verificationAiExecutor;
     }
@@ -123,7 +123,7 @@ public class GitImpactAnalysisService {
             saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.COMPLETED, 0, 0, List.of(), "没有需要 LLM 辅助确认的传播候选"));
             return;
         }
-        if (!llmService.isAvailable()) {
+        if (!aiGateway.isAvailable()) {
             saveLlmReview(new LlmReviewProgress(reportId, LlmReviewStatus.UNAVAILABLE, reviewTargets.size(), 0, List.of(), "LLM 服务不可用，已跳过辅助确认"));
             return;
         }
@@ -184,7 +184,7 @@ public class GitImpactAnalysisService {
 
     private LlmDecision requestLlmDecision(ImpactCandidate candidate) {
         try {
-            String answer = CompletableFuture.supplyAsync(() -> llmService.chat("""
+            String answer = CompletableFuture.supplyAsync(() -> aiGateway.chat("""
                             Return one valid json object only, with exactly one field named "decision".
                             The json value must be one of: CONFIRM, REJECT, UNCERTAIN.
                             Do not invent evidence or symbols that are absent from the candidate.

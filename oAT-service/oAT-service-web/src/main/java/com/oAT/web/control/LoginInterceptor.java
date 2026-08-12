@@ -1,6 +1,7 @@
 package com.oAT.web.control;
 
 import com.oAT.web.config.FrontendProperties;
+import com.aiplatform.client.AiPlatformProperties;
 import com.oAT.web.logging.AuditLogger;
 import com.oAT.web.logging.LogContext;
 import com.oAT.web.logging.LogFields;
@@ -16,16 +17,24 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 import static com.oAT.web.common.UtilJson.JSON_MAPPER;
 
 @Component
 public class LoginInterceptor implements HandlerInterceptor {
+    private static final String AI_TOOL_TOKEN_HEADER = "X-OAT-AI-TOOL-TOKEN";
+    private static final String GENERIC_AI_TOOL_TOKEN_HEADER = "X-AI-TOOL-TOKEN";
+
     private final FrontendProperties frontendProperties;
+    private final AiPlatformProperties aiPlatformProperties;
     private final AuditLogger auditLogger;
 
-    public LoginInterceptor(FrontendProperties frontendProperties, AuditLogger auditLogger) {
+    public LoginInterceptor(FrontendProperties frontendProperties,
+                            AiPlatformProperties aiPlatformProperties,
+                            AuditLogger auditLogger) {
         this.frontendProperties = frontendProperties;
+        this.aiPlatformProperties = aiPlatformProperties;
         this.auditLogger = auditLogger;
     }
 
@@ -33,6 +42,9 @@ public class LoginInterceptor implements HandlerInterceptor {
     public boolean preHandle(HttpServletRequest request, @NotNull HttpServletResponse response, @NotNull Object handler) {
         Boolean share = (Boolean) request.getAttribute("_share");
         if (share != null && share) {
+            return true;
+        }
+        if (isAuthorizedAiToolRequest(request)) {
             return true;
         }
         UserVo user = (UserVo) request.getSession().getAttribute("user");
@@ -56,6 +68,25 @@ public class LoginInterceptor implements HandlerInterceptor {
         }
         LogContext.putUser(user);
         return true;
+    }
+
+    private boolean isAuthorizedAiToolRequest(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        if (uri == null || !uri.startsWith("/api/ai-tools/")) {
+            return false;
+        }
+        String expectedToken = aiPlatformProperties.getToolToken();
+        if (!StringUtils.hasText(expectedToken)) {
+            return false;
+        }
+        String actualToken = request.getHeader(GENERIC_AI_TOOL_TOKEN_HEADER);
+        if (!StringUtils.hasText(actualToken)) {
+            actualToken = request.getHeader(AI_TOOL_TOKEN_HEADER);
+        }
+        return StringUtils.hasText(actualToken)
+                && MessageDigest.isEqual(
+                expectedToken.getBytes(StandardCharsets.UTF_8),
+                actualToken.getBytes(StandardCharsets.UTF_8));
     }
 
     private boolean isApiRequest(HttpServletRequest request) {

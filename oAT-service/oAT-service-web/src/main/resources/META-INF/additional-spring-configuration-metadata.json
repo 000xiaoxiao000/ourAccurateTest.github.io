@@ -25,6 +25,33 @@
       "defaultValue": 60000
     },
     {
+      "name": "logging.level.audit.security",
+      "type": "org.springframework.boot.logging.LogLevel",
+      "description": "Log level for security audit events."
+    },
+    {
+      "name": "logging.level.audit.business",
+      "type": "org.springframework.boot.logging.LogLevel",
+      "description": "Log level for business audit events."
+    },
+    {
+      "name": "logging.level.monitor.performance",
+      "type": "org.springframework.boot.logging.LogLevel",
+      "description": "Log level for performance monitor events."
+    },
+    {
+      "name": "oat.datasource.postgresql.create-database-if-missing",
+      "type": "java.lang.Boolean",
+      "description": "Whether to create the configured PostgreSQL database automatically when it is missing.",
+      "defaultValue": true
+    },
+    {
+      "name": "oat.data.path",
+      "type": "java.lang.String",
+      "description": "Base file system path for application-managed data.",
+      "defaultValue": "${user.home}/oAT/codeData/"
+    },
+    {
       "name": "oat.storage.large-payload.path",
       "type": "java.lang.String",
       "description": "File system path for storing large payload data that exceeds inline threshold.",
@@ -35,6 +62,62 @@
       "type": "java.lang.Long",
       "description": "Threshold in bytes for storing static source code inline in database versus file system. Data smaller than this threshold is stored inline in DB.",
       "defaultValue": 8192
+    },
+    {
+      "name": "ai-platform.base-url",
+      "type": "java.lang.String",
+      "description": "Base URL of the standalone AI platform service.",
+      "defaultValue": "http://localhost:8898"
+    },
+    {
+      "name": "ai-platform.connect-timeout-ms",
+      "type": "java.lang.Integer",
+      "description": "Connection timeout for AI platform requests in milliseconds.",
+      "defaultValue": 2000
+    },
+    {
+      "name": "ai-platform.read-timeout-ms",
+      "type": "java.lang.Integer",
+      "description": "Read timeout for AI platform requests in milliseconds.",
+      "defaultValue": 120000
+    },
+    {
+      "name": "ai-platform.tenant-id",
+      "type": "java.lang.String",
+      "description": "Tenant scope sent to the standalone AI platform.",
+      "defaultValue": "default"
+    },
+    {
+      "name": "ai-platform.user-id",
+      "type": "java.lang.String",
+      "description": "Optional user scope sent to the standalone AI platform."
+    },
+    {
+      "name": "ai-platform.tool-token",
+      "type": "java.lang.String",
+      "description": "Token used to authenticate requests to the AI platform service."
+    },
+    {
+      "name": "oat.frontend.base-url",
+      "type": "java.lang.String",
+      "description": "Primary frontend origin used for CORS and generated links.",
+      "defaultValue": "http://localhost:5176"
+    },
+    {
+      "name": "oat.frontend.allowed-origins",
+      "type": "java.lang.String",
+      "description": "Comma-separated frontend origins allowed by CORS.",
+      "defaultValue": "${oat.frontend.base-url:http://localhost:5176}"
+    },
+    {
+      "name": "git.default.username",
+      "type": "java.lang.String",
+      "description": "Default username for Git remote operations when request-level credentials are not supplied."
+    },
+    {
+      "name": "git.default.password",
+      "type": "java.lang.String",
+      "description": "Default password or token for Git remote operations when request-level credentials are not supplied."
     }
   ]
 }

@@ -4,7 +4,6 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -15,8 +14,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Coordinates short-lived user actions. Redis is used when enabled; the local
- * fallback keeps a single-node developer installation usable without Redis.
+ * Coordinates short-lived user actions. Redis is the primary path; the local
+ * fallback keeps the service usable if Redis is temporarily unavailable.
  */
 @Service
 public class MultiUserRequestCoordinator {
@@ -29,25 +28,20 @@ public class MultiUserRequestCoordinator {
             """, Long.class);
 
     private final StringRedisTemplate redis;
-    private final boolean redisEnabled;
     private final Cache<String, Long> localIdempotency = Caffeine.newBuilder()
             .maximumSize(20_000).expireAfterAccess(Duration.ofMinutes(5)).build();
     private final Cache<String, LocalCounter> localCounters = Caffeine.newBuilder()
             .maximumSize(20_000).expireAfterAccess(Duration.ofMinutes(5)).build();
 
-    public MultiUserRequestCoordinator(StringRedisTemplate redis,
-                                       @Value("${oat.redis.enabled:false}") boolean redisEnabled) {
+    public MultiUserRequestCoordinator(StringRedisTemplate redis) {
         this.redis = redis;
-        this.redisEnabled = redisEnabled;
     }
 
     public boolean acquireIdempotency(String key, Duration ttl) {
-        if (redisEnabled) {
-            try {
-                return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, "1", ttl));
-            } catch (RuntimeException exception) {
-                log.warn("event=redis.idempotency.fallback key_hash={} reason={}", key.hashCode(), exception.getMessage());
-            }
+        try {
+            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, "1", ttl));
+        } catch (RuntimeException exception) {
+            log.warn("event=redis.idempotency.fallback key_hash={} reason={}", key.hashCode(), exception.getMessage());
         }
         long now = System.nanoTime();
         long expiresAt = now + ttl.toNanos();
@@ -63,26 +57,22 @@ public class MultiUserRequestCoordinator {
     }
 
     public void releaseIdempotency(String key) {
-        if (redisEnabled) {
-            try {
-                redis.delete(key);
-                return;
-            } catch (RuntimeException exception) {
-                log.warn("event=redis.idempotency.release_failed key_hash={} reason={}", key.hashCode(), exception.getMessage());
-            }
+        try {
+            redis.delete(key);
+            return;
+        } catch (RuntimeException exception) {
+            log.warn("event=redis.idempotency.release_failed key_hash={} reason={}", key.hashCode(), exception.getMessage());
         }
         localIdempotency.invalidate(key);
     }
 
     public boolean allow(String key, int limit, Duration window) {
-        if (redisEnabled) {
-            try {
-                Long allowed = redis.execute(RATE_LIMIT_SCRIPT, Collections.singletonList(key),
-                        String.valueOf(window.toMillis()), String.valueOf(limit));
-                return Long.valueOf(1L).equals(allowed);
-            } catch (RuntimeException exception) {
-                log.warn("event=redis.rate_limit.fallback key_hash={} reason={}", key.hashCode(), exception.getMessage());
-            }
+        try {
+            Long allowed = redis.execute(RATE_LIMIT_SCRIPT, Collections.singletonList(key),
+                    String.valueOf(window.toMillis()), String.valueOf(limit));
+            return Long.valueOf(1L).equals(allowed);
+        } catch (RuntimeException exception) {
+            log.warn("event=redis.rate_limit.fallback key_hash={} reason={}", key.hashCode(), exception.getMessage());
         }
         long now = System.nanoTime();
         long windowNanos = window.toNanos();

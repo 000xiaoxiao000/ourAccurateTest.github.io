@@ -2,7 +2,6 @@ package com.oAT.web.config;
 
 import com.oAT.web.control.LoginInterceptor;
 import com.oAT.web.service.ResourceService;
-import org.jspecify.annotations.NonNull;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
@@ -52,7 +51,7 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Override
-    public void addResourceHandlers(@NonNull ResourceHandlerRegistry registry) {
+    public void addResourceHandlers(ResourceHandlerRegistry registry) {
         File resourceRoot = new File(resourceService.getCacheRoot());
         if (!resourceRoot.exists()) {
             resourceRoot.mkdirs();

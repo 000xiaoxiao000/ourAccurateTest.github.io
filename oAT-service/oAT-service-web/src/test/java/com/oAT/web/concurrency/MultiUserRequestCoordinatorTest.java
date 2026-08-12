@@ -11,7 +11,7 @@ class MultiUserRequestCoordinatorTest {
 
     @Test
     void localIdempotencyHonorsTtlAndRelease() throws Exception {
-        MultiUserRequestCoordinator coordinator = new MultiUserRequestCoordinator(null, false);
+        MultiUserRequestCoordinator coordinator = new MultiUserRequestCoordinator(null);
 
         assertTrue(coordinator.acquireIdempotency("idem:test", Duration.ofMillis(30)));
         assertFalse(coordinator.acquireIdempotency("idem:test", Duration.ofMillis(30)));
@@ -25,13 +25,14 @@ class MultiUserRequestCoordinatorTest {
 
     @Test
     void localRateLimitHonorsLimitAndWindow() throws Exception {
-        MultiUserRequestCoordinator coordinator = new MultiUserRequestCoordinator(null, false);
+        MultiUserRequestCoordinator coordinator = new MultiUserRequestCoordinator(null);
 
-        assertTrue(coordinator.allow("rate:test", 2, Duration.ofMillis(30)));
-        assertTrue(coordinator.allow("rate:test", 2, Duration.ofMillis(30)));
-        assertFalse(coordinator.allow("rate:test", 2, Duration.ofMillis(30)));
+        Duration window = Duration.ofMillis(100);
+        assertTrue(coordinator.allow("rate:test", 2, window));
+        assertTrue(coordinator.allow("rate:test", 2, window));
+        assertFalse(coordinator.allow("rate:test", 2, window));
 
-        Thread.sleep(40);
-        assertTrue(coordinator.allow("rate:test", 2, Duration.ofMillis(30)));
+        Thread.sleep(150);
+        assertTrue(coordinator.allow("rate:test", 2, window));
     }
 }

@@ -11,6 +11,9 @@ server:
 spring:
   application:
     name: oAT-service-web
+  session:
+    redis:
+      namespace: "${OAT_REDIS_SESSION_NAMESPACE:oat:prod:session}"
   servlet:
     multipart:
       max-file-size: 2048MB
@@ -33,18 +36,12 @@ spring:
     baseline-version: 1
     out-of-order: false
     validate-on-migrate: true
-  session:
-    redis:
-      namespace: "${OAT_REDIS_SESSION_NAMESPACE:oat:prod:session}"
   data:
     redis:
       host: "${OAT_REDIS_HOST:127.0.0.1}"
       port: "${OAT_REDIS_PORT:6379}"
       password: "${OAT_REDIS_PASSWORD:}"
       timeout: "${OAT_REDIS_TIMEOUT:2s}"
-      sentinel:
-        master: "${OAT_REDIS_SENTINEL_MASTER:}"
-        nodes: "${OAT_REDIS_SENTINEL_NODES:}"
 
 logging:
   level:
@@ -101,24 +98,14 @@ oat:
       path: "${oat.data.path}large-payload/"
     static-source:
       inline-threshold-bytes: 8192
-  redis:
-    # Redis is opt-in so a local single-node deployment remains self-contained.
-    # Production should set OAT_REDIS_ENABLED=true.
-    enabled: "${OAT_REDIS_ENABLED:false}"
 
-ai:
-  llm:
-    enabled: true
-    provider: deepseek
-    base-url: https://api.deepseek.com
-    api-key: "${AI_LLM_API_KEY:}"
-    model: "${AI_LLM_MODEL:deepseek-chat}"
-    max-tokens: 8192
-    temperature: 0.7
-    timeout: 300
-    log-requests: false
-    log-responses: false
-    system-prompt-prefix: 你是一个专业的软件需求一致性分析服务，专注于需求、用例、源码和运行证据的结构化分析。
+ai-platform:
+  base-url: "${OAT_AI_PLATFORM_URL:http://localhost:8898}"
+  connect-timeout-ms: "${OAT_AI_PLATFORM_CONNECT_TIMEOUT_MS:2000}"
+  read-timeout-ms: "${OAT_AI_PLATFORM_READ_TIMEOUT_MS:120000}"
+  tenant-id: "${OAT_AI_PLATFORM_TENANT_ID:oAT}"
+  user-id: "${OAT_AI_PLATFORM_USER_ID:}"
+  tool-token: "${OAT_AI_TOOL_TOKEN:local-ai-tool-token}"
 
 management:
   endpoints:

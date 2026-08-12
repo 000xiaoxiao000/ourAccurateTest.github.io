@@ -1,6 +1,9 @@
 package com.oAT.web.verification;
 
-import com.oAT.ai.service.LLMService;
+import com.aiplatform.client.AiDraftClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.oAT.web.persistence.entity.StaticSourceClassInfo;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
 import com.oAT.web.persistence.entity.StaticSourceMethodInfo;
@@ -21,7 +24,7 @@ import static org.mockito.Mockito.*;
 
 class VerificationAiOrchestratorTest {
 
-    private LLMService llmService;
+    private AiDraftClient aiDraftClient;
     private VerificationAiOrchestrator orchestrator;
 
     private static final String MINIMAL_JSON = """
@@ -33,42 +36,43 @@ class VerificationAiOrchestratorTest {
 
     @BeforeEach
     void setUp() {
-        llmService = mock(LLMService.class);
-        orchestrator = new VerificationAiOrchestrator(llmService);
-        when(llmService.isAvailable()).thenReturn(true);
+        aiDraftClient = mock(AiDraftClient.class);
+        // 默认认为 ai-platform 健康可用（真实环境中 AiGateway.isAvailable() 会做健康探测）
+        when(aiDraftClient.ping()).thenReturn(true);
+        orchestrator = new VerificationAiOrchestrator(new AiGateway(aiDraftClient));
     }
 
     // ── Prompt cache ──────────────────────────────────────────────────────────
 
     @Test
     void same_input_hits_cache_and_calls_llm_only_once() {
-        when(llmService.chat(anyString(), anyString())).thenReturn(MINIMAL_JSON);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(MINIMAL_JSON));
 
         AiVerificationInput input = simpleInput("baseline-1");
         orchestrator.analyze(input);
         orchestrator.analyze(input);
 
-        verify(llmService, times(1)).chat(anyString(), anyString());
+        verify(aiDraftClient, times(1)).execute(anyString(), anyString(), anyMap());
     }
 
     @Test
     void different_baseline_id_bypasses_cache() {
-        when(llmService.chat(anyString(), anyString())).thenReturn(MINIMAL_JSON);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(MINIMAL_JSON));
 
         orchestrator.analyze(simpleInput("bl-A"));
         orchestrator.analyze(simpleInput("bl-B"));
 
-        verify(llmService, times(2)).chat(anyString(), anyString());
+        verify(aiDraftClient, times(2)).execute(anyString(), anyString(), anyMap());
     }
 
     @Test
     void different_requirement_content_bypasses_cache() {
-        when(llmService.chat(anyString(), anyString())).thenReturn(MINIMAL_JSON);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(MINIMAL_JSON));
 
         orchestrator.analyze(inputWithRequirement("baseline-1", "REQ-1: 用户可以下单"));
         orchestrator.analyze(inputWithRequirement("baseline-1", "REQ-2: 用户可以退单"));
 
-        verify(llmService, times(2)).chat(anyString(), anyString());
+        verify(aiDraftClient, times(2)).execute(anyString(), anyString(), anyMap());
     }
 
     // ── Minimal subgraph context ──────────────────────────────────────────────
@@ -78,11 +82,12 @@ class VerificationAiOrchestratorTest {
         AtomicInteger capturedPromptRelevantPos = new AtomicInteger(-1);
         AtomicInteger capturedPromptIrrelevantPos = new AtomicInteger(-1);
 
-        when(llmService.chat(anyString(), argThat(prompt -> {
+        when(aiDraftClient.execute(anyString(), anyString(), argThat(context -> {
+            String prompt = String.valueOf(context.get("user"));
             capturedPromptRelevantPos.set(prompt.indexOf("OrderService"));
             capturedPromptIrrelevantPos.set(prompt.indexOf("UnrelatedHelper"));
             return true;
-        }))).thenReturn(MINIMAL_JSON);
+        }))).thenReturn(aiResponse(MINIMAL_JSON));
 
         // requirement text mentions "order" — OrderService should rank higher than UnrelatedHelper
         AiVerificationInput input = new AiVerificationInput(
@@ -117,7 +122,7 @@ class VerificationAiOrchestratorTest {
                  ],
                  "findings":[{"acKey":"AC-1","findingType":"PARTIAL","perspective":"CROSS","severity":"MEDIUM","title":"部分","description":"desc","verdict":"PARTIAL","confidence":0.7}]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(jsonWithFakeRef);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(jsonWithFakeRef));
 
         AiVerificationInput input = new AiVerificationInput(
                 "bl-1", "REQ-1: create order", null, null, null, null, null,
@@ -146,7 +151,7 @@ class VerificationAiOrchestratorTest {
                  ],
                  "findings":[{"acKey":"AC-1","findingType":"PARTIAL","perspective":"TEST","severity":"MEDIUM","title":"T","description":"D","verdict":"PARTIAL","confidence":0.7}]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(jsonWithTestcaseLink);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(jsonWithTestcaseLink));
 
         AiVerificationResult result = orchestrator.analyze(simpleInput("bl-1"));
 
@@ -158,7 +163,7 @@ class VerificationAiOrchestratorTest {
 
     @Test
     void valid_source_symbol_from_static_index_is_kept() {
-        when(llmService.chat(anyString(), anyString())).thenReturn(MINIMAL_JSON);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(MINIMAL_JSON));
 
         AiVerificationResult result = orchestrator.analyze(new AiVerificationInput(
                 "bl-1", "REQ-1: create order", null, null, null, null, null,
@@ -171,10 +176,10 @@ class VerificationAiOrchestratorTest {
     }
 
     @Test
-    void llm_unavailable_throws_immediately() {
-        when(llmService.isAvailable()).thenReturn(false);
+    void ai_platform_failure_throws_immediately() {
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenThrow(new IllegalStateException("ai-platform unavailable"));
         assertThrows(IllegalStateException.class, () -> orchestrator.analyze(simpleInput("bl-1")));
-        verify(llmService, never()).chat(anyString(), anyString());
+        verify(aiDraftClient, times(1)).execute(anyString(), anyString(), anyMap());
     }
 
     @Test
@@ -185,7 +190,7 @@ class VerificationAiOrchestratorTest {
                    "acceptanceCriteria":["用户必须可以使用正确账号密码登录系统"]}
                 ],"testcases":[],"traceLinks":[],"findings":[]}
                 """;
-        when(llmService.chat(anyString(), anyString())).thenReturn(nestedJson);
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse(nestedJson));
 
         AiVerificationResult result = orchestrator.analyze(inputWithRequirement("bl-1", "登录需求"));
 
@@ -196,7 +201,7 @@ class VerificationAiOrchestratorTest {
 
     @Test
     void fallback_extracts_plain_text_requirement_when_ai_has_no_criteria() {
-        when(llmService.chat(anyString(), anyString())).thenReturn("{}", "{}");
+        when(aiDraftClient.execute(anyString(), anyString(), anyMap())).thenReturn(aiResponse("{}"), aiResponse("{}"));
 
         AiVerificationResult result = orchestrator.analyze(inputWithRequirement("bl-1",
                 "用户登录验收：系统必须支持用户使用正确账号密码登录，登录成功后进入首页。"));
@@ -206,6 +211,12 @@ class VerificationAiOrchestratorTest {
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private JsonNode aiResponse(String text) {
+        ObjectNode node = new ObjectMapper().createObjectNode();
+        node.put("text", text);
+        return node;
+    }
 
     private AiVerificationInput simpleInput(String baselineId) {
         return new AiVerificationInput(baselineId, "REQ-1: 简单需求", null, null, null, null, null, List.of());

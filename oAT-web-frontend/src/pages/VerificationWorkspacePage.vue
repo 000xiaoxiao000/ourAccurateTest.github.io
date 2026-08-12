@@ -69,9 +69,20 @@
               </label>
               <textarea v-model="pasteInputs[asset.type]" :placeholder="asset.placeholder"></textarea>
               <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号" />
-              <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
-                {{ importing === asset.type ? '导入中...' : `导入${asset.label}` }}
-              </button>
+              <div class="import-actions">
+                <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
+                  {{ importing === asset.type ? '导入中...' : `导入${asset.label}` }}
+                </button>
+                <AiAssistButton
+                  :project-id="projectId"
+                  :intent="aiIntentForAsset(asset.type)"
+                  :label="aiDraftGenerateLabelFor(asset.type)"
+                  loading-text="AI 生成中"
+                  :source-text="pasteInputs[asset.type] || ''"
+                  @draft="openAiDraft(aiDraftTitleFor(asset.type), $event)"
+                  @error="handleAiError"
+                />
+              </div>
               <div v-if="asset.type === 'SOURCE'" class="source-import-divider">
                 <span>或</span>
               </div>
@@ -203,6 +214,17 @@
                 <small v-if="asset.contentPreview">{{ asset.contentPreview }}</small>
               </button>
               <div class="record-actions">
+                <AiAssistButton
+                  :project-id="projectId"
+                  :intent="aiIntentForAsset(group.key, asset)"
+                  :asset-id="asset.id"
+                  :asset-domain="assetDomainFor(group.key, asset)"
+                  :asset-action="aiActionForAsset(group.key as AssetType, asset)"
+                  :label="aiButtonLabelFor(group.key, asset)"
+                  loading-text="AI 处理中"
+                  @draft="openAiDraft(aiDraftTitleFor(group.key, asset), $event)"
+                  @error="handleAiError"
+                />
                 <button type="button" @click="startEditAsset(asset)">编辑</button>
                 <button type="button" class="danger-button" @click="deleteAsset(asset)">删除</button>
               </div>
@@ -674,6 +696,15 @@
         {{ helpTooltip.text }}
       </div>
     </Teleport>
+
+    <AiDraftDialog
+      :visible="aiDraftVisible"
+      :title="aiDraftTitle"
+      :draft="aiDraft"
+      @close="closeAiDraft"
+      @reject="rejectAiDraft"
+      @confirm="confirmAiDraftPayload"
+    />
   </section>
 </template>
 
@@ -682,6 +713,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import AnalysisOrchestrationPanel from '@/components/AnalysisOrchestrationPanel.vue'
 import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
+import AiAssistButton from '@/components/ai/AiAssistButton.vue'
+import AiDraftDialog from '@/components/ai/AiDraftDialog.vue'
 import { useRoute } from 'vue-router'
 
 import {
@@ -718,6 +751,7 @@ import {
   type Verdict,
   type WriteBackAction,
 } from '@/api/verification'
+import { confirmAiDraft, type AiDraftResponse } from '@/api/ai'
 import { fetchRepositoryBranches } from '@/api/bootstrap'
 import { fetchGitLatestCommit, fetchGitRecentCommits } from '@/api/version'
 import type { GitCommitOption } from '@/api/types'
@@ -800,6 +834,10 @@ const writeBackUrl = ref('')
 const writeBackNote = ref('')
 const writeBackTargetRole = ref<'PRODUCT' | 'TEST' | 'DEVELOPMENT' | 'CROSS'>('CROSS')
 const writeBackSubmitting = ref(false)
+const aiDraftVisible = ref(false)
+const aiDraftTitle = ref('')
+const aiDraftTaskId = ref('')
+const aiDraft = ref<AiDraftResponse | null>(null)
 const deletingAssetIds = ref<Set<string>>(new Set())
 const deletingBaselineIds = ref<Set<string>>(new Set())
 const reviewingFindingIds = ref<Set<string>>(new Set())
@@ -2337,6 +2375,146 @@ function verdictText(value: Verdict) {
   return map[value] || value
 }
 
+type AiAssetDomain = 'requirements' | 'testcases' | 'defects' | 'coverage' | 'sources' | 'git' | 'versions'
+type AiAssetAction = 'parse' | 'analyze'
+
+const aiAssetConfig: Record<AssetType, {
+  intent: string
+  domain: AiAssetDomain
+  action: AiAssetAction
+  importLabel: string
+  assetLabel: string
+  title: string
+}> = {
+  REQUIREMENT: {
+    intent: 'requirement.parse',
+    domain: 'requirements',
+    action: 'parse',
+    importLabel: 'AI 解析需求草稿',
+    assetLabel: 'AI 解析',
+    title: '需求解析草稿',
+  },
+  TESTCASE: {
+    intent: 'testcase.parse',
+    domain: 'testcases',
+    action: 'parse',
+    importLabel: '生成用例草稿',
+    assetLabel: '生成用例草稿',
+    title: '用例生成草稿',
+  },
+  DEFECT: {
+    intent: 'defect.parse',
+    domain: 'defects',
+    action: 'parse',
+    importLabel: 'AI 建缺陷草稿',
+    assetLabel: 'AI 建缺陷草稿',
+    title: '缺陷草稿',
+  },
+  COVERAGE: {
+    intent: 'coverage.analyze',
+    domain: 'coverage',
+    action: 'analyze',
+    importLabel: 'AI 分析缺口建议',
+    assetLabel: 'AI 分析缺口建议',
+    title: '覆盖率缺口分析草稿',
+  },
+  SOURCE: {
+    intent: 'source.analyze',
+    domain: 'sources',
+    action: 'analyze',
+    importLabel: '多语言代码语义分析',
+    assetLabel: '多语言代码语义分析',
+    title: '源码语义分析草稿',
+  },
+  EXECUTION: {
+    intent: 'version.analyze',
+    domain: 'versions',
+    action: 'analyze',
+    importLabel: 'AI 影响分析建议',
+    assetLabel: 'AI 影响分析建议',
+    title: '版本影响分析草稿',
+  },
+}
+
+function aiConfigFor(type: AssetType, asset?: VerificationAsset) {
+  const config = aiAssetConfig[type]
+  if (type === 'SOURCE' && asset?.sourceType === 'GIT') {
+    return {
+      ...config,
+      intent: 'git.analyze',
+      domain: 'git' as const,
+      title: 'Git 变更影响分析草稿',
+      importLabel: 'AI 分析变更解读',
+      assetLabel: 'AI 分析变更解读',
+    }
+  }
+  return config
+}
+
+function aiIntentForAsset(type: AssetType, asset?: VerificationAsset) {
+  return aiConfigFor(type, asset).intent
+}
+
+function aiActionForAsset(type: AssetType, asset?: VerificationAsset) {
+  return aiConfigFor(type, asset).action
+}
+
+function assetDomainFor(type: AssetType, asset?: VerificationAsset) {
+  return aiConfigFor(type, asset).domain
+}
+
+function aiDraftTitleFor(type: AssetType, asset?: VerificationAsset) {
+  return aiConfigFor(type, asset).title
+}
+
+function aiDraftGenerateLabelFor(type: AssetType) {
+  return aiAssetConfig[type].importLabel
+}
+
+function aiButtonLabelFor(type: AssetType, asset?: VerificationAsset) {
+  return aiConfigFor(type, asset).assetLabel
+}
+
+function openAiDraft(title: string, draft: AiDraftResponse) {
+  aiDraftTitle.value = title
+  aiDraft.value = draft
+  aiDraftTaskId.value = draft.taskId
+  aiDraftVisible.value = true
+}
+
+function closeAiDraft() {
+  aiDraftVisible.value = false
+  aiDraftTaskId.value = ''
+}
+
+async function confirmAiDraftPayload(payload: string) {
+  if (!aiDraftTaskId.value) return
+  try {
+    await confirmAiDraft(projectId.value, aiDraftTaskId.value, true, payload)
+    aiDraftVisible.value = false
+    aiDraftTaskId.value = ''
+    toast.success('AI 草稿已确认并落库')
+    await loadOverview()
+  } catch (err) {
+    toast.error(messageOf(err))
+  }
+}
+
+async function rejectAiDraft() {
+  if (!aiDraftTaskId.value) return
+  try {
+    await confirmAiDraft(projectId.value, aiDraftTaskId.value, false)
+    aiDraftVisible.value = false
+    toast.info('AI 草稿已拒绝')
+  } catch (err) {
+    toast.error(messageOf(err))
+  }
+}
+
+function handleAiError(err: unknown) {
+  toast.error(messageOf(err))
+}
+
 function messageOf(err: unknown) {
   return err instanceof Error ? err.message : '操作失败'
 }
@@ -2679,6 +2857,13 @@ function messageOf(err: unknown) {
 .asset-import-body {
   display: grid;
   gap: 8px;
+}
+
+.import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .asset-file-drop {

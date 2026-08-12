@@ -13,7 +13,6 @@
 
     <!-- 所有模块统一使用 JDK 21+ -->
     <modules>
-        <module>oAT-ai</module>
         <module>oAT-service-web</module>
     </modules>
 

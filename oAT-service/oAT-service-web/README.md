@@ -1,6 +1,6 @@
 # oAT-service-web
 
-`oAT-service-web` 是 ourAccurateTest 的后端主服务，基于 Spring Boot 构建，打包为可直接运行的 `war`。它提供项目、应用、版本、用例、仓库、代码图谱、验证基线、AI 分析和质量门禁等 API。
+`oAT-service-web` 是 ourAccurateTest 的后端主服务，基于 Spring Boot 构建，打包为可直接运行的 `war`。它提供项目、应用、版本、用例、仓库、代码图谱、验证基线、质量门禁、Git 影响分析和受控 AI 业务工具等 API；AI 生成能力由独立的 `ai-platform` 提供。
 
 ## 目录结构
 
@@ -70,13 +70,13 @@ oAT-service-web/
 | JGit | Git 仓库访问 |
 | JavaParser / ASM | Java 源码和字节码分析 |
 | 多语言覆盖率解析 | JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
-| LangChain4j | 通过 `oAT-ai` 调用 LLM |
+| LangChain4j | 在独立 `ai-platform` 中调用 LLM（经 `ai-platform-client` 接入） |
 
 ## 依赖服务
 
 - PostgreSQL：保存结构化业务数据、验证结果和图谱数据。
 - Git：用于仓库拉取、Commit 查询、Diff 和源码快照分析。
-- LLM 服务：可选 OpenAI、DeepSeek、Ollama 或兼容 OpenAI 协议的服务。
+- AI 平台：独立项目 `ai-platform`（独立 git 仓库，`ai-platform-service` 提供任务/草稿/会话 API），业务经 `ai-platform-client` artifact 接入，通过 HTTP Tool Registry 读取业务资产并生成草稿。
 - 本地文件目录：保存 Git 缓存、大载荷和源码压缩包。
 
 ## 配置
@@ -109,13 +109,16 @@ oat:
   data:
     path: "${user.home}/oAT/codeData/"
 
-ai:
-  llm:
-    enabled: true
-    provider: deepseek
-    api-key: "${AI_LLM_API_KEY:your-api-key}"
-    model: "${AI_LLM_MODEL:deepseek-chat}"
+ai-platform:
+  base-url: "${OAT_AI_PLATFORM_URL:http://localhost:8898}"
+  connect-timeout-ms: "${OAT_AI_PLATFORM_CONNECT_TIMEOUT_MS:2000}"
+  read-timeout-ms: "${OAT_AI_PLATFORM_READ_TIMEOUT_MS:120000}"
+  tenant-id: "${OAT_AI_PLATFORM_TENANT_ID:oAT}"
+  tool-token: "${OAT_AI_TOOL_TOKEN:local-ai-tool-token}"
 ```
+
+`oAT-service-web` 不在进程内调用模型。请先启动独立 `ai-platform-service`，并确保其
+`AI_TOOL_GATEWAY_TOKEN` 与业务端 `OAT_AI_TOOL_TOKEN` 相同。
 
 `oat.data.path` 需要有读写权限。上传限制默认是 `2048MB`，如果前面有 Nginx、网关或外部 Tomcat，也要同步调整请求体限制。
 
@@ -153,6 +156,8 @@ V9__analysis_job_checkpoint.sql
 V10__baseline_graph_versions_and_runtime_execution.sql
 V11__partitioning_and_archive_markers.sql
 V12__gate_enforcement_mode_and_stale_commit_view.sql
+V13__git_impact_jobs.sql
+V14__ai_generated_marker.sql
 ```
 
 `src/main/resources/db/postgresql/` 和 `src/main/resources/db/mysql/` 保留为手工初始化或历史兼容脚本，默认运行路径以 Flyway `db/migration` 为准。

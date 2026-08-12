@@ -28,7 +28,17 @@ public final class VerificationModels {
             Map<String, Object> metadata,
             Freshness freshness,
             String importedBy,
-            LocalDateTime capturedAt) {
+            LocalDateTime capturedAt,
+            boolean aiGenerated) {
+        public AssetSnapshot(String id, String projectId, AssetType assetType, SourceType sourceType,
+                             String externalId, String externalUrl, String sourceVersion, String fileName,
+                             String contentHash, String content, String storageType, String storageKey,
+                             long contentSize, String contentPreview, Map<String, Object> metadata,
+                             Freshness freshness, String importedBy, LocalDateTime capturedAt) {
+            this(id, projectId, assetType, sourceType, externalId, externalUrl, sourceVersion, fileName,
+                    contentHash, content, storageType, storageKey, contentSize, contentPreview, metadata,
+                    freshness, importedBy, capturedAt, false);
+        }
     }
 
     public record Baseline(

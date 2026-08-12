@@ -3,7 +3,6 @@ package com.oAT.web.verification;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.node.MissingNode;
-import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.logging.LogFields;
 import com.oAT.web.persistence.entity.StaticSourceInfo;
@@ -130,7 +129,7 @@ public class VerificationAiOrchestrator {
             每一个 criteria 至少输出一条 findings。若该验收标准已满足，输出 findingType=SATISFIED_SUMMARY、severity=INFO、verdict=SATISFIED，并说明支撑依据。
             """;
 
-    private final LLMService llmService;
+    private final AiGateway aiGateway;
     /** Short-lived local L1 cache. Cross-node sharing is intentionally handled by the persisted job/result layer. */
     private final Cache<String, String> promptCache = Caffeine.newBuilder()
             .maximumSize(PROMPT_CACHE_MAX_SIZE)
@@ -138,8 +137,8 @@ public class VerificationAiOrchestrator {
             .recordStats()
             .build();
 
-    public VerificationAiOrchestrator(LLMService llmService) {
-        this.llmService = llmService;
+    public VerificationAiOrchestrator(AiGateway aiGateway) {
+        this.aiGateway = aiGateway;
     }
 
     public AiVerificationResult analyze(AiVerificationInput input) {
@@ -147,7 +146,7 @@ public class VerificationAiOrchestrator {
     }
 
     public AiVerificationResult analyze(AiVerificationInput input, Consumer<String> progress) {
-        if (!llmService.isAvailable()) {
+        if (!aiGateway.isAvailable()) {
             throw new IllegalStateException("AI服务不可用，无法执行需求一致性分析");
         }
         String userMessage = buildUserMessage(input);
@@ -160,7 +159,7 @@ public class VerificationAiOrchestrator {
                     "prompt_hash", promptHash)));
         } else {
             progress.accept("正在请求 AI 生成需求、用例和依据关系");
-            cachedResponse = llmService.chat(SYSTEM_PROMPT, userMessage);
+            cachedResponse = aiGateway.chat(SYSTEM_PROMPT, userMessage);
             if (!StringUtils.hasText(cachedResponse)) {
                 throw new IllegalStateException("AI分析没有返回结果");
             }
@@ -181,7 +180,7 @@ public class VerificationAiOrchestrator {
                 return partial;
             }
             progress.accept("AI 返回格式不完整，正在自动修复并重试");
-            String repaired = llmService.chat(SYSTEM_PROMPT, buildRepairMessage(response));
+            String repaired = aiGateway.chat(SYSTEM_PROMPT, buildRepairMessage(response));
             if (!StringUtils.hasText(repaired)) {
                 return fallbackFromDocuments(input, progress, firstFailure);
             }

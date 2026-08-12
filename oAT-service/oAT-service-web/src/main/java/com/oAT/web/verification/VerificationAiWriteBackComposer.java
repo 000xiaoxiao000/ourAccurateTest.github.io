@@ -1,7 +1,6 @@
 package com.oAT.web.verification;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.oAT.ai.service.LLMService;
 import com.oAT.web.common.UtilJson;
 import com.oAT.web.verification.model.VerificationModels.AcceptanceCriterion;
 import com.oAT.web.verification.model.VerificationModels.Finding;
@@ -42,17 +41,17 @@ public class VerificationAiWriteBackComposer {
             }
             """;
 
-    private final LLMService llmService;
+    private final AiGateway aiGateway;
 
-    public VerificationAiWriteBackComposer(LLMService llmService) {
-        this.llmService = llmService;
+    public VerificationAiWriteBackComposer(AiGateway aiGateway) {
+        this.aiGateway = aiGateway;
     }
 
     public String compose(WriteBackInput input) {
-        if (!llmService.isAvailable()) {
+        if (!aiGateway.isAvailable()) {
             throw new IllegalStateException("AI服务不可用，无法生成回写内容");
         }
-        String response = llmService.chat(SYSTEM_PROMPT, buildUserMessage(input));
+        String response = aiGateway.chat(SYSTEM_PROMPT, buildUserMessage(input));
         if (!StringUtils.hasText(response)) {
             throw new IllegalStateException("AI没有返回回写内容");
         }
