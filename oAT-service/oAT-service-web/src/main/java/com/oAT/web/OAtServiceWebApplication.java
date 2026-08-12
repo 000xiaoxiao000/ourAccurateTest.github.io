@@ -11,7 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @SpringBootApplication
 @EnableAsync
 @EnableScheduling
-@ComponentScan(basePackages = {"com.oAT.web", "com.aiplatform.client"})
+@ComponentScan(basePackages = {"com.oAT.web", "com.ovanth.client"})
 public class OAtServiceWebApplication extends SpringBootServletInitializer {
 
     public static void main(String[] args) {

@@ -2,7 +2,7 @@ package com.oAT.web.ai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.aiplatform.client.AiDraftClient;
+import com.ovanth.client.OvanthDraftClient;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.service.ProjectService;
 import com.oAT.web.service.entity.ProjectVo;
@@ -42,12 +42,12 @@ public class AiDraftProxyController {
             items/risks/recommendedActions 必须引用输入中真实存在的定位或字段；证据不足时降低 confidence 并说明需要补充的依据。
             """;
 
-    private final AiDraftClient aiDraftClient;
+    private final OvanthDraftClient aiDraftClient;
     private final VerificationService verificationService;
     private final ProjectService projectService;
     private final ObjectMapper objectMapper;
 
-    public AiDraftProxyController(AiDraftClient aiDraftClient,
+    public AiDraftProxyController(OvanthDraftClient aiDraftClient,
                                   VerificationService verificationService,
                                   ProjectService projectService,
                                   ObjectMapper objectMapper) {
@@ -58,7 +58,7 @@ public class AiDraftProxyController {
     }
 
     @PostMapping("/tasks")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> submitTask(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> submitTask(@PathVariable String projectId,
                                                                               @RequestBody AiTaskSubmitRequest request) {
         Map<String, Object> context = new LinkedHashMap<>(request.context() == null ? Map.of() : request.context());
         context.putIfAbsent("projectId", projectId);
@@ -70,7 +70,7 @@ public class AiDraftProxyController {
      * 草稿确认后由 {@link #confirm} 落库为新的 AI 生成资产（SourceType.AGENT, aiGenerated=true）。
      */
     @PostMapping("/generate")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> generate(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> generate(@PathVariable String projectId,
                                                                            @RequestBody AiGenerateRequest request) {
         Assert.hasText(request.intent(), "intent 不能为空");
         Map<String, Object> context = new LinkedHashMap<>();
@@ -85,43 +85,43 @@ public class AiDraftProxyController {
     }
 
     @PostMapping("/requirements/{assetId}/parse")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> parseRequirement(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseRequirement(@PathVariable String projectId,
                                                                                     @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "requirement.parse", "需求解析任务已提交");
     }
 
     @PostMapping("/testcases/{assetId}/parse")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> parseTestcase(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseTestcase(@PathVariable String projectId,
                                                                                  @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "testcase.parse", "用例解析任务已提交");
     }
 
     @PostMapping("/defects/{assetId}/parse")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> parseDefect(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseDefect(@PathVariable String projectId,
                                                                                @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "defect.parse", "缺陷解析任务已提交");
     }
 
     @PostMapping("/coverage/{assetId}/analyze")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> analyzeCoverage(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeCoverage(@PathVariable String projectId,
                                                                                    @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "coverage.analyze", "覆盖率分析任务已提交");
     }
 
     @PostMapping("/sources/{assetId}/analyze")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> analyzeSource(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeSource(@PathVariable String projectId,
                                                                                  @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "source.analyze", "源码分析任务已提交");
     }
 
     @PostMapping("/git/{assetId}/analyze")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> analyzeGit(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeGit(@PathVariable String projectId,
                                                                               @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "git.analyze", "Git影响分析任务已提交");
     }
 
     @PostMapping("/versions/{assetId}/analyze")
-    public ResultNotified<AiDraftClient.AiTaskSubmissionResponse> analyzeVersion(@PathVariable String projectId,
+    public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeVersion(@PathVariable String projectId,
                                                                                   @PathVariable String assetId) {
         return submitAssetTask(projectId, assetId, "version.analyze", "版本影响分析任务已提交");
     }
@@ -150,7 +150,7 @@ public class AiDraftProxyController {
             return ok("AI草稿已拒绝", taskId);
         }
 
-        AiDraftClient.AiTaskRecord task = aiDraftClient.getTask(taskId);
+        OvanthDraftClient.AiTaskRecord task = aiDraftClient.getTask(taskId);
         Assert.notNull(task, "找不到指定AI任务");
         Map<String, Object> context = parseObject(task.context());
         Assert.isTrue(projectId.equals(String.valueOf(context.get("projectId"))), "AI任务不属于当前项目");
@@ -181,7 +181,7 @@ public class AiDraftProxyController {
         return ok("AI草稿已确认并落库", imported);
     }
 
-    private ResultNotified<AiDraftClient.AiTaskSubmissionResponse> submitAssetTask(String projectId,
+    private ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> submitAssetTask(String projectId,
                                                                                     String assetId,
                                                                                     String intent,
                                                                                     String message) {

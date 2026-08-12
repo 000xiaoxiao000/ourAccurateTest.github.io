@@ -1,7 +1,7 @@
 package com.oAT.web.control;
 
 import com.oAT.web.config.FrontendProperties;
-import com.aiplatform.client.AiPlatformProperties;
+import com.ovanth.client.OvanthProperties;
 import com.oAT.web.logging.AuditLogger;
 import com.oAT.web.logging.LogContext;
 import com.oAT.web.logging.LogFields;
@@ -27,14 +27,14 @@ public class LoginInterceptor implements HandlerInterceptor {
     private static final String GENERIC_AI_TOOL_TOKEN_HEADER = "X-AI-TOOL-TOKEN";
 
     private final FrontendProperties frontendProperties;
-    private final AiPlatformProperties aiPlatformProperties;
+    private final OvanthProperties ovanthProperties;
     private final AuditLogger auditLogger;
 
     public LoginInterceptor(FrontendProperties frontendProperties,
-                            AiPlatformProperties aiPlatformProperties,
+                            OvanthProperties ovanthProperties,
                             AuditLogger auditLogger) {
         this.frontendProperties = frontendProperties;
-        this.aiPlatformProperties = aiPlatformProperties;
+        this.ovanthProperties = ovanthProperties;
         this.auditLogger = auditLogger;
     }
 
@@ -75,7 +75,7 @@ public class LoginInterceptor implements HandlerInterceptor {
         if (uri == null || !uri.startsWith("/api/ai-tools/")) {
             return false;
         }
-        String expectedToken = aiPlatformProperties.getToolToken();
+        String expectedToken = ovanthProperties.getToolToken();
         if (!StringUtils.hasText(expectedToken)) {
             return false;
         }
