@@ -129,12 +129,13 @@ public class AiDraftProxyController {
     @GetMapping("/tasks/{taskId}/draft")
     public ResultNotified<Map<String, Object>> getDraft(@PathVariable String projectId, @PathVariable String taskId) {
         JsonNode draft = aiDraftClient.getDraft(taskId);
+        JsonNode summary = draft == null ? null : draft.path("summary");
         Map<String, Object> response = new LinkedHashMap<>();
-        response.put("taskId", draft == null ? taskId : draft.path("taskId").asText(taskId));
-        response.put("status", draft == null ? "UNKNOWN" : draft.path("status").asText("UNKNOWN"));
+        response.put("taskId", (summary != null && !summary.isMissingNode()) ? summary.path("taskId").asText(taskId) : taskId);
+        response.put("status", (summary != null && !summary.isMissingNode()) ? summary.path("status").asText("UNKNOWN") : "UNKNOWN");
         response.put("payload", parseJsonOrText(draft == null ? null : draft.path("payload").asText(null)));
         response.put("error", draft == null ? "" : draft.path("error").asText(""));
-        response.put("aiGenerated", draft != null && draft.path("aiGenerated").asBoolean(false));
+        response.put("aiGenerated", summary != null && !summary.isMissingNode() && summary.path("aiGenerated").asBoolean(false));
         return ok("获取AI草稿成功", response);
     }
 

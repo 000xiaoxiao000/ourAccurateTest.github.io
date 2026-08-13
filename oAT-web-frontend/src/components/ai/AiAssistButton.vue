@@ -22,6 +22,7 @@ const props = withDefaults(
     assetId?: string
     assetAction?: 'parse' | 'analyze'
     sourceText?: string
+    emptyMessage?: string
     pollIntervalMs?: number
     maxPollCount?: number
   }>(),
@@ -34,6 +35,7 @@ const props = withDefaults(
     assetId: '',
     assetAction: 'analyze',
     sourceText: '',
+    emptyMessage: '请先粘贴 AI 输入原文',
     pollIntervalMs: 2000,
     maxPollCount: 60,
   },
@@ -51,11 +53,11 @@ async function submit() {
   loading.value = true
   try {
     const submission = props.assetDomain && props.assetId
-      ? await submitAssetAiTask(props.projectId, props.assetDomain, props.assetId, props.assetAction)
-      : props.sourceText?.trim()
-        ? await generateAiDraft(props.projectId, props.intent, props.sourceText)
+        ? await submitAssetAiTask(props.projectId, props.assetDomain, props.assetId, props.assetAction)
+        : props.sourceText?.trim()
+          ? await generateAiDraft(props.projectId, props.intent, props.sourceText)
         : (() => {
-            throw new Error('请先在输入框中粘贴内容作为 AI 输入')
+            throw new Error(props.emptyMessage)
           })()
     const draft = await pollDraft(submission.taskId)
     emit('draft', draft)
@@ -69,7 +71,8 @@ async function submit() {
 async function pollDraft(taskId: string): Promise<AiDraftResponse> {
   for (let i = 0; i < props.maxPollCount; i += 1) {
     const draft = await getAiDraft(props.projectId, taskId)
-    if (draft.status !== 'PENDING' && draft.status !== 'RUNNING') {
+    const status = draft.status
+    if (status !== 'PENDING' && status !== 'RUNNING') {
       return draft
     }
     await new Promise((resolve) => window.setTimeout(resolve, props.pollIntervalMs))

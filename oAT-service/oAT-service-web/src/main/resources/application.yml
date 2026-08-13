@@ -103,7 +103,7 @@ ovanth:
   base-url: "${OAT_AI_PLATFORM_URL:http://localhost:8898}"
   connect-timeout-ms: "${OAT_AI_PLATFORM_CONNECT_TIMEOUT_MS:2000}"
   read-timeout-ms: "${OAT_AI_PLATFORM_READ_TIMEOUT_MS:120000}"
-  tenant-id: "${OAT_AI_PLATFORM_TENANT_ID:oAT}"
+  tenant-id: "${OAT_AI_PLATFORM_TENANT_ID:default}"
   user-id: "${OAT_AI_PLATFORM_USER_ID:}"
   tool-token: "${OAT_AI_TOOL_TOKEN:local-ai-tool-token}"
 

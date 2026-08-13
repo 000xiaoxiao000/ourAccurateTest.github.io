@@ -62,12 +62,50 @@
               <em>{{ isImportExpanded(asset.type) ? '收起' : '展开' }}</em>
             </button>
             <div v-if="isImportExpanded(asset.type)" class="asset-import-body">
+              <div class="connector-sync-panel">
+                <div class="section-head compact-head">
+                  <h3>从平台同步</h3>
+                  <span>MCP / 连接器</span>
+                </div>
+                <label>
+                  <span>连接器类型</span>
+                  <select v-model="connectorForms[asset.type].connectorType">
+                    <option v-for="type in availableConnectorTypes" :key="type" :value="type">{{ type }}</option>
+                  </select>
+                </label>
+                <label>
+                  <span>同步范围</span>
+                  <input v-model.trim="connectorForms[asset.type].scopeRef" type="text" :placeholder="connectorScopePlaceholder(asset.type)" />
+                </label>
+                <div class="inline-grid">
+                  <label>
+                    <span>平台地址</span>
+                    <input v-model.trim="connectorForms[asset.type].baseUrl" type="url" placeholder="https://..." />
+                  </label>
+                  <label>
+                    <span>外部版本 / 账号</span>
+                    <input v-model.trim="connectorForms[asset.type].sourceVersion" type="text" placeholder="可选" />
+                  </label>
+                </div>
+                <button type="button" class="secondary-button full" :disabled="importing === asset.type || !canSyncConnector(asset.type)" @click="syncConnectorAsset(asset.type)">
+                  {{ importing === asset.type ? '同步中...' : '从平台同步资料' }}
+                </button>
+                <small>{{ connectorHelpText(asset.type) }}</small>
+              </div>
               <label class="asset-file-drop">
                 <input type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
                 <span>{{ files[asset.type]?.name || '选择文件' }}</span>
                 <small>{{ files[asset.type]?.name ? '已选择文件，可重新选择或拖放替换' : '点击选择文件，或把文件拖放到此区域' }}</small>
               </label>
-              <textarea v-model="pasteInputs[asset.type]" :placeholder="asset.placeholder"></textarea>
+              <label class="ai-input-field">
+                <span>AI 输入原文</span>
+                <textarea
+                  v-model="pasteInputs[asset.type]"
+                  :placeholder="asset.placeholder"
+                  :aria-label="`${asset.label} AI 输入原文`"
+                ></textarea>
+                <small>{{ pasteInputHelpFor(asset.type) }}</small>
+              </label>
               <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号" />
               <div class="import-actions">
                 <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
@@ -79,9 +117,12 @@
                   :label="aiDraftGenerateLabelFor(asset.type)"
                   loading-text="AI 生成中"
                   :source-text="pasteInputs[asset.type] || ''"
+                  :disabled="!hasAiDraftInput(asset.type)"
+                  :empty-message="`请先在“${asset.label}”卡片中同步平台资料或粘贴原文`"
                   @draft="openAiDraft(aiDraftTitleFor(asset.type), $event)"
                   @error="handleAiError"
                 />
+                <span v-if="!hasAiDraftInput(asset.type)" class="ai-input-required">先同步平台资料，或粘贴原文后生成 AI 草稿</span>
               </div>
               <div v-if="asset.type === 'SOURCE'" class="source-import-divider">
                 <span>或</span>
@@ -701,6 +742,7 @@
       :visible="aiDraftVisible"
       :title="aiDraftTitle"
       :draft="aiDraft"
+      :project-id="projectId"
       @close="closeAiDraft"
       @reject="rejectAiDraft"
       @confirm="confirmAiDraftPayload"
@@ -733,6 +775,7 @@ import {
   markVerificationBaselineStale,
   reviewTraceLink,
   reviewVerificationFinding,
+  syncConnectorVerificationAsset,
   updateVerificationAsset,
   updateVerificationBaseline,
   writeBackVerificationFinding,
@@ -872,6 +915,22 @@ const gitForm = reactive({
   branch: '',
   commit: '',
   maxFiles: 1000,
+})
+const availableConnectorTypes = ref<string[]>(['JIRA', 'TAPD', 'ZENTAO', 'PINGCODE', 'TESTLINK', 'LINK_ONLY'])
+const connectorForms = reactive<Record<AssetType, {
+  connectorType: string
+  scopeRef: string
+  baseUrl: string
+  externalId: string
+  externalUrl: string
+  sourceVersion: string
+}>>({
+  REQUIREMENT: { connectorType: 'JIRA', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
+  TESTCASE: { connectorType: 'TESTLINK', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
+  SOURCE: { connectorType: 'LINK_ONLY', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
+  EXECUTION: { connectorType: 'LINK_ONLY', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
+  COVERAGE: { connectorType: 'LINK_ONLY', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
+  DEFECT: { connectorType: 'JIRA', scopeRef: '', baseUrl: '', externalId: '', externalUrl: '', sourceVersion: '' },
 })
 const gitBranches = ref<string[]>([])
 const gitCommitOptions = ref<GitCommitOption[]>([])
@@ -1473,6 +1532,70 @@ function isAcceptedAssetFile(type: AssetType, file: File) {
 
 function hasImportInput(type: AssetType) {
   return !!files[type] || !!pasteInputs[type]?.trim()
+}
+
+function hasAiDraftInput(type: AssetType) {
+  return !!pasteInputs[type]?.trim()
+}
+
+function pasteInputHelpFor(type: AssetType) {
+  if (type === 'REQUIREMENT') return '连接器未接入时，可在这里粘贴需求原文作为兜底输入。'
+  if (type === 'TESTCASE') return '连接器未接入时，可在这里粘贴用例原文作为兜底输入。'
+  if (type === 'SOURCE') return '源码类资料优先使用文件上传或源码工程导入，粘贴只作为兜底。'
+  if (type === 'DEFECT') return '连接器未接入时，可在这里粘贴缺陷摘要作为兜底输入。'
+  if (type === 'EXECUTION') return '连接器未接入时，可在这里粘贴执行记录作为兜底输入。'
+  if (type === 'COVERAGE') return '连接器未接入时，可在这里粘贴覆盖率摘要作为兜底输入。'
+  return '未接入连接器时，可手工粘贴原始资料作为兜底。'
+}
+
+function canSyncConnector(type: AssetType) {
+  return !!connectorForms[type].connectorType && !!connectorForms[type].scopeRef.trim()
+}
+
+function connectorHelpText(type: AssetType) {
+  if (type === 'REQUIREMENT') return '适合接 Jira、禅道、TAPD 等需求平台，按范围拉取需求原文。'
+  if (type === 'TESTCASE') return '适合接测试管理平台，按用例集或目录拉取测试内容。'
+  if (type === 'DEFECT') return '适合接缺陷平台，按外部单号或查询范围拉取问题记录。'
+  return '当前卡片暂以文件、粘贴或外部链接资料为主。'
+}
+
+function connectorScopePlaceholder(type: AssetType) {
+  if (type === 'REQUIREMENT') return '需求编号、项目键、查询条件'
+  if (type === 'TESTCASE') return '用例集、目录路径、查询条件'
+  if (type === 'DEFECT') return '缺陷编号、任务键、查询条件'
+  return '同步范围 / 外部引用'
+}
+
+async function syncConnectorAsset(type: AssetType) {
+  if (importing.value) return
+  if (!canSyncConnector(type)) {
+    toast.warning('请先选择连接器类型并填写同步范围')
+    return
+  }
+  importing.value = type
+  error.value = ''
+  try {
+    const form = connectorForms[type]
+    const asset = await syncConnectorVerificationAsset(projectId.value, {
+      assetType: type,
+      connectorType: form.connectorType,
+      scopeRef: form.scopeRef,
+      baseUrl: form.baseUrl || undefined,
+      externalId: form.externalId || undefined,
+      externalUrl: form.externalUrl || undefined,
+      sourceVersion: form.sourceVersion || undefined,
+      fieldMapping: undefined,
+    })
+    selectAssetForBaseline(type, asset.id, false)
+    toast.success(`${assetTypeLabel(type)}已从平台同步`)
+    await loadOverview()
+    activeWorkspace.value = 'library'
+  } catch (err) {
+    error.value = messageOf(err)
+    toast.error(error.value)
+  } finally {
+    importing.value = ''
+  }
 }
 
 function isImportExpanded(type: AssetType) {
@@ -2857,6 +2980,49 @@ function messageOf(err: unknown) {
 .asset-import-body {
   display: grid;
   gap: 8px;
+}
+
+.connector-sync-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed rgba(var(--oat-primary-rgb), .22);
+  border-radius: 10px;
+  background: rgba(var(--oat-primary-rgb), .04);
+}
+
+.connector-sync-panel small {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-input-field {
+  gap: 6px;
+}
+
+.ai-input-field > span {
+  color: var(--oat-primary-dark);
+}
+
+.ai-input-field textarea {
+  min-height: 96px;
+  border-color: rgba(var(--oat-primary-rgb), .32);
+  box-shadow: inset 3px 0 0 rgba(var(--oat-primary-rgb), .45);
+}
+
+.ai-input-field small,
+.ai-input-required {
+  color: var(--oat-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.ai-input-required {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
 }
 
 .import-actions {

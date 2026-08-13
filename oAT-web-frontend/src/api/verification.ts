@@ -304,6 +304,19 @@ export function importGitSourceAsset(projectId: string, payload: {
   return apiPost<VerificationAsset>(`${base(projectId)}/assets/git-source`, JSON.stringify(payload), 'application/json')
 }
 
+export function syncConnectorVerificationAsset(projectId: string, payload: {
+  assetType: AssetType
+  connectorType: string
+  scopeRef: string
+  baseUrl?: string
+  externalId?: string
+  externalUrl?: string
+  sourceVersion?: string
+  fieldMapping?: Record<string, unknown>
+}) {
+  return apiPost<VerificationAsset>(`${base(projectId)}/assets/connector-sync`, JSON.stringify(payload), 'application/json')
+}
+
 export function updateVerificationAsset(projectId: string, assetId: string, payload: {
   fileName?: string; content?: string; externalId?: string; externalUrl?: string; sourceVersion?: string
 }) {

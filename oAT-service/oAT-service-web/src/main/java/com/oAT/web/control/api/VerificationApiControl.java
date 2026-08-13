@@ -23,6 +23,7 @@ import com.oAT.web.verification.VerificationService.WriteBackFinding;
 import com.oAT.web.verification.SourceAssetFilter;
 import com.oAT.web.verification.SourceAssetFilter.SourceProfile;
 import com.oAT.web.verification.connector.ConnectorRegistry;
+import com.oAT.web.verification.connector.ConnectorSpi;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
@@ -270,6 +271,62 @@ public class VerificationApiControl {
         } finally {
             Files.deleteIfExists(tempZip.toPath());
         }
+    }
+
+    @PostMapping("/assets/connector-sync")
+    public ResultNotified<AssetSnapshot> syncConnectorAsset(@PathVariable String projectId,
+                                                           @SessionAttribute UserVo user,
+                                                           @RequestBody ConnectorAssetSync request) {
+        ensureProjectAccess(projectId, user);
+        Assert.notNull(request, "请求体不能为空");
+        Assert.notNull(request.assetType(), "资料类型不能为空");
+        Assert.hasText(request.connectorType(), "连接器类型不能为空");
+        Assert.hasText(request.scopeRef(), "同步范围不能为空");
+        ConnectorSpi connector = connectorRegistry.get(request.connectorType());
+        ConnectorType connectorType = ConnectorType.valueOf(request.connectorType());
+        ConnectorConfig config = new ConnectorConfig(
+                "inline-" + UUID.randomUUID(), projectId, request.connectorType(), connectorType,
+                optionalText(request.baseUrl()), null,
+                request.fieldMapping() == null ? Map.of() : request.fieldMapping(),
+                false, ConnectorStatus.ACTIVE, user.getId(), LocalDateTime.now(), LocalDateTime.now());
+        String connectionError = connector.testConnection(config);
+        Assert.isTrue(!StringUtils.hasText(connectionError), connectionError);
+        String content = fetchConnectorContent(connector, config, request.assetType(), request.scopeRef());
+        Assert.hasText(content, "当前连接器没有返回可导入内容，请检查同步范围或连接器实现");
+
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("automaticSync", true);
+        metadata.put("inputMode", "CONNECTOR");
+        metadata.put("connectorType", request.connectorType());
+        metadata.put("scopeRef", request.scopeRef());
+        metadata.put("mcpSource", true);
+        if (StringUtils.hasText(request.baseUrl())) metadata.put("baseUrl", request.baseUrl().trim());
+        AssetSnapshot asset = verificationService.importAsset(projectId, user.getId(), request.assetType(),
+                SourceType.API, connectorFileName(request.assetType(), request.connectorType(), request.scopeRef()),
+                content, optionalText(request.externalId()), optionalText(request.externalUrl()),
+                optionalText(request.sourceVersion()), metadata);
+        auditLogger.business("verification.connector_asset.sync", LogFields.map(
+                "project_id", projectId,
+                "asset_id", asset.id(),
+                "asset_type", request.assetType(),
+                "connector_type", request.connectorType(),
+                "scope_ref", request.scopeRef(),
+                "content_bytes", content.getBytes(StandardCharsets.UTF_8).length,
+                "user_id", user.getId()));
+        return ok("连接器资料同步成功", asset);
+    }
+
+    private String fetchConnectorContent(ConnectorSpi connector, ConnectorConfig config, AssetType assetType, String scopeRef) {
+        if (assetType == AssetType.REQUIREMENT) return connector.fetchRequirementContent(config, scopeRef);
+        if (assetType == AssetType.TESTCASE) return connector.fetchTestcaseContent(config, scopeRef);
+        if (assetType == AssetType.DEFECT) return connector.fetchDefectContent(config, scopeRef);
+        throw new IllegalArgumentException("当前资料类型暂不支持通过连接器同步: " + assetType);
+    }
+
+    private String connectorFileName(AssetType assetType, String connectorType, String scopeRef) {
+        String safeScope = scopeRef.replaceAll("[^A-Za-z0-9._-]+", "-");
+        if (safeScope.length() > 80) safeScope = safeScope.substring(0, 80);
+        return connectorType.toLowerCase() + "-" + assetType.name().toLowerCase() + "-" + safeScope + ".txt";
     }
 
     private String optionalText(String value) {
@@ -750,6 +807,9 @@ public class VerificationApiControl {
     public record EvaluateGateModeRequest(String policyId, QualityGateService.EnforcementMode mode) {}
     public record ExemptionRequest(String ruleId, String reason, LocalDateTime expiresAt) {}
     public record ChangeImpactRequest(String changeDescription) {}
+    public record ConnectorAssetSync(AssetType assetType, String connectorType, String scopeRef, String baseUrl,
+                                     String externalId, String externalUrl, String sourceVersion,
+                                     Map<String, Object> fieldMapping) {}
     public record GitChangeImpactRequest(String appId, String baseCommit, String headCommit) {}
     public record GitChangeImpactResponse(com.oAT.web.verification.impact.ImpactModels.ImpactReport report,
                                           ImpactTraceabilityMapper.TraceabilityImpact traceability,

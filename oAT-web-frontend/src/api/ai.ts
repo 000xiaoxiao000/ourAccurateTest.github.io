@@ -7,6 +7,11 @@ export interface AiTaskSubmissionResponse {
 
 export interface AiDraftResponse {
   taskId: string
+  /**
+   * 与 ovanth AiDraftStatus 真实枚举对齐：
+   * PENDING / RUNNING / DONE / FAILED / CONFIRMED / REJECTED。
+   * 历史误把 RUNNING 写成 PROCESSING、漏了 FAILED，现已修正。
+   */
   status: 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'CONFIRMED' | 'REJECTED'
   payload: unknown
   error?: string
