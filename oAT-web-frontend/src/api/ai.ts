@@ -22,10 +22,11 @@ export function submitAiTask(
   projectId: string,
   intent: string,
   context: Record<string, unknown> = {},
+  sessionId?: string,
 ): Promise<AiTaskSubmissionResponse> {
   return apiPost<AiTaskSubmissionResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/ai/tasks`,
-    JSON.stringify({ intent, context }),
+    JSON.stringify({ intent, context, sessionId }),
     'application/json',
   )
 }
@@ -38,10 +39,11 @@ export function generateAiDraft(
   projectId: string,
   intent: string,
   content: string,
+  sessionId?: string,
 ): Promise<AiTaskSubmissionResponse> {
   return apiPost<AiTaskSubmissionResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/ai/generate`,
-    JSON.stringify({ intent, content }),
+    JSON.stringify({ intent, content, sessionId }),
     'application/json',
   )
 }
@@ -55,10 +57,11 @@ export function submitAssetAiTask(
   domain: 'requirements' | 'testcases' | 'defects' | 'coverage' | 'sources' | 'git' | 'versions',
   assetId: string,
   action: 'parse' | 'analyze',
+  sessionId?: string,
 ): Promise<AiTaskSubmissionResponse> {
   return apiPost<AiTaskSubmissionResponse>(
     `/api/projects/${encodeURIComponent(projectId)}/ai/${domain}/${encodeURIComponent(assetId)}/${action}`,
-    JSON.stringify({}),
+    JSON.stringify({ sessionId }),
     'application/json',
   )
 }

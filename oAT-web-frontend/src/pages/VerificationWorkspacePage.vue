@@ -93,19 +93,35 @@
                 <small>{{ connectorHelpText(asset.type) }}</small>
               </div>
               <label class="asset-file-drop">
-                <input type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
-                <span>{{ files[asset.type]?.name || '选择文件' }}</span>
-                <small>{{ files[asset.type]?.name ? '已选择文件，可重新选择或拖放替换' : '点击选择文件，或把文件拖放到此区域' }}</small>
+                <input :key="fileInputKeys[asset.type]" type="file" :accept="assetAccept(asset.type)" @change="onFileChange(asset.type, $event)" />
+                <div class="asset-file-drop-main">
+                  <span>{{ files[asset.type]?.name || '选择文件' }}</span>
+                  <small>{{ files[asset.type]?.name ? '已选择文件，可重新选择或拖放替换' : '点击选择文件，或把文件拖放到此区域' }}</small>
+                </div>
+                <button
+                  v-if="files[asset.type]"
+                  type="button"
+                  class="file-clear-button"
+                  aria-label="清除已选择文件"
+                  title="清除"
+                  @click.stop.prevent="clearAssetFile(asset.type)"
+                >
+                  ×
+                </button>
               </label>
-              <label class="ai-input-field">
+              <div class="ai-input-field">
                 <span>AI 输入原文</span>
-                <textarea
-                  v-model="pasteInputs[asset.type]"
-                  :placeholder="asset.placeholder"
-                  :aria-label="`${asset.label} AI 输入原文`"
-                ></textarea>
-                <small>{{ pasteInputHelpFor(asset.type) }}</small>
-              </label>
+                <button type="button" class="ai-input-preview" @click="openAiInputEditor(asset.type)">
+                  <span class="ai-input-preview-text" :class="{ empty: !pasteInputs[asset.type]?.trim() }">
+                    {{ aiInputPreviewText(asset.type, asset.placeholder) }}
+                  </span>
+                  <strong>{{ aiInputStatsText(asset.type) }}</strong>
+                </button>
+                <div class="ai-input-actions">
+                  <small>{{ pasteInputHelpFor(asset.type) }}</small>
+                  <button type="button" class="secondary-button small" @click="openAiInputEditor(asset.type)">放大编辑</button>
+                </div>
+              </div>
               <input v-model.trim="sourceVersions[asset.type]" type="text" placeholder="外部版本 / Commit / 批次号" />
               <div class="import-actions">
                 <button type="button" :disabled="importing === asset.type || !hasImportInput(asset.type)" @click="importAsset(asset.type)">
@@ -747,6 +763,34 @@
       @reject="rejectAiDraft"
       @confirm="confirmAiDraftPayload"
     />
+
+    <Teleport to="body">
+      <div v-if="aiInputEditorVisible" class="ai-input-mask" @click.self="closeAiInputEditor">
+        <section class="ai-input-dialog" role="dialog" aria-modal="true">
+          <header class="ai-input-dialog-header">
+            <div>
+              <p class="ai-input-dialog-badge">AI 输入原文</p>
+              <h3>{{ aiInputEditorTitle }}</h3>
+              <p class="ai-input-dialog-meta">{{ aiInputEditorMeta }}</p>
+            </div>
+            <button type="button" class="ai-input-dialog-close" @click="closeAiInputEditor">关闭</button>
+          </header>
+
+          <textarea
+            ref="aiInputEditorTextareaRef"
+            v-model="aiInputEditorDraft"
+            class="ai-input-dialog-textarea"
+            spellcheck="false"
+            :placeholder="aiInputEditorPlaceholder"
+          ></textarea>
+
+          <footer class="ai-input-dialog-actions">
+            <button type="button" class="secondary-button" @click="closeAiInputEditor">取消</button>
+            <button type="button" class="primary-button" @click="saveAiInputEditor">保存并关闭</button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </section>
 </template>
 
@@ -881,6 +925,10 @@ const aiDraftVisible = ref(false)
 const aiDraftTitle = ref('')
 const aiDraftTaskId = ref('')
 const aiDraft = ref<AiDraftResponse | null>(null)
+const aiInputEditorVisible = ref(false)
+const aiInputEditorType = ref<AssetType | ''>('')
+const aiInputEditorDraft = ref('')
+const aiInputEditorTextareaRef = ref<HTMLTextAreaElement | null>(null)
 const deletingAssetIds = ref<Set<string>>(new Set())
 const deletingBaselineIds = ref<Set<string>>(new Set())
 const reviewingFindingIds = ref<Set<string>>(new Set())
@@ -890,6 +938,7 @@ let overviewRequestSeq = 0
 let baselineRequestSeq = 0
 const error = ref('')
 const files = reactive<Partial<Record<AssetType, File>>>({})
+const fileInputKeys = reactive<Record<AssetType, number>>({ REQUIREMENT: 0, TESTCASE: 0, SOURCE: 0, EXECUTION: 0, COVERAGE: 0, DEFECT: 0 })
 const draggingAssetType = ref<AssetType | ''>('')
 const pasteInputs = reactive<Record<AssetType, string>>({ REQUIREMENT: '', TESTCASE: '', SOURCE: '', EXECUTION: '', COVERAGE: '', DEFECT: '' })
 const sourceVersions = reactive<Record<AssetType, string>>({ REQUIREMENT: '', TESTCASE: '', SOURCE: '', EXECUTION: '', COVERAGE: '', DEFECT: '' })
@@ -983,6 +1032,15 @@ const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeho
   { type: 'EXECUTION', label: '执行依据', hint: 'Excel / CSV / JSON / 文本', placeholder: '粘贴测试执行结果，包含用例ID和状态...' },
   { type: 'COVERAGE', label: '覆盖率', hint: 'JaCoCo / Istanbul / LCOV / Cobertura / Go / Python 等', placeholder: '粘贴多语言覆盖率报告摘要...' },
 ]
+
+const aiInputEditorAsset = computed(() => assetInputs.find((asset) => asset.type === aiInputEditorType.value) || null)
+const aiInputEditorTitle = computed(() => aiInputEditorAsset.value?.label || 'AI 输入原文')
+const aiInputEditorPlaceholder = computed(() => aiInputEditorAsset.value?.placeholder || '请粘贴原文')
+const aiInputEditorMeta = computed(() => {
+  const type = aiInputEditorType.value
+  if (!type) return ''
+  return `${assetTypeLabel(type)} · ${aiInputStatsText(type)}`
+})
 
 const tabs = [
   { key: 'matrix', label: '追溯矩阵' },
@@ -1483,6 +1541,11 @@ function setAssetFile(type: AssetType, file: File) {
   }
 }
 
+function clearAssetFile(type: AssetType) {
+  delete files[type]
+  fileInputKeys[type] += 1
+}
+
 function onAssetDragEnter(type: AssetType, event: DragEvent) {
   if (hasDraggedFiles(event)) {
     draggingAssetType.value = type
@@ -1536,6 +1599,40 @@ function hasImportInput(type: AssetType) {
 
 function hasAiDraftInput(type: AssetType) {
   return !!pasteInputs[type]?.trim()
+}
+
+function aiInputPreviewText(type: AssetType, placeholder: string) {
+  const text = pasteInputs[type]?.trim()
+  if (!text) return placeholder
+  const previewLines = text.split(/\r?\n/).slice(0, 3)
+  return previewLines.join('\n')
+}
+
+function aiInputStatsText(type: AssetType) {
+  const text = pasteInputs[type]?.trim() || ''
+  if (!text) return '未输入'
+  const lineCount = text.split(/\r?\n/).length
+  return `${text.length} 字 · ${lineCount} 行`
+}
+
+async function openAiInputEditor(type: AssetType) {
+  aiInputEditorType.value = type
+  aiInputEditorDraft.value = pasteInputs[type] || ''
+  aiInputEditorVisible.value = true
+  await nextTick()
+  aiInputEditorTextareaRef.value?.focus()
+  aiInputEditorTextareaRef.value?.setSelectionRange(aiInputEditorDraft.value.length, aiInputEditorDraft.value.length)
+}
+
+function closeAiInputEditor() {
+  aiInputEditorVisible.value = false
+}
+
+function saveAiInputEditor() {
+  const type = aiInputEditorType.value
+  if (!type) return
+  pasteInputs[type] = aiInputEditorDraft.value
+  closeAiInputEditor()
 }
 
 function pasteInputHelpFor(type: AssetType) {
@@ -2998,6 +3095,7 @@ function messageOf(err: unknown) {
 }
 
 .ai-input-field {
+  display: grid;
   gap: 6px;
 }
 
@@ -3005,10 +3103,49 @@ function messageOf(err: unknown) {
   color: var(--oat-primary-dark);
 }
 
-.ai-input-field textarea {
-  min-height: 96px;
-  border-color: rgba(var(--oat-primary-rgb), .32);
-  box-shadow: inset 3px 0 0 rgba(var(--oat-primary-rgb), .45);
+.ai-input-preview {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-height: 108px;
+  padding: 12px 14px;
+  border: 1px solid rgba(var(--oat-primary-rgb), .28);
+  border-radius: 10px;
+  background: rgba(var(--oat-primary-rgb), .04);
+  text-align: left;
+  cursor: text;
+}
+
+.ai-input-preview-text {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oat-text);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.ai-input-preview-text.empty {
+  color: var(--oat-text-muted);
+}
+
+.ai-input-preview strong {
+  color: var(--oat-primary-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ai-input-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .ai-input-field small,
@@ -3025,6 +3162,90 @@ function messageOf(err: unknown) {
   min-height: 36px;
 }
 
+.ai-input-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, .56);
+  backdrop-filter: blur(3px);
+}
+
+.ai-input-dialog {
+  width: min(980px, 100%);
+  max-height: min(90vh, 980px);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 36px 90px rgba(15, 23, 42, .28);
+}
+
+.ai-input-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.ai-input-dialog-badge {
+  display: inline-flex;
+  align-items: center;
+  margin: 0 0 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, .10);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.ai-input-dialog-header h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 20px;
+}
+
+.ai-input-dialog-meta {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-input-dialog-close {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 118, 110, .18);
+  background: #fff;
+  color: #0f766e;
+  font-weight: 700;
+}
+
+.ai-input-dialog-textarea {
+  width: 100%;
+  min-height: min(68vh, 680px);
+  margin: 0;
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 10px;
+  padding: 14px;
+  background: #f8fafc;
+  color: #172033;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.6;
+}
+
+.ai-input-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .import-actions {
   display: flex;
   flex-wrap: wrap;
@@ -3034,7 +3255,9 @@ function messageOf(err: unknown) {
 
 .asset-file-drop {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
   min-height: 74px;
   padding: 12px;
   border: 1px dashed rgba(100, 116, 139, .34);
@@ -3069,10 +3292,29 @@ function messageOf(err: unknown) {
   white-space: nowrap;
 }
 
+.asset-file-drop-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
 .asset-file-drop small {
   color: var(--oat-text-muted);
   font-size: 12px;
   font-weight: 600;
+}
+
+.file-clear-button {
+  width: 28px;
+  height: 28px;
+  align-self: start;
+  border: 1px solid rgba(220, 38, 38, .22);
+  border-radius: 999px;
+  background: rgba(220, 38, 38, .06);
+  color: var(--oat-danger);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 .source-import-divider {

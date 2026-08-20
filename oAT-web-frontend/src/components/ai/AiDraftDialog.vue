@@ -10,16 +10,13 @@
           <button class="ai-draft-close" type="button" @click="close">关闭</button>
         </header>
 
-        <p class="ai-draft-meta">
-          <span>任务状态：{{ statusLabel }}</span>
-          <span v-if="isPending" class="ai-draft-meta-loading" aria-live="polite">
-            <span class="ai-draft-spinner" />
-            AI 正在生成，请稍候…
-          </span>
-          <span v-else-if="isFailed && errorMessage" class="ai-draft-meta-error">
-            失败原因：{{ errorMessage }}
-          </span>
-        </p>
+        <div class="ai-draft-status" :class="statusBannerClass" role="status" aria-live="polite">
+          <span class="ai-draft-status-icon" aria-hidden="true">{{ statusIcon }}</span>
+          <div class="ai-draft-status-text">
+            <strong>{{ statusHeading }}</strong>
+            <span class="ai-draft-status-sub">{{ statusHint }}</span>
+          </div>
+        </div>
 
         <textarea
           v-model="draftText"
@@ -29,10 +26,6 @@
           :readonly="!isTerminal"
           :placeholder="isTerminal ? '' : 'AI 正在生成草稿，完成后可在此编辑'"
         ></textarea>
-
-        <p v-if="!isTerminal" class="ai-draft-hint">
-          ⏳ 草稿生成完成后将在此处显示并可编辑，无需手动刷新。
-        </p>
 
         <footer class="ai-draft-actions">
           <button class="ai-draft-button secondary" type="button" :disabled="!canAct" @click="reject">拒绝</button>
@@ -142,6 +135,33 @@ const errorMessage = computed(() => {
   if (!draft?.error) return ''
   return draft.error
 })
+
+/**
+ * 状态展示从一行小字升级为 banner：图标 + 主标题 + 副标题，告诉用户现在到哪一步、下一步该干什么。
+ * PENDING / RUNNING 视为进行中，DONE 可落库/拒绝，FAILED/REJECTED/CONFIRMED 视为终态。
+ */
+const STATUS_BANNER: Record<string, { icon: string; heading: string; hint: string; tone: 'pending' | 'success' | 'error' | 'neutral' }> = {
+  PENDING:   { icon: '⏳', heading: 'AI 正在准备生成',         hint: '即将开始生成草稿，无需手动刷新。',         tone: 'pending' },
+  RUNNING:   { icon: '✨', heading: 'AI 正在生成草稿',           hint: '预计需要 10~30 秒，完成后可在下方编辑或落库。', tone: 'pending' },
+  DONE:      { icon: '✅', heading: 'AI 已完成草稿',             hint: '请在下方查看并编辑，确认无误后点击「确认落库」，或点击「拒绝」驳回。', tone: 'success' },
+  CONFIRMED: { icon: '👍', heading: '草稿已通过',                hint: '本次 AI 草稿已被接受，可查看历史记录。', tone: 'neutral' },
+  REJECTED:  { icon: '🚫', heading: '草稿已驳回',                hint: '本次 AI 草稿已驳回，可重新发起或人工补充。', tone: 'neutral' },
+  FAILED:    { icon: '⚠️', heading: 'AI 生成失败',               hint: '请稍后重试，或联系管理员排查错误。',     tone: 'error' },
+}
+
+const statusBanner = computed(() => {
+  const status = props.draft?.status
+  return status ? STATUS_BANNER[status] : null
+})
+
+const statusIcon = computed(() => statusBanner.value?.icon ?? '•')
+const statusHeading = computed(() => statusBanner.value?.heading ?? '等待 AI 响应')
+const statusHint = computed(() => {
+  const fallback = statusBanner.value?.hint ?? '请稍候…'
+  const err = errorMessage.value
+  return statusBanner.value?.tone === 'error' && err ? `${fallback}（${err}）` : fallback
+})
+const statusBannerClass = computed(() => statusBanner.value?.tone ?? 'pending')
 
 /** 只有终态且 payload 非空才能落库或拒绝，避免 PENDING 时误操作。 */
 const canAct = computed(() => {
@@ -267,6 +287,41 @@ function reject() {
 .ai-draft-meta-error {
   color: #b91c1c;
   font-weight: 600;
+}
+
+.ai-draft-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ai-draft-status-icon { font-size: 22px; line-height: 1; }
+.ai-draft-status-text { display: flex; flex-direction: column; gap: 2px; }
+.ai-draft-status-text strong { font-size: 14px; font-weight: 700; }
+.ai-draft-status-text span { color: inherit; opacity: .85; }
+.ai-draft-status.pending {
+  background: rgba(14, 165, 233, .08);
+  border-color: rgba(14, 165, 233, .25);
+  color: #0c4a6e;
+}
+.ai-draft-status.success {
+  background: rgba(16, 185, 129, .10);
+  border-color: rgba(16, 185, 129, .28);
+  color: #065f46;
+}
+.ai-draft-status.error {
+  background: rgba(239, 68, 68, .08);
+  border-color: rgba(239, 68, 68, .28);
+  color: #991b1b;
+}
+.ai-draft-status.neutral {
+  background: rgba(100, 116, 139, .08);
+  border-color: rgba(100, 116, 139, .22);
+  color: #334155;
 }
 
 .ai-draft-textarea {

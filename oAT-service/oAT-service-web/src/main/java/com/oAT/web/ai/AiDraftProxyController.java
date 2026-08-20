@@ -62,7 +62,7 @@ public class AiDraftProxyController {
                                                                               @RequestBody AiTaskSubmitRequest request) {
         Map<String, Object> context = new LinkedHashMap<>(request.context() == null ? Map.of() : request.context());
         context.putIfAbsent("projectId", projectId);
-        return ok("AI任务已提交", aiDraftClient.submit("oAT", request.intent(), context));
+        return ok("AI任务已提交", aiDraftClient.submit("oAT", request.intent(), request.sessionId(), context));
     }
 
     /**
@@ -81,49 +81,56 @@ public class AiDraftProxyController {
         if (StringUtils.hasText(request.content())) {
             context.put("input", Map.of("projectId", projectId, "sourceText", request.content()));
         }
-        return ok("AI草稿生成任务已提交", aiDraftClient.submit("oAT", request.intent(), context));
+        return ok("AI草稿生成任务已提交", aiDraftClient.submit("oAT", request.intent(), request.sessionId(), context));
     }
 
     @PostMapping("/requirements/{assetId}/parse")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseRequirement(@PathVariable String projectId,
-                                                                                    @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "requirement.parse", "需求解析任务已提交");
+                                                                                    @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "requirement.parse", "需求解析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/testcases/{assetId}/parse")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseTestcase(@PathVariable String projectId,
-                                                                                 @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "testcase.parse", "用例解析任务已提交");
+                                                                                 @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "testcase.parse", "用例解析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/defects/{assetId}/parse")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> parseDefect(@PathVariable String projectId,
-                                                                               @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "defect.parse", "缺陷解析任务已提交");
+                                                                               @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "defect.parse", "缺陷解析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/coverage/{assetId}/analyze")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeCoverage(@PathVariable String projectId,
-                                                                                   @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "coverage.analyze", "覆盖率分析任务已提交");
+                                                                                   @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "coverage.analyze", "覆盖率分析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/sources/{assetId}/analyze")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeSource(@PathVariable String projectId,
-                                                                                 @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "source.analyze", "源码分析任务已提交");
+                                                                                 @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "source.analyze", "源码分析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/git/{assetId}/analyze")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeGit(@PathVariable String projectId,
-                                                                              @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "git.analyze", "Git影响分析任务已提交");
+                                                                              @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "git.analyze", "Git影响分析任务已提交", request == null ? null : request.sessionId());
     }
 
     @PostMapping("/versions/{assetId}/analyze")
     public ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> analyzeVersion(@PathVariable String projectId,
-                                                                                  @PathVariable String assetId) {
-        return submitAssetTask(projectId, assetId, "version.analyze", "版本影响分析任务已提交");
+                                                                                  @PathVariable String assetId,
+                                                                                    @RequestBody(required = false) AssetTaskRequest request) {
+        return submitAssetTask(projectId, assetId, "version.analyze", "版本影响分析任务已提交", request == null ? null : request.sessionId());
     }
 
     @GetMapping("/tasks/{taskId}/draft")
@@ -185,7 +192,8 @@ public class AiDraftProxyController {
     private ResultNotified<OvanthDraftClient.AiTaskSubmissionResponse> submitAssetTask(String projectId,
                                                                                     String assetId,
                                                                                     String intent,
-                                                                                    String message) {
+                                                                                    String message,
+                                                                                    String sessionId) {
         Map<String, Object> context = new LinkedHashMap<>();
         context.put("projectId", projectId);
         context.put("assetId", assetId);
@@ -198,7 +206,7 @@ public class AiDraftProxyController {
                 "method", "POST",
                 "path", "/api/ai-tools/assets/read",
                 "body", Map.of("projectId", projectId, "assetId", assetId, "assetType", assetType.name())));
-        return ok(message, aiDraftClient.submit("oAT", intent, context));
+        return ok(message, aiDraftClient.submit("oAT", intent, sessionId, context));
     }
 
     private String title(String intent) {
@@ -268,10 +276,13 @@ public class AiDraftProxyController {
         return result;
     }
 
-    public record AiTaskSubmitRequest(String intent, Map<String, Object> context) {
+    public record AiTaskSubmitRequest(String intent, Map<String, Object> context, String sessionId) {
     }
 
-    public record AiGenerateRequest(String intent, String content) {
+    public record AiGenerateRequest(String intent, String content, String sessionId) {
+    }
+
+    public record AssetTaskRequest(String sessionId) {
     }
 
     public record ConfirmRequest(boolean confirmed, String payload) {

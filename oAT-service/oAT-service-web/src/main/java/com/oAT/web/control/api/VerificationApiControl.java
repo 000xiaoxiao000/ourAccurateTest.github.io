@@ -3,6 +3,8 @@ package com.oAT.web.control.api;
 import com.alibaba.excel.EasyExcel;
 import com.oAT.web.control.entity.ResultNotified;
 import com.oAT.web.coverage.universal.JacocoExecToXmlConverter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.oAT.web.concurrency.MultiUserRequestCoordinator;
 import com.oAT.web.logging.AuditLogger;
 import com.oAT.web.logging.LogContext;
@@ -22,8 +24,8 @@ import com.oAT.web.verification.VerificationService.UpdateBaseline;
 import com.oAT.web.verification.VerificationService.WriteBackFinding;
 import com.oAT.web.verification.SourceAssetFilter;
 import com.oAT.web.verification.SourceAssetFilter.SourceProfile;
+import com.oAT.web.ai.ConnectorSyncService;
 import com.oAT.web.verification.connector.ConnectorRegistry;
-import com.oAT.web.verification.connector.ConnectorSpi;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
@@ -106,6 +108,8 @@ public class VerificationApiControl {
     private final JacocoExecToXmlConverter jacocoExecToXmlConverter;
     private final Executor verificationAiExecutor;
     private final AuditLogger auditLogger;
+    private final ConnectorSyncService connectorSyncService;
+    private final ObjectMapper objectMapper;
 
     public VerificationApiControl(VerificationService verificationService, ProjectService projectService,
                                   AppService appService, GitService gitService,
@@ -119,7 +123,9 @@ public class VerificationApiControl {
                                   ConnectorRegistry connectorRegistry,
                                   JacocoExecToXmlConverter jacocoExecToXmlConverter,
                                   AuditLogger auditLogger,
-                                  @Qualifier("verificationAiExecutor") Executor verificationAiExecutor) {
+                                  @Qualifier("verificationAiExecutor") Executor verificationAiExecutor,
+                                  ConnectorSyncService connectorSyncService,
+                                  ObjectMapper objectMapper) {
         this.verificationService = verificationService;
         this.projectService = projectService;
         this.appService = appService;
@@ -135,6 +141,8 @@ public class VerificationApiControl {
         this.jacocoExecToXmlConverter = jacocoExecToXmlConverter;
         this.auditLogger = auditLogger;
         this.verificationAiExecutor = verificationAiExecutor;
+        this.connectorSyncService = connectorSyncService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/overview")
@@ -274,7 +282,7 @@ public class VerificationApiControl {
     }
 
     @PostMapping("/assets/connector-sync")
-    public ResultNotified<AssetSnapshot> syncConnectorAsset(@PathVariable String projectId,
+    public ResultNotified<ConnectorSyncService.SyncOutcome> syncConnectorAsset(@PathVariable String projectId,
                                                            @SessionAttribute UserVo user,
                                                            @RequestBody ConnectorAssetSync request) {
         ensureProjectAccess(projectId, user);
@@ -282,51 +290,52 @@ public class VerificationApiControl {
         Assert.notNull(request.assetType(), "资料类型不能为空");
         Assert.hasText(request.connectorType(), "连接器类型不能为空");
         Assert.hasText(request.scopeRef(), "同步范围不能为空");
-        ConnectorSpi connector = connectorRegistry.get(request.connectorType());
-        ConnectorType connectorType = ConnectorType.valueOf(request.connectorType());
-        ConnectorConfig config = new ConnectorConfig(
-                "inline-" + UUID.randomUUID(), projectId, request.connectorType(), connectorType,
-                optionalText(request.baseUrl()), null,
-                request.fieldMapping() == null ? Map.of() : request.fieldMapping(),
-                false, ConnectorStatus.ACTIVE, user.getId(), LocalDateTime.now(), LocalDateTime.now());
-        String connectionError = connector.testConnection(config);
-        Assert.isTrue(!StringUtils.hasText(connectionError), connectionError);
-        String content = fetchConnectorContent(connector, config, request.assetType(), request.scopeRef());
-        Assert.hasText(content, "当前连接器没有返回可导入内容，请检查同步范围或连接器实现");
 
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("automaticSync", true);
-        metadata.put("inputMode", "CONNECTOR");
-        metadata.put("connectorType", request.connectorType());
-        metadata.put("scopeRef", request.scopeRef());
-        metadata.put("mcpSource", true);
-        if (StringUtils.hasText(request.baseUrl())) metadata.put("baseUrl", request.baseUrl().trim());
-        AssetSnapshot asset = verificationService.importAsset(projectId, user.getId(), request.assetType(),
-                SourceType.API, connectorFileName(request.assetType(), request.connectorType(), request.scopeRef()),
-                content, optionalText(request.externalId()), optionalText(request.externalUrl()),
-                optionalText(request.sourceVersion()), metadata);
+        // 构建 ovanth 的 range JSON, 把原 oAT 字段映射到不同 connector 识别的 keys
+        ObjectNode range = objectMapper.createObjectNode();
+        // 同步范围 / 项目键 / JQL / 仓库路径 全部塞进 range
+        range.put("scopeRef", request.scopeRef());
+        if (StringUtils.hasText(request.baseUrl())) range.put("baseUrl", request.baseUrl());
+        // assetType 决定 kind, 让 ovanth adapter 按 kind 筛选
+        range.put("kind", assetTypeToKind(request.assetType()));
+        if (request.fieldMapping() != null && !request.fieldMapping().isEmpty()) {
+            range.set("fieldMapping", objectMapper.valueToTree(request.fieldMapping()));
+        }
+        // 让 adapter 解析得到的 kinds 包含业务线期望的那个（REQUIREMENT/TESTCASE/DEFECT/SOURCE/COVERAGE）
+        range.put("expectedKind", assetTypeToKind(request.assetType()));
+
+        ConnectorSyncService.SyncOutcome outcome =
+                connectorSyncService.invoke(projectId, user,
+                        request.connectorType(), // connectorId 业务线沿用 type 名即可 (ovanth 控制台同步命名)
+                        range, request.sourceVersion(), null, Boolean.TRUE);
+
+        AssetSnapshot firstImported = outcome.importedAssets().isEmpty()
+                ? null : outcome.importedAssets().get(0);
         auditLogger.business("verification.connector_asset.sync", LogFields.map(
                 "project_id", projectId,
-                "asset_id", asset.id(),
+                "asset_id", firstImported == null ? "" : firstImported.id(),
                 "asset_type", request.assetType(),
-                "connector_type", request.connectorType(),
+                "connector_type", outcome.connectorType(),
+                "connector_id", outcome.connectorId(),
                 "scope_ref", request.scopeRef(),
-                "content_bytes", content.getBytes(StandardCharsets.UTF_8).length,
+                "platform_items", outcome.platformItemCount(),
+                "imported_count", outcome.importedAssets().size(),
+                "invocation_id", outcome.invocationId(),
                 "user_id", user.getId()));
-        return ok("连接器资料同步成功", asset);
+        return ok("连接器资料同步成功", outcome);
     }
 
-    private String fetchConnectorContent(ConnectorSpi connector, ConnectorConfig config, AssetType assetType, String scopeRef) {
-        if (assetType == AssetType.REQUIREMENT) return connector.fetchRequirementContent(config, scopeRef);
-        if (assetType == AssetType.TESTCASE) return connector.fetchTestcaseContent(config, scopeRef);
-        if (assetType == AssetType.DEFECT) return connector.fetchDefectContent(config, scopeRef);
-        throw new IllegalArgumentException("当前资料类型暂不支持通过连接器同步: " + assetType);
-    }
-
-    private String connectorFileName(AssetType assetType, String connectorType, String scopeRef) {
-        String safeScope = scopeRef.replaceAll("[^A-Za-z0-9._-]+", "-");
-        if (safeScope.length() > 80) safeScope = safeScope.substring(0, 80);
-        return connectorType.toLowerCase() + "-" + assetType.name().toLowerCase() + "-" + safeScope + ".txt";
+    /** oAT AssetType → ovanth item.kind */
+    private String assetTypeToKind(AssetType assetType) {
+        if (assetType == null) return "REQUIREMENT";
+        return switch (assetType) {
+            case REQUIREMENT -> "REQUIREMENT";
+            case TESTCASE    -> "TESTCASE";
+            case DEFECT      -> "DEFECT";
+            case SOURCE      -> "SOURCE";
+            case COVERAGE    -> "COVERAGE_METHOD";
+            case EXECUTION   -> "EXECUTION";
+        };
     }
 
     private String optionalText(String value) {

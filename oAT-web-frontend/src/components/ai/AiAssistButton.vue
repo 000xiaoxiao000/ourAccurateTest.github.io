@@ -10,6 +10,35 @@ import { ref } from 'vue'
 
 import { generateAiDraft, getAiDraft, submitAssetAiTask, type AiDraftResponse } from '@/api/ai'
 
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000
+
+/**
+ * 生成/读取"AI 会话"：同 projectId + intent 复用同一个 sessionId，让 ovanth 会话历史能查到
+ * 一连串的 AI 调用。sessionStorage 里带 createdAt，过期自动重新开新会话。
+ */
+function resolveSessionId(projectId: string, intent: string): string {
+  const key = `oAT.ai.session.${projectId}.${intent}`
+  try {
+    const raw = window.sessionStorage.getItem(key)
+    if (raw) {
+      const parsed = JSON.parse(raw) as { id: string; createdAt: number }
+      if (parsed?.id && Date.now() - parsed.createdAt < SESSION_TTL_MS) {
+        return parsed.id
+      }
+    }
+  } catch {
+    // sessionStorage 不可用时降级到一次性 sessionId，仍能让本轮 UI 看得到历史
+  }
+  const id = (crypto.randomUUID && crypto.randomUUID().replace(/-/g, '')) ||
+    `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify({ id, createdAt: Date.now() }))
+  } catch {
+    /* noop */
+  }
+  return id
+}
+
 const props = withDefaults(
   defineProps<{
     projectId: string
@@ -52,10 +81,11 @@ async function submit() {
   if (loading.value) return
   loading.value = true
   try {
+    const sessionId = resolveSessionId(props.projectId, props.intent)
     const submission = props.assetDomain && props.assetId
-        ? await submitAssetAiTask(props.projectId, props.assetDomain, props.assetId, props.assetAction)
+        ? await submitAssetAiTask(props.projectId, props.assetDomain, props.assetId, props.assetAction, sessionId)
         : props.sourceText?.trim()
-          ? await generateAiDraft(props.projectId, props.intent, props.sourceText)
+          ? await generateAiDraft(props.projectId, props.intent, props.sourceText, sessionId)
         : (() => {
             throw new Error(props.emptyMessage)
           })()
