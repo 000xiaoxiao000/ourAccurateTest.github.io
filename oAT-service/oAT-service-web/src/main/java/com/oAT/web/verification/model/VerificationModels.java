@@ -349,7 +349,7 @@ public final class VerificationModels {
     public enum Perspective { PRODUCT, TEST, DEVELOPMENT, CROSS }
     public enum Severity { CRITICAL, HIGH, MEDIUM, LOW, INFO }
     public enum Verdict { SATISFIED, STATICALLY_CONSISTENT, PARTIAL, NOT_SATISFIED, AMBIGUOUS, NOT_VERIFIABLE, EXEMPTED, STALE }
-    public enum ConnectorType { JIRA, TAPD, ZENTAO, PINGCODE, TESTLINK, TESTCASE_FILE, GIT, GENERIC_REST, LINK_ONLY }
+    public enum ConnectorType { JIRA, TAPD, ZENTAO, GIT, COVERAGE }
     public enum ConnectorStatus { ACTIVE, INACTIVE, ERROR }
     public enum ImpactLevel { HIGH, MEDIUM, LOW, NONE }
     public enum OrphanType { NO_REQUIREMENT, NO_TESTCASE, NO_CODE, NO_DEFECT_FIX }

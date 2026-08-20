@@ -68,9 +68,11 @@
                   <span>MCP / 连接器</span>
                 </div>
                 <label>
-                  <span>连接器类型</span>
+                  <span>连接器</span>
                   <select v-model="connectorForms[asset.type].connectorType">
-                    <option v-for="type in availableConnectorTypes" :key="type" :value="type">{{ type }}</option>
+                    <option v-for="opt in connectorSelectOptions" :key="opt.connectorId" :value="opt.connectorId">
+                      {{ opt.displayName || opt.connectorId }}（{{ opt.type }}）
+                    </option>
                   </select>
                 </label>
                 <label>
@@ -820,6 +822,8 @@ import {
   reviewTraceLink,
   reviewVerificationFinding,
   syncConnectorVerificationAsset,
+  listConnectors,
+  type ConnectorOption,
   updateVerificationAsset,
   updateVerificationBaseline,
   writeBackVerificationFinding,
@@ -966,6 +970,13 @@ const gitForm = reactive({
   maxFiles: 1000,
 })
 const availableConnectorTypes = ref<string[]>(['JIRA', 'TAPD', 'ZENTAO', 'PINGCODE', 'TESTLINK', 'LINK_ONLY'])
+/** ovanth 已配置的真实连接器列表（权威来源）。为空时回退到本地类型下拉。 */
+const connectorOptions = ref<ConnectorOption[]>([])
+const connectorSelectOptions = computed<ConnectorOption[]>(() =>
+  connectorOptions.value.length
+    ? connectorOptions.value
+    : availableConnectorTypes.value.map((t) => ({ connectorId: t, type: t, displayName: t })),
+)
 const connectorForms = reactive<Record<AssetType, {
   connectorType: string
   scopeRef: string
@@ -1498,6 +1509,7 @@ onMounted(async () => {
   window.addEventListener('resize', positionHelpTooltip)
   window.addEventListener('scroll', positionHelpTooltip, true)
   await projectStore.loadProjectContext(projectId.value).catch(() => undefined)
+  await loadConnectors()
   await loadOverview()
 })
 
@@ -1645,6 +1657,15 @@ function pasteInputHelpFor(type: AssetType) {
   return '未接入连接器时，可手工粘贴原始资料作为兜底。'
 }
 
+async function loadConnectors() {
+  if (!projectId.value) return
+  try {
+    connectorOptions.value = await listConnectors(projectId.value)
+  } catch {
+    connectorOptions.value = []
+  }
+}
+
 function canSyncConnector(type: AssetType) {
   return !!connectorForms[type].connectorType && !!connectorForms[type].scopeRef.trim()
 }
@@ -1673,9 +1694,12 @@ async function syncConnectorAsset(type: AssetType) {
   error.value = ''
   try {
     const form = connectorForms[type]
+    const selected = form.connectorType
+    const isOvanthConnector = connectorOptions.value.some((o) => o.connectorId === selected)
     const asset = await syncConnectorVerificationAsset(projectId.value, {
       assetType: type,
-      connectorType: form.connectorType,
+      connectorType: isOvanthConnector ? undefined : selected,
+      connectorId: isOvanthConnector ? selected : undefined,
       scopeRef: form.scopeRef,
       baseUrl: form.baseUrl || undefined,
       externalId: form.externalId || undefined,
@@ -3113,7 +3137,7 @@ function messageOf(err: unknown) {
   border-radius: 10px;
   background: rgba(var(--oat-primary-rgb), .04);
   text-align: left;
-  cursor: text;
+  cursor: pointer;
 }
 
 .ai-input-preview-text {
@@ -3146,6 +3170,12 @@ function messageOf(err: unknown) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.ai-input-actions .small {
+  min-height: 34px;
+  padding: 6px 9px;
+  white-space: nowrap;
 }
 
 .ai-input-field small,

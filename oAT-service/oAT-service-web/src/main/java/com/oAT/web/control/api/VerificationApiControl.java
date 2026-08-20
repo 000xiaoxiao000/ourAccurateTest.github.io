@@ -306,7 +306,7 @@ public class VerificationApiControl {
 
         ConnectorSyncService.SyncOutcome outcome =
                 connectorSyncService.invoke(projectId, user,
-                        request.connectorType(), // connectorId 业务线沿用 type 名即可 (ovanth 控制台同步命名)
+                        request.connectorId() != null ? request.connectorId() : request.connectorType(),
                         range, request.sourceVersion(), null, Boolean.TRUE);
 
         AssetSnapshot firstImported = outcome.importedAssets().isEmpty()
@@ -816,7 +816,7 @@ public class VerificationApiControl {
     public record EvaluateGateModeRequest(String policyId, QualityGateService.EnforcementMode mode) {}
     public record ExemptionRequest(String ruleId, String reason, LocalDateTime expiresAt) {}
     public record ChangeImpactRequest(String changeDescription) {}
-    public record ConnectorAssetSync(AssetType assetType, String connectorType, String scopeRef, String baseUrl,
+    public record ConnectorAssetSync(AssetType assetType, String connectorType, String connectorId, String scopeRef, String baseUrl,
                                      String externalId, String externalUrl, String sourceVersion,
                                      Map<String, Object> fieldMapping) {}
     public record GitChangeImpactRequest(String appId, String baseCommit, String headCommit) {}

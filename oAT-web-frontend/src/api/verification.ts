@@ -306,7 +306,8 @@ export function importGitSourceAsset(projectId: string, payload: {
 
 export function syncConnectorVerificationAsset(projectId: string, payload: {
   assetType: AssetType
-  connectorType: string
+  connectorType?: string
+  connectorId?: string
   scopeRef: string
   baseUrl?: string
   externalId?: string
@@ -315,6 +316,18 @@ export function syncConnectorVerificationAsset(projectId: string, payload: {
   fieldMapping?: Record<string, unknown>
 }) {
   return apiPost<VerificationAsset>(`${base(projectId)}/assets/connector-sync`, JSON.stringify(payload), 'application/json')
+}
+
+export interface ConnectorOption {
+  connectorId: string
+  type: string
+  displayName?: string
+  enabled?: boolean
+}
+
+/** 列出当前租户在 ovanth 已配置的连接器（权威来源），返回真实 connectorId。 */
+export function listConnectors(projectId: string) {
+  return apiGet<ConnectorOption[]>(`/api/projects/${projectId}/connectors/list`)
 }
 
 export function updateVerificationAsset(projectId: string, assetId: string, payload: {
