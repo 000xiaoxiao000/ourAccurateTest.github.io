@@ -806,7 +806,7 @@ function positionPopover(target: 'base' | 'head') {
     top: `${Math.max(VIEWPORT_PADDING, top)}px`,
     left: `${rect.left}px`,
     width: `${rect.width}px`,
-    '--commit-popover-max-h': `${maxHeight}px`,
+    maxHeight: `${maxHeight}px`,
     transform: placeBelow ? 'none' : 'translateY(-100%)',
     'transform-origin': placeBelow ? 'top left' : 'bottom left',
   }
@@ -1537,7 +1537,7 @@ onBeforeUnmount(() => {
   z-index: 1100;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  max-height: var(--commit-popover-max-h, min(720px, 80vh));
+  max-height: min(720px, 80vh);
   border: 1px solid rgba(15, 23, 42, .12);
   border-radius: 12px;
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
