@@ -25,13 +25,296 @@
       <div class="inline-grid">
         <label>
           <span>源码工程</span>
-          <select v-model="form.appId">
+          <select v-model="form.appId" @change="onAppChange">
             <option value="">请选择源码工程</option>
             <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
           </select>
         </label>
-        <label><span>Base Commit</span><input v-model.trim="form.baseCommit" placeholder="比较起点 Commit" /></label>
-        <label><span>Head Commit</span><input v-model.trim="form.headCommit" placeholder="比较终点 Commit" /></label>
+        <label class="branch-cell">
+          <span>分支</span>
+          <div class="branch-control">
+            <select
+              v-model="form.branch"
+              :disabled="!form.appId || branchLoading"
+              @change="onBranchChange"
+            >
+              <option value="">
+                {{ !form.appId ? '请先选择源码工程' : branchLoading ? '加载中…' : '请选择分支' }}
+              </option>
+              <option v-for="branch in branchOptions" :key="branch" :value="branch">{{ branch }}</option>
+            </select>
+            <button
+              type="button"
+              class="icon-button"
+              :disabled="!form.appId || !form.branch || commitsLoading"
+              :title="commitsLoading ? '正在加载 Commit' : '刷新最近 Commits'"
+              aria-label="刷新最近 Commits"
+              @click="refreshCommits"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" :class="commitsLoading ? 'spinning' : ''">
+                <path d="M4 4v6h6M20 20v-6h-6M5 13a8 8 0 0 0 14.9 4M19 11a8 8 0 0 0-14.9-4" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="icon-button repo-link"
+              :disabled="!form.appId || !repoBaseUrl"
+              :title="repoBaseUrl ? '在代码仓库中查看分支' : '当前工程尚未配置仓库地址'"
+              aria-label="在代码仓库中查看"
+              @click="openRepoRoot"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M14 3h7v7M10 14L21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
+              </svg>
+            </button>
+          </div>
+        </label>
+        <div class="latest-hint">
+          <span>最新 Commit</span>
+          <code v-if="latestCommit" :title="latestCommit">{{ shortCommit(latestCommit) }}</code>
+          <button
+            v-else-if="form.appId && form.branch && !latestCommitLoading"
+            type="button"
+            class="ghost-button"
+            @click="fetchLatestCommit"
+          >点击获取</button>
+          <span v-else-if="latestCommitLoading" class="muted">加载中…</span>
+          <span v-else class="muted">选择源码工程与分支后自动获取</span>
+        </div>
+      </div>
+
+      <div class="commits-grid">
+        <div class="commit-field" :class="{ expanded: picker === 'base' }">
+          <div class="commit-field-head">
+            <span class="commit-label">Base Commit</span>
+            <div class="commit-field-actions">
+              <button
+                type="button"
+                class="ghost-button"
+                :disabled="!latestCommit"
+                @click="useLatest('base')"
+              >用最新</button>
+              <button
+                type="button"
+                class="ghost-button"
+                :disabled="!repoBaseUrl || !form.baseCommit"
+                :title="form.baseCommit ? '在代码仓库查看该 Commit' : '请先选择 Commit'"
+                @click="openRepoAtCommit('base')"
+              >在仓库查看 ↗</button>
+            </div>
+          </div>
+          <div class="commit-input-wrap">
+            <input
+              ref="baseInput"
+              class="commit-input"
+              type="text"
+              v-model.trim="form.baseCommit"
+              placeholder="键入 Commit Id，或从下拉中选择"
+              autocomplete="off"
+              spellcheck="false"
+              @focus="togglePicker('base', true)"
+              @input="filterPicker('base')"
+            />
+            <button
+              type="button"
+              class="commit-popover-trigger"
+              :disabled="!commitOptions.length"
+              :title="commitOptions.length ? '在最近 Commit 中选择' : '当前分支暂无可枚举的 Commit'"
+              :aria-expanded="picker === 'base'"
+              aria-label="选择 Recent Commit"
+              @click="togglePicker('base')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ open: picker === 'base' }"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
+            </button>
+            <span v-if="commitShort(form.baseCommit)" class="commit-preview">{{ commitShort(form.baseCommit) }}</span>
+          </div>
+          <Teleport to="body">
+            <div
+              v-if="picker === 'base'"
+              ref="basePopover"
+              class="commit-popover"
+              :style="popoverStyle.base"
+              @mousedown.stop
+            >
+              <div class="commit-popover-head">
+                <span class="commit-popover-title">最近 {{ filteredBaseCommits.length || commitOptions.length }} 个 Commit</span>
+                <input
+                  v-model.trim="baseFilter"
+                  type="text"
+                  class="commit-popover-filter"
+                  placeholder="按消息、作者或 Commit Id 过滤"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="commit-popover-body">
+                <div v-if="commitsLoading" class="empty-inline">正在读取 Commit…</div>
+                <div v-else-if="!commitOptions.length" class="empty-inline">当前分支暂无可枚举的 Commit，可手动键入。</div>
+                <div v-else-if="!filteredBaseCommits.length" class="empty-inline">没有匹配「{{ baseFilter }}」的 Commit。</div>
+                <button
+                  v-for="c in filteredBaseCommits"
+                  :key="`browse-base-${c.commitId}`"
+                  type="button"
+                  class="commit-picker-row"
+                  :class="{ active: form.baseCommit === c.commitId }"
+                  @click="pickCommit('base', c)"
+                >
+                  <div class="commit-line-main">
+                    <code class="commit-sha">{{ c.shortCommitId || (c.commitId || '').slice(0, 8) }}</code>
+                    <span class="commit-message" :title="c.message">{{ c.message || '（无 Commit 信息）' }}</span>
+                    <time class="commit-time" :title="`commit 时间：${c.commitTimeText || '未知'}`">{{ c.commitTimeText || '—' }}</time>
+                  </div>
+                  <div class="commit-line-meta">
+                    <span class="commit-author">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="12" height="12"><path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.31 2-6 2.69-6 5v1h12v-1c0-2.31-2.69-3-6-5Z"/></svg>
+                      {{ c.author || '未知作者' }}
+                    </span>
+                    <span class="commit-full" :title="c.commitId">{{ c.commitId }}</span>
+                  </div>
+                </button>
+                <div class="empty-inline" v-if="commitsLoading">正在读取更多 Commit…</div>
+              </div>
+              <div v-if="commitOptions.length" class="commit-popover-foot">
+                <span class="commit-popover-summary">
+                  已显示 <strong>{{ commitOptions.length }}</strong> 个 Commit
+                  <template v-if="commitsReachedTail">· 已到分支顶端</template>
+                </span>
+                <span class="commit-popover-summary">
+                  <template v-if="moreLoading">加载下一页中…</template>
+                  <template v-else-if="!commitsReachedTail">滚动到底自动加载</template>
+                </span>
+              </div>
+              <div
+                v-if="commitOptions.length && !commitsReachedTail"
+                ref="baseSentinel"
+                class="commit-popover-sentinel"
+                aria-hidden="true"
+              >
+                <span class="dot-loader"></span>
+                <span>滚动到底自动加载 {{ COMMIT_PICKER_PAGE }} 个 Commit…</span>
+              </div>
+              <div v-else-if="commitsReachedTail" class="commit-popover-sentinel commit-popover-tail">
+                — 已到分支顶端 —
+              </div>
+            </div>
+          </Teleport>
+        </div>
+
+        <div class="commit-field" :class="{ expanded: picker === 'head' }">
+          <div class="commit-field-head">
+            <span class="commit-label">Head Commit</span>
+            <div class="commit-field-actions">
+              <button
+                type="button"
+                class="ghost-button"
+                :disabled="!latestCommit"
+                @click="useLatest('head')"
+              >用最新</button>
+              <button
+                type="button"
+                class="ghost-button"
+                :disabled="!repoBaseUrl || !form.headCommit"
+                :title="form.headCommit ? '在代码仓库查看该 Commit' : '请先选择 Commit'"
+                @click="openRepoAtCommit('head')"
+              >在仓库查看 ↗</button>
+            </div>
+          </div>
+          <div class="commit-input-wrap">
+            <input
+              ref="headInput"
+              class="commit-input"
+              type="text"
+              v-model.trim="form.headCommit"
+              placeholder="键入 Commit Id，或从下拉中选择"
+              autocomplete="off"
+              spellcheck="false"
+              @focus="togglePicker('head', true)"
+              @input="filterPicker('head')"
+            />
+            <button
+              type="button"
+              class="commit-popover-trigger"
+              :disabled="!commitOptions.length"
+              :title="commitOptions.length ? '在最近 Commit 中选择' : '当前分支暂无可枚举的 Commit'"
+              :aria-expanded="picker === 'head'"
+              aria-label="选择 Recent Commit"
+              @click="togglePicker('head')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ open: picker === 'head' }"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
+            </button>
+            <span v-if="commitShort(form.headCommit)" class="commit-preview">{{ commitShort(form.headCommit) }}</span>
+          </div>
+          <Teleport to="body">
+            <div
+              v-if="picker === 'head'"
+              ref="headPopover"
+              class="commit-popover"
+              :style="popoverStyle.head"
+              @mousedown.stop
+            >
+              <div class="commit-popover-head">
+                <span class="commit-popover-title">最近 {{ filteredHeadCommits.length || commitOptions.length }} 个 Commit</span>
+                <input
+                  v-model.trim="headFilter"
+                  type="text"
+                  class="commit-popover-filter"
+                  placeholder="按消息、作者或 Commit Id 过滤"
+                  spellcheck="false"
+                  autocomplete="off"
+                />
+              </div>
+              <div class="commit-popover-body">
+                <div v-if="commitsLoading" class="empty-inline">正在读取 Commit…</div>
+                <div v-else-if="!commitOptions.length" class="empty-inline">当前分支暂无可枚举的 Commit，可手动键入。</div>
+                <div v-else-if="!filteredHeadCommits.length" class="empty-inline">没有匹配「{{ headFilter }}」的 Commit。</div>
+                <button
+                  v-for="c in filteredHeadCommits"
+                  :key="`browse-head-${c.commitId}`"
+                  type="button"
+                  class="commit-picker-row"
+                  :class="{ active: form.headCommit === c.commitId }"
+                  @click="pickCommit('head', c)"
+                >
+                  <div class="commit-line-main">
+                    <code class="commit-sha">{{ c.shortCommitId || (c.commitId || '').slice(0, 8) }}</code>
+                    <span class="commit-message" :title="c.message">{{ c.message || '（无 Commit 信息）' }}</span>
+                    <time class="commit-time" :title="`commit 时间：${c.commitTimeText || '未知'}`">{{ c.commitTimeText || '—' }}</time>
+                  </div>
+                  <div class="commit-line-meta">
+                    <span class="commit-author">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" width="12" height="12"><path fill="currentColor" d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.31 2-6 2.69-6 5v1h12v-1c0-2.31-2.69-3-6-5Z"/></svg>
+                      {{ c.author || '未知作者' }}
+                    </span>
+                    <span class="commit-full" :title="c.commitId">{{ c.commitId }}</span>
+                  </div>
+                </button>
+                <div class="empty-inline" v-if="commitsLoading">正在读取更多 Commit…</div>
+              </div>
+              <div v-if="commitOptions.length" class="commit-popover-foot">
+                <span class="commit-popover-summary">
+                  已显示 <strong>{{ commitOptions.length }}</strong> 个 Commit
+                  <template v-if="commitsReachedTail">· 已到分支顶端</template>
+                </span>
+                <span class="commit-popover-summary">
+                  <template v-if="moreLoading">加载下一页中…</template>
+                  <template v-else-if="!commitsReachedTail">滚动到底自动加载</template>
+                </span>
+              </div>
+              <div
+                v-if="commitOptions.length && !commitsReachedTail"
+                ref="headSentinel"
+                class="commit-popover-sentinel"
+                aria-hidden="true"
+              >
+                <span class="dot-loader"></span>
+                <span>滚动到底自动加载 {{ COMMIT_PICKER_PAGE }} 个 Commit…</span>
+              </div>
+              <div v-else-if="commitsReachedTail" class="commit-popover-sentinel commit-popover-tail">
+                — 已到分支顶端 —
+              </div>
+            </div>
+          </Teleport>
+        </div>
       </div>
       <div class="analyze-action-row">
         <button
@@ -300,10 +583,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { fetchGitChangeImpactJob, fetchGitImpactLlmReview, fetchVerificationOverview, startGitChangeImpactJob, type GitChangeImpactResponse, type GitImpactAnalysisJob, type GitImpactLlmReviewProgress, type GitImpactReport, type VerificationOverview } from '@/api/verification'
+import { fetchRepositoryBranches, fetchRepositoryConfig } from '@/api/bootstrap'
+import { fetchGitLatestCommit, fetchGitRecentCommits } from '@/api/version'
+import type { GitCommitOption, RepositoryConfigPayload } from '@/api/types'
 import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { useToast } from '@/composables/useToast'
@@ -322,11 +608,40 @@ let analysisPollTimer: number | undefined
 let llmPollTimer: number | undefined
 const loading = ref(false)
 const error = ref('')
-const form = reactive({ baselineId: '', appId: '', baseCommit: '', headCommit: '' })
+const form = reactive({ baselineId: '', appId: '', branch: '', baseCommit: '', headCommit: '' })
 const resultFilters = reactive({ keyword: '', classification: '' })
 const pages = reactive({ files: 1, direct: 1, candidates: 1, criteria: 1, testcases: 1 })
 const pageSizes = reactive({ files: 10, direct: 10, candidates: 10, criteria: 5, testcases: 5 })
+
+// Git commit picker state
+const branchOptions = ref<string[]>([])
+const branchLoading = ref(false)
+const commitOptions = ref<GitCommitOption[]>([])
+const commitsLoading = ref(false)
+const moreLoading = ref(false)
+const commitsLimit = ref(50)
+const commitsReachedTail = ref(true)
+const latestCommit = ref('')
+const latestCommitLoading = ref(false)
+const repoConfig = ref<RepositoryConfigPayload | null>(null)
+const picker = ref<'' | 'base' | 'head'>('')
+const baseFilter = ref('')
+const headFilter = ref('')
+const baseInput = ref<HTMLInputElement | null>(null)
+const headInput = ref<HTMLInputElement | null>(null)
+const basePopover = ref<HTMLDivElement | null>(null)
+const headPopover = ref<HTMLDivElement | null>(null)
+const baseSentinel = ref<HTMLDivElement | null>(null)
+const headSentinel = ref<HTMLDivElement | null>(null)
+const popoverStyle = reactive<{ base: Record<string, string>; head: Record<string, string> }>({
+  base: { top: '0px', left: '0px', width: '0px' },
+  head: { top: '0px', left: '0px', width: '0px' },
+})
+let baseLazyObserver: IntersectionObserver | null = null
+let headLazyObserver: IntersectionObserver | null = null
 const canAnalyze = computed(() => !!form.baselineId && !!form.appId && !!form.baseCommit && !!form.headCommit)
+const selectedApp = computed(() => apps.value.find(app => app.id === form.appId))
+const repoBaseUrl = computed(() => repoWebUrl(repoConfig.value?.app?.repoAddress))
 const transitiveCandidates = computed(() => (result.value?.report.candidates || [])
   .filter(candidate => candidate.classification !== 'DIRECT')
   .sort((a, b) => b.confidence - a.confidence || a.distance - b.distance))
@@ -431,6 +746,300 @@ async function analyze() {
 function messageOf(err: unknown) {
   return err instanceof Error ? err.message : '请求失败，请稍后重试'
 }
+
+// ── Git commit picker helpers ────────────────────────────────────────────────
+
+function normalizeBranchName(branch: string) {
+  return branch.replace(/^refs\/heads\//, '').replace(/^origin\//, '').trim()
+}
+
+function commitShort(value?: string) {
+  return value ? value.slice(0, 8) : ''
+}
+
+function formatCommitOption(commit: GitCommitOption) {
+  const short = commit.shortCommitId || commit.commitId.slice(0, 10)
+  return [short, commit.message, commit.author, commit.commitTimeText].filter(Boolean).join(' · ')
+}
+
+function matchesCommitFilter(commit: GitCommitOption, keyword: string) {
+  if (!keyword) return true
+  const k = keyword.toLowerCase()
+  return [commit.commitId, commit.shortCommitId, commit.message, commit.author]
+    .filter(Boolean)
+    .some(field => String(field).toLowerCase().includes(k))
+}
+
+const filteredBaseCommits = computed(() => commitOptions.value.filter(c => matchesCommitFilter(c, baseFilter.value)))
+const filteredHeadCommits = computed(() => commitOptions.value.filter(c => matchesCommitFilter(c, headFilter.value)))
+
+function togglePicker(target: 'base' | 'head', force?: boolean) {
+  const next = force === undefined ? (picker.value === target ? '' : target) : (force ? target : '')
+  picker.value = next
+  if (next === target) {
+    nextTick(() => positionPopover(target))
+  }
+}
+
+function filterPicker(target: 'base' | 'head') {
+  if (picker.value === target) return
+  if (!commitOptions.value.length) return
+  picker.value = target
+  nextTick(() => positionPopover(target))
+}
+
+function positionPopover(target: 'base' | 'head') {
+  const inputEl = target === 'base' ? baseInput.value : headInput.value
+  if (!inputEl) return
+  const rect = inputEl.getBoundingClientRect()
+  const GAP = 8
+  const VIEWPORT_PADDING = 12
+  const viewportH = window.innerHeight
+  const below = viewportH - rect.bottom - GAP - VIEWPORT_PADDING
+  const above = rect.top - GAP - VIEWPORT_PADDING
+  // 优先下方；空间不足时自动翻转到上方（input 之下），避免被截断
+  const placeBelow = below >= 200 || below >= above
+  const available = Math.max(220, placeBelow ? below : above)
+  const maxHeight = Math.max(220, Math.min(720, available))
+  const top = placeBelow ? rect.bottom + GAP : rect.top - GAP
+  const style: Record<string, string> = {
+    top: `${Math.max(VIEWPORT_PADDING, top)}px`,
+    left: `${rect.left}px`,
+    width: `${rect.width}px`,
+    '--commit-popover-max-h': `${maxHeight}px`,
+    transform: placeBelow ? 'none' : 'translateY(-100%)',
+    'transform-origin': placeBelow ? 'top left' : 'bottom left',
+  }
+  popoverStyle[target] = style
+}
+
+function onWindowMaybeReposition() {
+  if (picker.value === 'base') positionPopover('base')
+  if (picker.value === 'head') positionPopover('head')
+}
+
+function onDocumentClick(event: MouseEvent) {
+  if (!picker.value) return
+  const target = event.target as HTMLElement | null
+  if (!target) return
+  if (target.closest('.commit-popover')) return
+  if (target.closest('.commit-input-wrap')) return
+  picker.value = ''
+}
+
+function pickCommit(target: 'base' | 'head', commit: GitCommitOption) {
+  if (!commit?.commitId) return
+  if (target === 'base') form.baseCommit = commit.commitId
+  else form.headCommit = commit.commitId
+  picker.value = ''
+}
+
+function useLatest(target: 'base' | 'head') {
+  if (!latestCommit.value) return
+  if (target === 'base') form.baseCommit = latestCommit.value
+  else form.headCommit = latestCommit.value
+}
+
+function looksLikeCommit(value?: string) {
+  const cleaned = (value || '').trim()
+  return cleaned.length >= 7 && cleaned.length <= 64 && /^[0-9a-f]+$/i.test(cleaned)
+}
+
+/** 推断 git 仓库 web 地址，支持 GitHub / GitLab / Gitee / 自建仓库（带 web UI）。 */
+function repoWebUrl(repoAddress?: string) {
+  const raw = (repoAddress || '').trim()
+  if (!raw) return ''
+  let url = raw
+  if (url.startsWith('git@')) {
+    url = url.replace(/^git@([^:]+):/, 'https://$1/').replace(/\.git$/, '')
+    return url.replace(/\/$/, '')
+  }
+  if (url.startsWith('ssh://git@')) {
+    url = url.replace(/^ssh:\/\/git@/, 'https://').replace(/\.git$/, '')
+    return url.replace(/\/$/, '')
+  }
+  if (/^https?:\/\//.test(url)) {
+    return url.replace(/\.git$/, '').replace(/\/$/, '')
+  }
+  return ''
+}
+
+function repoUrlFor(commit?: string) {
+  const base = repoBaseUrl.value
+  if (!base || !looksLikeCommit(commit)) return ''
+  return `${base}/commit/${(commit || '').trim()}`
+}
+
+function openExternal(url: string) {
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+function openRepoRoot() {
+  openExternal(repoBaseUrl.value)
+}
+
+function openRepoAtCommit(target: 'base' | 'head') {
+  const value = target === 'base' ? form.baseCommit : form.headCommit
+  openExternal(repoUrlFor(value))
+}
+
+function resetCommitState() {
+  branchOptions.value = []
+  commitOptions.value = []
+  latestCommit.value = ''
+  picker.value = ''
+}
+
+async function loadRepoConfig(appId: string) {
+  if (!appId) {
+    repoConfig.value = null
+    return
+  }
+  try {
+    repoConfig.value = await fetchRepositoryConfig(projectId.value, appId)
+  } catch {
+    repoConfig.value = null
+  }
+}
+
+async function loadBranches(appId: string) {
+  if (!appId) {
+    branchOptions.value = []
+    return
+  }
+  branchLoading.value = true
+  try {
+    const list = await fetchRepositoryBranches(projectId.value, appId)
+    branchOptions.value = list.map(normalizeBranchName).filter(Boolean)
+  } catch (err) {
+    branchOptions.value = []
+    error.value = messageOf(err)
+  } finally {
+    branchLoading.value = false
+  }
+}
+
+// Constant used as the page size of the commit picker. Bump to taste.
+const COMMIT_PICKER_PAGE = 50
+
+async function loadCommits(appId: string, branch: string) {
+  if (!appId || !branch) {
+    commitOptions.value = []
+    commitsLimit.value = COMMIT_PICKER_PAGE
+    commitsReachedTail.value = true
+    return
+  }
+  commitsLoading.value = true
+  commitsLimit.value = COMMIT_PICKER_PAGE
+  commitsReachedTail.value = false
+  try {
+    commitOptions.value = await fetchGitRecentCommits(projectId.value, appId, branch, COMMIT_PICKER_PAGE)
+  } catch (err) {
+    commitOptions.value = []
+    error.value = messageOf(err)
+  } finally {
+    commitsLoading.value = false
+  }
+}
+
+async function loadMoreCommits() {
+  const appId = form.appId
+  const branch = form.branch
+  if (!appId || !branch) return
+  if (commitsLoading.value || moreLoading.value || commitsReachedTail.value) return
+  if (commitOptions.value.length < commitsLimit.value) {
+    // Already loaded fewer than the current page → no more chunks to request
+    commitsReachedTail.value = true
+    return
+  }
+  moreLoading.value = true
+  const nextLimit = commitsLimit.value + COMMIT_PICKER_PAGE
+  try {
+    const more = await fetchGitRecentCommits(projectId.value, appId, branch, nextLimit)
+    const appended = more.slice(commitOptions.value.length)
+    if (appended.length) commitOptions.value = [...commitOptions.value, ...appended]
+    commitsLimit.value = nextLimit
+    if (appended.length < COMMIT_PICKER_PAGE || more.length < nextLimit) {
+      commitsReachedTail.value = true
+    }
+  } catch (err) {
+    error.value = messageOf(err)
+  } finally {
+    moreLoading.value = false
+  }
+}
+
+async function fetchLatestCommit() {
+  if (!form.appId || !form.branch) return
+  latestCommitLoading.value = true
+  try {
+    latestCommit.value = (await fetchGitLatestCommit(projectId.value, form.appId, form.branch)) || ''
+  } catch (err) {
+    latestCommit.value = ''
+    error.value = messageOf(err)
+  } finally {
+    latestCommitLoading.value = false
+  }
+}
+
+async function onAppChange() {
+  form.branch = ''
+  form.baseCommit = ''
+  form.headCommit = ''
+  resetCommitState()
+  if (!form.appId) {
+    repoConfig.value = null
+    return
+  }
+  await loadRepoConfig(form.appId)
+  await loadBranches(form.appId)
+}
+
+async function onBranchChange() {
+  form.baseCommit = ''
+  form.headCommit = ''
+  picker.value = ''
+  commitOptions.value = []
+  latestCommit.value = ''
+  if (!form.appId || !form.branch) return
+  await Promise.all([loadCommits(form.appId, form.branch), fetchLatestCommit()])
+}
+
+async function refreshCommits() {
+  if (!form.appId || !form.branch) return
+  await Promise.all([loadCommits(form.appId, form.branch), fetchLatestCommit()])
+}
+
+function rebuildLazyObservers() {
+  baseLazyObserver?.disconnect()
+  headLazyObserver?.disconnect()
+  baseLazyObserver = null
+  headLazyObserver = null
+  if (typeof window === 'undefined' || !('IntersectionObserver' in window)) return
+  const cb: IntersectionObserverCallback = entries => {
+    if (!entries.some(entry => entry.isIntersecting)) return
+    if (commitsLoading.value || moreLoading.value || commitsReachedTail.value) return
+    if (!form.appId || !form.branch) return
+    void loadMoreCommits()
+  }
+  baseLazyObserver = new IntersectionObserver(cb, { rootMargin: '320px 0px', threshold: 0 })
+  headLazyObserver = new IntersectionObserver(cb, { rootMargin: '320px 0px', threshold: 0 })
+  if (baseSentinel.value) baseLazyObserver.observe(baseSentinel.value)
+  if (headSentinel.value) headLazyObserver.observe(headSentinel.value)
+}
+
+watch(
+  () => [
+    commitOptions.value.length,
+    commitsReachedTail.value,
+    picker.value,
+    baseSentinel.value,
+    headSentinel.value,
+  ],
+  () => rebuildLazyObservers(),
+  { flush: 'post' }
+)
 
 watch(() => [resultFilters.keyword, resultFilters.classification], resetPages)
 
@@ -653,10 +1262,20 @@ function typeText(value: string) {
   return ({ ADD: '新增', MODIFY: '修改', DELETE: '删除', RENAME: '重命名', COPY: '复制', MOVE: '移动', SIGNATURE_CHANGE: '签名变更' } as Record<string, string>)[value] || value
 }
 
-onMounted(loadOverview)
+onMounted(() => {
+  loadOverview()
+  window.addEventListener('resize', onWindowMaybeReposition)
+  window.addEventListener('scroll', onWindowMaybeReposition, true)
+  document.addEventListener('mousedown', onDocumentClick)
+})
 onBeforeUnmount(() => {
   stopAnalysisPolling()
   stopLlmReviewPolling()
+  window.removeEventListener('resize', onWindowMaybeReposition)
+  window.removeEventListener('scroll', onWindowMaybeReposition, true)
+  document.removeEventListener('mousedown', onDocumentClick)
+  baseLazyObserver?.disconnect()
+  headLazyObserver?.disconnect()
 })
 </script>
 
@@ -752,6 +1371,386 @@ onBeforeUnmount(() => {
 .inline-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .form-stack label { display: grid; gap: 7px; color: #475569; font-size: 13px; font-weight: 700; }
 .form-stack input, .form-stack select { min-height: 42px; border: 1px solid rgba(15, 23, 42, .13); border-radius: 10px; padding: 9px 11px; background: #fff; color: #1e293b; font: inherit; }
+
+.branch-cell .branch-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+.branch-cell select { min-height: 42px; }
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, .13);
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.icon-button:hover:not(:disabled) { color: #0f766e; border-color: rgba(15, 118, 110, .35); }
+.icon-button:focus-visible { outline: none; box-shadow: var(--oat-focus-ring); }
+.icon-button:disabled { opacity: .45; cursor: not-allowed; background: var(--oat-surface-soft); }
+.icon-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+.icon-button.repo-link svg { stroke-width: 1.8; }
+.icon-button .spinning { animation: refresh-spin .8s linear infinite; }
+
+.latest-hint {
+  display: grid;
+  gap: 6px;
+  align-content: center;
+  padding: 9px 12px;
+  border: 1px solid rgba(15, 118, 110, .14);
+  border-radius: 10px;
+  background: #f0fdfa;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+.latest-hint code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f766e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+  font-weight: 800;
+}
+.latest-hint .muted { color: #64748b; font-weight: 600; }
+
+.commits-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.commit-field {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(15, 23, 42, .08);
+  border-radius: 12px;
+  background: #fff;
+}
+.commit-field.expanded { border-color: rgba(15, 118, 110, .35); box-shadow: 0 0 0 3px rgba(15, 118, 110, .08); }
+.commit-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.commit-label { color: #475569; font-size: 13px; font-weight: 800; }
+.commit-field-actions { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.ghost-button:hover:not(:disabled) { color: #0f766e; border-color: rgba(15, 118, 110, .35); }
+.ghost-button:focus-visible { outline: none; box-shadow: var(--oat-focus-ring); }
+.ghost-button:disabled { opacity: .45; cursor: not-allowed; background: var(--oat-surface-soft); }
+
+.commit-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.commit-input {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(15, 23, 42, .13);
+  border-radius: 10px;
+  padding: 9px 11px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+}
+.commit-input:focus-visible { outline: none; border-color: rgba(15, 118, 110, .5); box-shadow: var(--oat-focus-ring); }
+.commit-preview {
+  position: absolute;
+  right: 44px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  pointer-events: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.commit-input-wrap .commit-popover-trigger {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+.commit-input-wrap .commit-popover-trigger:hover:not(:disabled) {
+  background: #ccfbf1;
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, .35);
+}
+.commit-input-wrap .commit-popover-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--oat-focus-ring);
+}
+.commit-input-wrap .commit-popover-trigger:disabled { opacity: .4; cursor: not-allowed; background: var(--oat-surface-soft); }
+.commit-input-wrap .commit-popover-trigger svg { width: 16px; height: 16px; transition: transform .15s ease; }
+.commit-input-wrap .commit-popover-trigger svg.open { transform: rotate(180deg); }
+.commit-input-wrap .commit-input { padding-right: 44px; }
+
+.commit-popover {
+  position: fixed;
+  z-index: 1100;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  max-height: var(--commit-popover-max-h, min(720px, 80vh));
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, .14), 0 2px 6px rgba(15, 23, 42, .06);
+  overflow: hidden;
+}
+.commit-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, .08);
+  background: #ffffff;
+}
+.commit-popover-title {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+.commit-popover-filter {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: 1px solid rgba(15, 23, 42, .12);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1e293b;
+}
+.commit-popover-filter:focus-visible {
+  outline: none;
+  border-color: rgba(15, 118, 110, .5);
+  box-shadow: var(--oat-focus-ring);
+}
+.commit-popover-body {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 10px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 118, 110, .35) transparent;
+}
+.commit-popover-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.commit-popover-body::-webkit-scrollbar-thumb {
+  background: rgba(15, 118, 110, .28);
+  border-radius: 4px;
+}
+.commit-popover-body::-webkit-scrollbar-thumb:hover { background: rgba(15, 118, 110, .5); }
+.commit-popover-body::-webkit-scrollbar-track { background: transparent; }
+.commit-popover-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(15, 23, 42, .08);
+  background: #ffffff;
+}
+.commit-popover-foot .commit-popover-summary {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+.commit-popover-foot .commit-popover-summary strong {
+  color: #0f766e;
+  font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+.commit-popover-load-more {
+  border: 1px solid rgba(15, 118, 110, .35);
+  border-radius: 8px;
+  padding: 5px 12px;
+  background: #f0fdfa;
+  color: #0f766e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+.commit-popover-load-more:hover { background: #ccfbf1; border-color: rgba(15, 118, 110, .55); }
+.commit-popover-load-more:disabled { opacity: .55; cursor: not-allowed; background: #f0fdfa; }
+.commit-popover-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  border-top: 1px dashed rgba(15, 23, 42, .12);
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 600;
+}
+.commit-popover-sentinel .dot-loader {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(15, 118, 110, .25);
+  border-top-color: rgba(15, 118, 110, .85);
+  animation: commit-picker-spin 0.8s linear infinite;
+}
+.commit-popover-sentinel.commit-popover-tail {
+  border-top-style: solid;
+  border-top-color: rgba(15, 23, 42, .08);
+  color: #0f766e;
+}
+.commit-popover-sentinel.commit-popover-tail .dot-loader { display: none; }
+@keyframes commit-picker-spin {
+  to { transform: rotate(360deg); }
+}
+.commit-picker-row {
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid rgba(15, 23, 42, .06);
+  border-radius: 10px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.commit-picker-row:hover {
+  border-color: rgba(15, 118, 110, .35);
+  background: #f0fdfa;
+  box-shadow: 0 1px 2px rgba(15, 118, 110, .08);
+}
+.commit-picker-row.active {
+  border-color: rgba(15, 118, 110, .55);
+  background: #ecfeff;
+  box-shadow: 0 0 0 2px rgba(15, 118, 110, .12) inset;
+}
+.commit-picker-row:focus-visible {
+  outline: none;
+  border-color: rgba(15, 118, 110, .5);
+  box-shadow: var(--oat-focus-ring);
+}
+.commit-picker-row .commit-line-main {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.commit-picker-row .commit-sha {
+  color: #0f766e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(15, 118, 110, .08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-align: center;
+  letter-spacing: -.3px;
+}
+.commit-picker-row .commit-message {
+  min-width: 0;
+  color: #1e293b;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.commit-picker-row .commit-time {
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  font-weight: 600;
+  background: #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  letter-spacing: .2px;
+}
+.commit-picker-row .commit-line-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 88px;
+  min-width: 0;
+}
+.commit-picker-row .commit-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  white-space: nowrap;
+}
+.commit-picker-row .commit-author svg { color: #94a3b8; flex-shrink: 0; }
+.commit-picker-row .commit-full {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  color: #94a3b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
 .result-panel { display: grid; gap: 16px; }
 .summary-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
 .summary-item { display: grid; gap: 2px; min-height: 72px; align-content: center; padding: 12px; border: 1px solid rgba(15, 23, 42, .08); border-radius: 8px; background: #fff; }
@@ -997,6 +1996,12 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 760px) {
   .inline-grid { grid-template-columns: 1fr; }
+  .commits-grid { grid-template-columns: 1fr; }
+  .branch-cell .branch-control { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .commit-picker-row .commit-line-main { grid-template-columns: 70px minmax(0, 1fr); }
+  .commit-picker-row .commit-time { grid-column: 1 / -1; justify-self: start; padding-left: 80px; }
+  .commit-picker-row .commit-line-meta { padding-left: 80px; flex-wrap: wrap; }
+  .commit-picker-row .commit-full { flex-basis: 100%; padding-left: 0; }
   .summary-grid,
   .commit-strip,
   .result-toolbar,

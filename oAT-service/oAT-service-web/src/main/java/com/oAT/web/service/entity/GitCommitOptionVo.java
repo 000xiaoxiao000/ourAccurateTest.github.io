@@ -7,6 +7,8 @@ public class GitCommitOptionVo implements Serializable {
     private String shortCommitId;
     private String message;
     private String author;
+    private String commitTimeText;
+    private Long commitTimestampMs;
 
     public GitCommitOptionVo() {
     }
@@ -48,5 +50,21 @@ public class GitCommitOptionVo implements Serializable {
 
     public void setAuthor(String author) {
         this.author = author;
+    }
+
+    public String getCommitTimeText() {
+        return commitTimeText;
+    }
+
+    public void setCommitTimeText(String commitTimeText) {
+        this.commitTimeText = commitTimeText;
+    }
+
+    public Long getCommitTimestampMs() {
+        return commitTimestampMs;
+    }
+
+    public void setCommitTimestampMs(Long commitTimestampMs) {
+        this.commitTimestampMs = commitTimestampMs;
     }
 }

@@ -22,11 +22,14 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.List;
+import java.util.TimeZone;
 
 @Service
 public class GitRemoteSupportService {
@@ -379,7 +382,17 @@ public class GitRemoteSupportService {
             message = "-";
         }
         String author = commit.getAuthorIdent() != null ? commit.getAuthorIdent().getName() : "";
-        return new GitCommitOptionVo(commitId, shortCommitId, message, author);
+        GitCommitOptionVo vo = new GitCommitOptionVo(commitId, shortCommitId, message, author);
+        long whenMs = commit.getCommitTime() * 1000L;
+        vo.setCommitTimestampMs(whenMs);
+        vo.setCommitTimeText(formatCommitTime(whenMs));
+        return vo;
+    }
+
+    private static String formatCommitTime(long whenMs) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+        sdf.setTimeZone(TimeZone.getDefault());
+        return sdf.format(new Date(whenMs));
     }
 
     private void deleteFile(File file) {
