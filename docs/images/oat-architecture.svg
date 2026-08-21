@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" font-family="'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#475569"/>
+    </marker>
+    <style>
+      .box { fill:#eef4ff; stroke:#3b82f6; stroke-width:1.5; }
+      .boxAlt { fill:#ecfdf5; stroke:#10b981; stroke-width:1.5; }
+      .boxWarn { fill:#fef3c7; stroke:#f59e0b; stroke-width:1.5; }
+      .boxDark { fill:#1e293b; stroke:#0f172a; stroke-width:1.5; }
+      .title { fill:#0f172a; font-size:20px; font-weight:700; }
+      .lbl { fill:#0f172a; font-size:13px; font-weight:600; }
+      .sub { fill:#475569; font-size:11px; }
+      .cap { fill:#64748b; font-size:12px; font-weight:600; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1000" height="600" fill="#ffffff"/>
+  <text x="500" y="34" text-anchor="middle" class="title">ourAccurateTest · 智溯平台系统架构</text>
+  <text x="500" y="54" text-anchor="middle" class="sub">智能分析 + 全链路追溯 · 业务零 AI 代码，AI 由独立平台提供</text>
+
+  <!-- Frontend & capturer -->
+  <rect x="70" y="74" width="300" height="58" rx="12" class="box"/>
+  <text x="220" y="98" text-anchor="middle" class="lbl">oAT-web-frontend</text>
+  <text x="220" y="117" text-anchor="middle" class="sub">Vue 3 + TS + Vite · 端口 5176</text>
+
+  <rect x="630" y="74" width="300" height="58" rx="12" class="boxWarn"/>
+  <text x="780" y="98" text-anchor="middle" class="lbl">oAT-traffic-capture</text>
+  <text x="780" y="117" text-anchor="middle" class="sub">Electron 桌面流量采集器 · 代理 8888</text>
+
+  <!-- service-web container -->
+  <rect x="70" y="196" width="540" height="200" rx="14" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="86" y="222" class="cap">oAT-service-web（端口 8899 · war 包）</text>
+  <text x="86" y="248" class="sub">项目 / 应用 / 版本 / 用例管理</text>
+  <text x="86" y="268" class="sub">验证工作区 · 基线 · 追溯矩阵</text>
+  <text x="86" y="288" class="sub">质量门禁 · Git 影响分析</text>
+  <text x="86" y="308" class="sub">代码图谱 · API 端点分析</text>
+  <text x="86" y="328" class="sub">多语言覆盖率解析 (JaCoCo/Istanbul/LCOV…)</text>
+  <text x="86" y="348" class="sub">受控 AI 业务工具 /api/ai-tools</text>
+  <text x="86" y="372" class="sub">JGit · JavaParser/ASM · Spring JDBC</text>
+
+  <!-- AI platform -->
+  <rect x="660" y="196" width="270" height="200" rx="14" class="boxDark"/>
+  <text x="795" y="226" text-anchor="middle" fill="#ffffff" class="lbl">AI 平台（独立服务）</text>
+  <text x="795" y="250" text-anchor="middle" fill="#cbd5e1" class="sub">ovanth / ai-platform-service</text>
+  <text x="795" y="270" text-anchor="middle" fill="#cbd5e1" class="sub">端口 8898 · schema ai_platform</text>
+  <text x="795" y="294" text-anchor="middle" fill="#cbd5e1" class="sub">任务 / 草稿 / 会话</text>
+  <text x="795" y="312" text-anchor="middle" fill="#cbd5e1" class="sub">LangChain4j + DeepSeek</text>
+  <text x="795" y="330" text-anchor="middle" fill="#cbd5e1" class="sub">HTTP Tool Registry → 业务资产</text>
+  <text x="795" y="354" text-anchor="middle" fill="#cbd5e1" class="sub">/admin 管理台 (X-Admin-Token)</text>
+
+  <!-- infra row -->
+  <rect x="70" y="436" width="200" height="58" rx="12" class="boxAlt"/>
+  <text x="170" y="460" text-anchor="middle" class="lbl">PostgreSQL</text>
+  <text x="170" y="479" text-anchor="middle" class="sub">业务数据 · Flyway</text>
+
+  <rect x="300" y="436" width="170" height="58" rx="12" class="box"/>
+  <text x="385" y="460" text-anchor="middle" class="lbl">Git 仓库</text>
+  <text x="385" y="479" text-anchor="middle" class="sub">Commit / Diff / 快照</text>
+
+  <rect x="500" y="436" width="200" height="58" rx="12" class="box"/>
+  <text x="600" y="460" text-anchor="middle" class="lbl">本地文件目录</text>
+  <text x="600" y="479" text-anchor="middle" class="sub">Git 缓存 / 大载荷</text>
+
+  <!-- arrows -->
+  <line x1="220" y1="132" x2="250" y2="196" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="700" y1="132" x2="560" y2="196" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="610" y1="296" x2="660" y2="296" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="170" y1="396" x2="170" y2="436" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="385" y1="396" x2="385" y2="436" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="600" y1="396" x2="600" y2="436" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+</svg>

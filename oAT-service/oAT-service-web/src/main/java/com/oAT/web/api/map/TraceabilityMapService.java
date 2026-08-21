@@ -311,7 +311,9 @@ public class TraceabilityMapService {
                 asset.freshness(),
                 asset.importedBy(),
                 asset.capturedAt(),
-                LocalDateTime.now());
+                LocalDateTime.now(),
+                null,
+                VerificationModels.BaselineScope.SYSTEM);
     }
 
     private int normalizeDepth(Integer requestedDepth) {

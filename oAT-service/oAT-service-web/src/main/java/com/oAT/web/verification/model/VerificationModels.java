@@ -29,15 +29,16 @@ public final class VerificationModels {
             Freshness freshness,
             String importedBy,
             LocalDateTime capturedAt,
-            boolean aiGenerated) {
+            boolean aiGenerated,
+            String appId) {
         public AssetSnapshot(String id, String projectId, AssetType assetType, SourceType sourceType,
                              String externalId, String externalUrl, String sourceVersion, String fileName,
                              String contentHash, String content, String storageType, String storageKey,
                              long contentSize, String contentPreview, Map<String, Object> metadata,
-                             Freshness freshness, String importedBy, LocalDateTime capturedAt) {
+                             Freshness freshness, String importedBy, LocalDateTime capturedAt, String appId) {
             this(id, projectId, assetType, sourceType, externalId, externalUrl, sourceVersion, fileName,
                     contentHash, content, storageType, storageKey, contentSize, contentPreview, metadata,
-                    freshness, importedBy, capturedAt, false);
+                    freshness, importedBy, capturedAt, false, appId);
         }
     }
 
@@ -68,7 +69,8 @@ public final class VerificationModels {
             String coverageReportHash,
             String executionTraceHash,
             String symbolHash,
-            String supersededByBaselineId) {
+            String supersededByBaselineId,
+            BaselineScope scope) {
 
         /** Backward-compatible constructor for callers that don't supply the new graph version fields. */
         public Baseline(String id, String projectId, String name,
@@ -76,12 +78,13 @@ public final class VerificationModels {
                         String executionAssetId, String coverageAssetId, String sourceAppId,
                         String repositoryUrl, String sourceBranch, String sourceCommit,
                         String analyzerVersion, BaselineStatus status, Freshness freshness,
-                        String createdBy, LocalDateTime createTime, LocalDateTime updateTime) {
+                        String createdBy, LocalDateTime createTime, LocalDateTime updateTime,
+                        String supersededByBaselineId, BaselineScope scope) {
             this(id, projectId, name, requirementAssetId, testcaseAssetId, sourceAssetId,
                     executionAssetId, coverageAssetId, sourceAppId, repositoryUrl,
                     sourceBranch, sourceCommit, analyzerVersion, status, freshness,
                     createdBy, createTime, updateTime,
-                    null, null, null, null, null, null, null, null);
+                    null, null, null, null, null, null, null, null, scope);
         }
     }
 
@@ -343,6 +346,8 @@ public final class VerificationModels {
     public enum SourceType { FILE, GIT, API, AGENT, PASTE }
     public enum Freshness { LIVE, SNAPSHOT, MANUAL, STALE, UNKNOWN }
     public enum BaselineStatus { CREATED, ANALYZING, WAITING_REVIEW, COMPLETED, FAILED, STALE }
+    /** 基线归属范围：SYSTEM=绑定到具体系统（新建必选）；LEGACY_PROJECT=遗留的项目级基线（只读）。 */
+    public enum BaselineScope { SYSTEM, LEGACY_PROJECT }
     public enum AnalysisJobStatus { QUEUED, RUNNING, SUCCEEDED, FAILED }
     public enum EvidenceLevel { E0, E1, E2, E3, E4 }
     public enum ReviewStatus { PENDING, CONFIRMED, REJECTED, WRITTEN_BACK, STALE, EXEMPTED }

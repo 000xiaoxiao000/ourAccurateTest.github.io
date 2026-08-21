@@ -15,7 +15,7 @@ public interface UsecaseService {
 
     UsecaseVo doAdd(String author, UsecaseVo usecaseParam);
 
-    List<UsecaseVo> getUsecases(String projectId, String directory, String sort, String keyword);
+    List<UsecaseVo> getUsecases(String projectId, String directory, String sort, String keyword, String appId);
 
     UsecaseVo getUsecase(String projectId, String id);
 

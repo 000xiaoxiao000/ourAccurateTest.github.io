@@ -6,6 +6,10 @@ import java.util.Date;
 public class UsecaseVo implements Serializable {
     private String id;
     private String projectId;
+    // 归属系统（App）ID，A1 全系统级，创建时必填
+    private String appId;
+    // 关联的其他系统 ID 列表（跨系统业务需求），可空
+    private String relatedAppIds[];
     // 标题
     private String title;
     // 标题图
@@ -49,6 +53,22 @@ public class UsecaseVo implements Serializable {
 
     public void setProjectId(String projectId) {
         this.projectId = projectId;
+    }
+
+    public String getAppId() {
+        return appId;
+    }
+
+    public void setAppId(String appId) {
+        this.appId = appId;
+    }
+
+    public String[] getRelatedAppIds() {
+        return relatedAppIds;
+    }
+
+    public void setRelatedAppIds(String[] relatedAppIds) {
+        this.relatedAppIds = relatedAppIds;
     }
 
     public String getTitle() {

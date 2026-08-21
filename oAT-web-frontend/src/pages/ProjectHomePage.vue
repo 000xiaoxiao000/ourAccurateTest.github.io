@@ -41,6 +41,9 @@
                 <span>{{ app.repoConfigured ? '已配置代码仓库' : '待配置代码仓库' }}</span>
               </div>
               <div class="app-card-actions">
+                <RouterLink :to="`/p/${projectId}/apps/${app.id}/verification`">AI 验证</RouterLink>
+                <RouterLink :to="`/p/${projectId}/apps/${app.id}/git-impact`">Git 影响</RouterLink>
+                <RouterLink :to="`/p/${projectId}/apps/${app.id}/map`">链路地图</RouterLink>
                 <RouterLink :to="`/p/${projectId}/apps/${app.id}/repository`">仓库配置</RouterLink>
               </div>
             </article>

@@ -73,6 +73,22 @@ const router = createRouter({
           component: () => import('@/pages/GitImpactPage.vue'),
         },
         {
+          path: 'p/:projectId/apps/:appId/verification',
+          name: 'app-verification-workspace',
+          component: () => import('@/pages/VerificationWorkspacePage.vue'),
+        },
+        {
+          path: 'p/:projectId/apps/:appId/git-impact',
+          name: 'app-git-impact',
+          component: () => import('@/pages/GitImpactPage.vue'),
+        },
+        {
+          path: 'p/:projectId/apps/:appId/map',
+          redirect: (to) => ({
+            path: `/p/${String(to.params.projectId)}/map/app/${String(to.params.appId)}`,
+          }),
+        },
+        {
           path: 'p/:projectId/verification/connections',
           name: 'data-connections',
           component: () => import('@/pages/DataConnectionPage.vue'),

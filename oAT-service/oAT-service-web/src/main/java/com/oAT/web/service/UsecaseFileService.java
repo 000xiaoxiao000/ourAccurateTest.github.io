@@ -10,7 +10,7 @@ public interface UsecaseFileService {
 
     void downloadTemplate(HttpServletResponse response) throws IOException;
 
-    UsecaseImportResult importUsecases(String projectId, String operator, String currentDirectory, MultipartFile file) throws IOException;
+    UsecaseImportResult importUsecases(String projectId, String operator, String currentDirectory, String appId, MultipartFile file) throws IOException;
 
     void exportUsecases(String projectId, String directory, String sort, String keyword, HttpServletResponse response) throws IOException;
 }

@@ -45,7 +45,7 @@ public final class SourceAssetFilter {
 
     public static boolean assetMatchesApp(AssetSnapshot asset, SourceProfile profile) {
         if (asset == null || profile == null || !StringUtils.hasText(profile.appId())) return true;
-        String assetAppId = metadataText(asset.metadata(), "appId");
+        String assetAppId = StringUtils.hasText(asset.appId()) ? asset.appId() : metadataText(asset.metadata(), "appId");
         return !StringUtils.hasText(assetAppId) || profile.appId().equals(assetAppId);
     }
 

@@ -305,6 +305,8 @@ public class AiDraftProxyController {
         }
         if (e.getStatusCode().value() == 403) {
             message = "AI 平台接入失败：" + (message != null ? message : "业务线未授权");
+        } else if (e.getStatusCode().value() == 429) {
+            message = "AI 算力配额已用尽：" + (message != null ? message : "今日 token 配额已超限，请明日重试或联系管理员提升配额");
         } else {
             message = "AI 平台调用失败：" + (message != null ? message : ("HTTP " + e.getStatusCode().value()));
         }

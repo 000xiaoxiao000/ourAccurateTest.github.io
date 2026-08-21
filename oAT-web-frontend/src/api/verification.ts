@@ -51,6 +51,8 @@ export interface VerificationBaseline {
   freshness: Freshness
   createTime: string
   updateTime: string
+  /** 基线归属范围：SYSTEM=绑定系统（新建必选）；LEGACY_PROJECT=遗留项目级（只读） */
+  scope?: string
 }
 
 export interface AcceptanceCriterion {

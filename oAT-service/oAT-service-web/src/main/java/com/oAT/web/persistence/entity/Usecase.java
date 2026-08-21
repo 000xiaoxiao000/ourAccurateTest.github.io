@@ -19,6 +19,14 @@ public class Usecase implements Serializable, StandardDate{
     private String content;
     private String projectId;
     /**
+     * 归属系统（App）ID。A1：需求全系统级，创建时必填。
+     */
+    private String appId;
+    /**
+     * 关联的其他系统 ID 列表（跨系统业务需求）。主系统为 appId，此处补充可见范围。可空。
+     */
+    private String relatedAppIds[];
+    /**
      * 目录 ID
      */
     private String directory;
@@ -83,6 +91,22 @@ public class Usecase implements Serializable, StandardDate{
 
     public void setProjectId(String projectId) {
         this.projectId = projectId;
+    }
+
+    public String getAppId() {
+        return appId;
+    }
+
+    public void setAppId(String appId) {
+        this.appId = appId;
+    }
+
+    public String[] getRelatedAppIds() {
+        return relatedAppIds;
+    }
+
+    public void setRelatedAppIds(String[] relatedAppIds) {
+        this.relatedAppIds = relatedAppIds;
     }
 
     public String getDirectory() {

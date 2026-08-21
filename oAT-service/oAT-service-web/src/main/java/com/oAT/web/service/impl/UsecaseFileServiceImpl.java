@@ -55,8 +55,14 @@ public class UsecaseFileServiceImpl implements UsecaseFileService {
     }
 
     @Override
-    public UsecaseImportResult importUsecases(String projectId, String operator, String currentDirectory, MultipartFile file) throws IOException {
+    public UsecaseImportResult importUsecases(String projectId, String operator, String currentDirectory, String appId, MultipartFile file) throws IOException {
         UsecaseImportResult result = new UsecaseImportResult();
+        // A1 需求全系统级：导入必须指定归属系统
+        if (!StringUtils.hasText(appId)) {
+            result.getErrors().add(new UsecaseImportError(0, "appId", "请选择导入目标系统（需求必须归属系统）", null));
+            result.setFailureCount(1);
+            return result;
+        }
         if (file == null || file.isEmpty()) {
             result.getErrors().add(new UsecaseImportError(0, "file", "请选择要上传的用例 Excel 文件", null));
             result.setFailureCount(1);
@@ -83,7 +89,7 @@ public class UsecaseFileServiceImpl implements UsecaseFileService {
         for (int i = 0; i < rows.size(); i++) {
             UsecaseImportRow row = rows.get(i);
             int rowNumber = i + 2;
-            validateRow(projectId, row, rowNumber, defaultDirectory, directoryMap, result, toSave);
+            validateRow(projectId, row, rowNumber, defaultDirectory, directoryMap, result, toSave, appId);
         }
 
         if (result.hasErrors()) {
@@ -104,7 +110,7 @@ public class UsecaseFileServiceImpl implements UsecaseFileService {
     public void exportUsecases(String projectId, String directory, String sort, String keyword, HttpServletResponse response) throws IOException {
         String normalizedDirectory = normalizeDefaultDirectory(directory);
         String normalizedSort = StringUtils.hasText(sort) ? sort : "updateTime";
-        List<UsecaseVo> usecases = usecaseService.getUsecases(projectId, normalizedDirectory, normalizedSort, keyword);
+        List<UsecaseVo> usecases = usecaseService.getUsecases(projectId, normalizedDirectory, normalizedSort, keyword, null);
         Map<String, String> directoryNameMap = buildDirectoryNameMap(projectId);
         List<UsecaseImportRow> rows = usecases.stream()
                 .map(usecase -> toExportRow(usecase, directoryNameMap))
@@ -116,7 +122,7 @@ public class UsecaseFileServiceImpl implements UsecaseFileService {
     }
 
     private void validateRow(String projectId, UsecaseImportRow row, int rowNumber, String defaultDirectory,
-                             Map<String, String> directoryMap, UsecaseImportResult result, List<UsecaseVo> toSave) {
+                             Map<String, String> directoryMap, UsecaseImportResult result, List<UsecaseVo> toSave, String appId) {
         if (row == null || isBlankRow(row)) {
             return;
         }
@@ -142,6 +148,7 @@ public class UsecaseFileServiceImpl implements UsecaseFileService {
 
         UsecaseVo usecase = new UsecaseVo();
         usecase.setProjectId(projectId);
+        usecase.setAppId(appId);
         usecase.setTitle(title);
         usecase.setDirectory(directoryId);
         usecase.setContent(trimToNull(row.getContent()));

@@ -711,6 +711,12 @@ async function loadOverview() {
   try {
     await projectStore.loadProjectContext(projectId.value)
     overview.value = await fetchVerificationOverview(projectId.value)
+    // 支持从源码工程卡片直接进入某系统的 Git 影响分析
+    const requestedAppId = route.params.appId as string
+    if (requestedAppId && apps.value.some(app => app.id === requestedAppId) && !form.appId) {
+      form.appId = requestedAppId
+      await onAppChange()
+    }
   } catch (err) {
     error.value = messageOf(err)
   } finally {

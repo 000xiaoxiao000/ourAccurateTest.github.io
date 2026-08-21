@@ -10,9 +10,9 @@
           </span>
         </RouterLink>
         <nav class="shell-nav" aria-label="主导航">
-          <RouterLink v-if="projectId" :to="`/p/${projectId}/verification`">AI 验证</RouterLink>
-          <RouterLink v-if="projectId" :to="`/p/${projectId}/git-impact`">Git 影响</RouterLink>
-          <RouterLink v-if="projectId" :to="`/p/${projectId}/map/home`">链路地图</RouterLink>
+          <RouterLink v-if="projectId" :to="functionEntry('verification')">AI 验证</RouterLink>
+          <RouterLink v-if="projectId" :to="functionEntry('git-impact')">Git 影响</RouterLink>
+          <RouterLink v-if="projectId" :to="functionEntry('map')">链路地图</RouterLink>
           <div v-if="projectId" class="nav-dropdown app-center" :class="{ open: openMenu === 'app' }" @mouseenter="openNavMenu('app')" @mouseleave="closeMenus">
             <RouterLink class="nav-dropdown-trigger" :to="`/p/${projectId}/apps`" aria-haspopup="true" :aria-expanded="openMenu === 'app'" @click="closeMenus">源码工程 <span class="menu-caret" aria-hidden="true">⌄</span></RouterLink>
             <div class="nav-menu app-menu">
@@ -140,6 +140,21 @@ const filteredApps = computed(() => {
   const keyword = appKeyword.value.toLowerCase()
   return apps.value.filter((app) => !keyword || `${app.name} ${app.language || ''} ${app.describe || ''}`.toLowerCase().includes(keyword)).slice(0, 12)
 })
+// B1: 单系统项目直接进系统级功能页（无需手动选系统）；多系统/未配置则进项目级（页内系统选择）
+function functionEntry(kind: 'verification' | 'git-impact' | 'map'): string {
+  if (!projectId.value) return '/projects'
+  const base = `/p/${projectId.value}`
+  const systemApps = apps.value
+  if (systemApps.length === 1) {
+    const appId = systemApps[0].id
+    if (kind === 'verification') return `${base}/apps/${appId}/verification`
+    if (kind === 'git-impact') return `${base}/apps/${appId}/git-impact`
+    if (kind === 'map') return `${base}/apps/${appId}/map`
+  }
+  if (kind === 'verification') return `${base}/verification`
+  if (kind === 'git-impact') return `${base}/git-impact`
+  return `${base}/map/home`
+}
 const mainModeClass = computed(() => {
   const name = String(route.name || '')
   if (['map-home', 'map-app', 'map-code', 'verification-workspace', 'git-impact'].includes(name)) {

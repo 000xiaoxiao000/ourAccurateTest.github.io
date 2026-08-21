@@ -356,12 +356,15 @@
             </select>
           </label>
           <label>
-            <span>应用静态索引</span>
+            <span>所属系统（必选）</span>
             <select v-model="baselineForm.sourceAppId">
-              <option value="">不绑定应用</option>
+              <option value="" disabled>{{ apps.length ? '请选择系统' : '项目中暂无系统' }}</option>
               <option v-for="app in apps" :key="app.id" :value="app.id">{{ app.name }}</option>
             </select>
-            <small v-if="baselineForm.coverageAssetId && !baselineForm.sourceAppId" class="field-warning">
+            <small v-if="!baselineForm.sourceAppId" class="field-warning">
+              新建分析基线必须绑定所属系统，AI 验证结果才会归属到具体系统。
+            </small>
+            <small v-else-if="baselineForm.coverageAssetId" class="field-warning">
               覆盖率行/分支数据需要绑定应用静态索引后才能和代码节点匹配。
             </small>
           </label>
@@ -393,7 +396,8 @@
           </div>
           <div class="inline-actions">
             <button v-if="editingBaselineId" type="button" class="secondary-button" @click="cancelEditBaseline">取消编辑</button>
-            <button type="button" class="primary-button full" :disabled="creatingBaseline" @click="saveBaseline">
+            <button type="button" class="primary-button full"
+                    :disabled="creatingBaseline || (!editingBaselineId && !baselineForm.sourceAppId)" @click="saveBaseline">
               {{ creatingBaseline ? '保存中...' : editingBaselineId ? '保存基线修改' : '创建分析基线' }}
             </button>
           </div>
@@ -410,15 +414,18 @@
           v-for="baseline in overview.baselines"
           :key="baseline.id"
           class="baseline-item"
-          :class="{ active: baseline.id === selectedBaselineId }"
+          :class="{ active: baseline.id === selectedBaselineId, legacy: baseline.scope === 'LEGACY_PROJECT' }"
         >
           <button type="button" class="record-main" @click="openBaseline(baseline.id)">
             <strong>{{ baseline.name }}</strong>
-            <span>{{ baselineStatusText(baseline.status) }} · {{ freshnessText(baseline.freshness) }} · {{ formatTime(baseline.createTime) }}</span>
+            <span>
+              <template v-if="baseline.scope === 'LEGACY_PROJECT'">遗留（项目级）· </template>
+              {{ baselineStatusText(baseline.status) }} · {{ freshnessText(baseline.freshness) }} · {{ formatTime(baseline.createTime) }}
+            </span>
           </button>
           <div class="record-actions">
-            <button type="button" @click="startEditBaseline(baseline)">编辑</button>
-            <button type="button" class="danger-button" @click="deleteBaseline(baseline)">删除</button>
+            <button type="button" :disabled="baseline.scope === 'LEGACY_PROJECT'" @click="startEditBaseline(baseline)">编辑</button>
+            <button type="button" class="danger-button" :disabled="baseline.scope === 'LEGACY_PROJECT'" @click="deleteBaseline(baseline)">删除</button>
           </div>
         </article>
         <div v-if="!overview.baselines.length" class="empty-state compact">
@@ -803,7 +810,7 @@ import AppPagination from '@/components/AppPagination.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import AiAssistButton from '@/components/ai/AiAssistButton.vue'
 import AiDraftDialog from '@/components/ai/AiDraftDialog.vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   analyzeBaseline,
@@ -874,6 +881,7 @@ const dialog = useDialog()
 const projectStore = useProjectStore()
 const projectId = computed(() => String(route.params.projectId || ''))
 const apps = computed(() => projectStore.contextByProjectId[projectId.value]?.apps || [])
+const router = useRouter()
 const selectedBaselineApp = computed(() => apps.value.find(app => app.id === baselineForm.sourceAppId))
 const selectedGitApp = computed(() => apps.value.find(app => app.id === gitForm.appId))
 
@@ -1015,8 +1023,12 @@ const workspaceTabs: Array<{ key: WorkspaceKey; label: string; description: stri
   { key: 'result', label: '分析结果', description: '矩阵 / 问题 / 依据' },
 ]
 
-watch(() => baselineForm.sourceAppId, () => {
+// B1 收尾：当前系统(appId)变化即同步到路由 query，使面包屑显示系统名
+watch(() => baselineForm.sourceAppId, (appId) => {
   autofillBaselineGitRevision()
+  if (appId && appId !== route.query.appId) {
+    router.replace({ query: { ...route.query, appId } })
+  }
 })
 
 watch(() => baselineForm.sourceAssetId, () => {
@@ -1034,6 +1046,18 @@ watch(() => gitForm.appId, async () => {
 watch(() => gitForm.branch, () => {
   gitCommitOptions.value = []
 })
+
+// B1: 单系统自动选；多系统下优先使用路由 params.appId，支持从源码工程卡片直接进入某系统
+watch(() => apps.value, (list) => {
+  const requestedAppId = route.params.appId as string
+  const defaultAppId = requestedAppId || (list.length === 1 ? list[0].id : '')
+  if (defaultAppId && !editingBaselineId.value && !baselineForm.sourceAppId) {
+    baselineForm.sourceAppId = defaultAppId
+  }
+  if (defaultAppId && !gitForm.appId) {
+    gitForm.appId = defaultAppId
+  }
+}, { immediate: true })
 
 const assetInputs: Array<{ type: AssetType; label: string; hint: string; placeholder: string }> = [
   { type: 'REQUIREMENT', label: '需求', hint: 'Word / Markdown / Excel / CSV / 文本', placeholder: '粘贴需求功能点或验收标准...' },

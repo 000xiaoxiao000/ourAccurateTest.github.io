@@ -41,6 +41,25 @@ public class CaseCenterRepository {
         return queryPage("usecase", "project_id = ? AND directory_id = ?", pageable, projectId, directory);
     }
 
+    /**
+     * A1 需求全系统级：按系统范围过滤用例。appId 为空（兼容旧数据/旧调用）则退化为全项目过滤。
+     * 命中规则：主系统 app_id = ? 或关联系统 related_app_ids 包含 ?。
+     */
+    public List<CaseCenterIndex> findByUsecase_ProjectIdAndUsecase_DirectoryAndAppId(String projectId, String directory, String appId, Pageable pageable) {
+        if (!StringUtils.hasText(appId)) {
+            return queryPage("usecase", "project_id = ? AND directory_id = ?", pageable, projectId, directory);
+        }
+        String where = "project_id = ? AND directory_id = ? AND (app_id = ? OR related_app_ids @> ?::jsonb)";
+        String sql = "SELECT 'usecase' type, id, payload_json, create_time, update_time FROM oat_usecase WHERE " + where + " ORDER BY create_time DESC";
+        List<Object> params = new ArrayList<>(Arrays.asList(projectId, directory, appId, "[\"" + appId + "\"]"));
+        if (pageable != null && pageable.isPaged()) {
+            sql += " LIMIT ? OFFSET ?";
+            params.add(pageable.getPageSize());
+            params.add(pageable.getOffset());
+        }
+        return query(sql, params.toArray());
+    }
+
     public List<CaseCenterIndex> findByUsecase_ProjectId(String projectId) {
         return query("SELECT 'usecase' type, id, payload_json, create_time, update_time FROM oat_usecase WHERE project_id = ? ORDER BY create_time DESC", projectId);
     }
@@ -76,11 +95,12 @@ public class CaseCenterRepository {
 
     private void saveUsecase(CaseCenterIndex index) {
         Usecase u = index.getUsecase();
+        String relatedAppIdsJson = (u == null || u.getRelatedAppIds() == null) ? null : UtilJson.writeValueAsString(u.getRelatedAppIds());
         jdbcTemplate.update("""
-                        INSERT INTO oat_usecase (id, project_id, directory_id, title, content, head_image, defects_json, prd_requirements_json, labels_json, authors_json, payload_json, create_time, update_time)
-                        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
-                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, directory_id=EXCLUDED.directory_id, title=EXCLUDED.title, content=EXCLUDED.content, head_image=EXCLUDED.head_image, defects_json=EXCLUDED.defects_json, prd_requirements_json=EXCLUDED.prd_requirements_json, labels_json=EXCLUDED.labels_json, authors_json=EXCLUDED.authors_json, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
-                        """, index.getId(), u == null ? null : u.getProjectId(), u == null ? null : u.getDirectory(), u == null ? null : u.getTitle(), u == null ? null : u.getContent(), u == null ? null : u.getHeadImage(), u == null ? null : UtilJson.writeValueAsString(u.getDefects()), u == null ? null : UtilJson.writeValueAsString(u.getPrdRequirements()), u == null ? null : UtilJson.writeValueAsString(u.getLabels()), u == null ? null : UtilJson.writeValueAsString(u.getAuthors()), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
+                        INSERT INTO oat_usecase (id, project_id, directory_id, app_id, related_app_ids, title, content, head_image, defects_json, prd_requirements_json, labels_json, authors_json, payload_json, create_time, update_time)
+                        VALUES (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?::jsonb, ?, ?)
+                        ON CONFLICT (id) DO UPDATE SET project_id=EXCLUDED.project_id, directory_id=EXCLUDED.directory_id, app_id=EXCLUDED.app_id, related_app_ids=EXCLUDED.related_app_ids, title=EXCLUDED.title, content=EXCLUDED.content, head_image=EXCLUDED.head_image, defects_json=EXCLUDED.defects_json, prd_requirements_json=EXCLUDED.prd_requirements_json, labels_json=EXCLUDED.labels_json, authors_json=EXCLUDED.authors_json, payload_json=EXCLUDED.payload_json, create_time=EXCLUDED.create_time, update_time=EXCLUDED.update_time
+                        """, index.getId(), u == null ? null : u.getProjectId(), u == null ? null : u.getDirectory(), u == null ? null : u.getAppId(), relatedAppIdsJson, u == null ? null : u.getTitle(), u == null ? null : u.getContent(), u == null ? null : u.getHeadImage(), u == null ? null : UtilJson.writeValueAsString(u.getDefects()), u == null ? null : UtilJson.writeValueAsString(u.getPrdRequirements()), u == null ? null : UtilJson.writeValueAsString(u.getLabels()), u == null ? null : UtilJson.writeValueAsString(u.getAuthors()), json(index), ts(index.getCreateTime()), ts(index.getUpdateTime()));
     }
 
     private void saveDirectory(CaseCenterIndex index) {

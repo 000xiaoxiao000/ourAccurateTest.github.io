@@ -96,7 +96,7 @@ public class VerificationService {
                 fileName, contentHash, null, stored.storageType(), stored.storageKey(), stored.contentSize(),
                 stored.contentPreview(), metadata == null ? Map.of() : metadata,
                 sourceType == SourceType.API || sourceType == SourceType.AGENT ? Freshness.LIVE : Freshness.MANUAL,
-                userId, now, aiGenerated);
+                userId, now, aiGenerated, metadataText(metadata, "appId"));
         repository.saveAsset(asset);
         indexCoverageAssetIfPossible(asset, content, appIdFrom(asset));
         return asset;
@@ -124,7 +124,7 @@ public class VerificationService {
                 textOrExisting(command.sourceVersion(), existing.sourceVersion()),
                 textOrExisting(command.fileName(), existing.fileName()), contentHash, null,
                 stored.storageType(), stored.storageKey(), stored.contentSize(), stored.contentPreview(),
-                existing.metadata(), existing.freshness(), userId, LocalDateTime.now(), existing.aiGenerated());
+                existing.metadata(), existing.freshness(), userId, LocalDateTime.now(), existing.aiGenerated(), existing.appId());
         Assert.isTrue(repository.updateAsset(updated), "找不到指定资料");
         invalidateBaselinesReferencingAsset(projectId, updated.id());
         indexCoverageAssetIfPossible(updated, content, appIdFrom(updated));
@@ -142,6 +142,7 @@ public class VerificationService {
     }
 
     public Baseline createBaseline(String projectId, String userId, CreateBaseline command) {
+        Assert.hasText(command.sourceAppId(), "新建分析基线必须指定所属系统(sourceAppId)");
         AssetSnapshot requirement = optionalAsset(projectId, command.requirementAssetId(), AssetType.REQUIREMENT);
         AssetSnapshot testcase = optionalAsset(projectId, command.testcaseAssetId(), AssetType.TESTCASE);
         if (StringUtils.hasText(command.sourceAssetId())) requiredAsset(projectId, command.sourceAssetId(), AssetType.SOURCE);
@@ -156,7 +157,8 @@ public class VerificationService {
                 assetId(requirement), assetId(testcase), command.sourceAssetId(), command.executionAssetId(),
                 command.coverageAssetId(), command.sourceAppId(), command.repositoryUrl(),
                 command.sourceBranch(), command.sourceCommit(), VerificationModels.ANALYZER_VERSION,
-                BaselineStatus.CREATED, freshness, userId, now, now);
+                BaselineStatus.CREATED, freshness, userId, now, now,
+                null, BaselineScope.SYSTEM);
         repository.saveBaseline(baseline);
         indexCoverageForBaseline(projectId, baseline);
         return baseline;
@@ -184,7 +186,8 @@ public class VerificationService {
                 assetId(requirement), assetId(testcase), command.sourceAssetId(), command.executionAssetId(),
                 command.coverageAssetId(), command.sourceAppId(), command.repositoryUrl(), command.sourceBranch(),
                 command.sourceCommit(), existing.analyzerVersion(), BaselineStatus.CREATED, freshness,
-                existing.createdBy(), existing.createTime(), LocalDateTime.now());
+                existing.createdBy(), existing.createTime(), LocalDateTime.now(),
+                existing.supersededByBaselineId(), existing.scope());
         Assert.isTrue(repository.updateBaseline(updated), "找不到指定分析基线");
         graphService.invalidate(projectId, baselineId);
         indexCoverageForBaseline(projectId, updated);
@@ -564,7 +567,7 @@ public class VerificationService {
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.fileName(), asset.contentHash(),
                 null, asset.storageType(), asset.storageKey(), asset.contentSize(),
                 StringUtils.hasText(asset.contentPreview()) ? asset.contentPreview() : preview(asset.content()),
-                asset.metadata(), asset.freshness(), asset.importedBy(), asset.capturedAt(), asset.aiGenerated());
+                asset.metadata(), asset.freshness(), asset.importedBy(), asset.capturedAt(), asset.aiGenerated(), asset.appId());
     }
 
     private String preview(String content) {

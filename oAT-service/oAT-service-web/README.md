@@ -1,6 +1,6 @@
 # oAT-service-web
 
-`oAT-service-web` 是 ourAccurateTest 的后端主服务，基于 Spring Boot 构建，打包为可直接运行的 `war`。它提供项目、应用、版本、用例、仓库、代码图谱、验证基线、质量门禁、Git 影响分析和受控 AI 业务工具等 API；AI 生成能力由独立的 `ai-platform` 提供。
+`oAT-service-web` 是 ourAccurateTest 的后端主服务，基于 Spring Boot 构建，打包为可直接运行的 `war`。它提供项目、应用、版本、用例、仓库、代码图谱、验证基线、质量门禁、Git 影响分析和受控 AI 业务工具等 API；AI 生成能力由独立的 AI 平台提供。
 
 ## 目录结构
 
@@ -29,6 +29,18 @@ oAT-service-web/
             ├── migration/   # Flyway 迁移脚本
             ├── postgresql/  # PostgreSQL 手工脚本
             └── mysql/       # 历史兼容脚本
+```
+
+## 能力分层
+
+```mermaid
+graph TD
+  Ctrl["control / api<br/>Controller + 响应组装"] --> Svc["service / verification<br/>业务与智溯分析"]
+  Svc --> Lang["language / coverage<br/>Java 解析 · 多语言覆盖率"]
+  Svc --> Infra["infra<br/>JGit 适配"]
+  Svc --> Persist[("persistence<br/>Repository + 实体")]
+  Svc --> AI["AI 业务工具<br/>/api/ai-tools → 独立 AI 平台"]
+  Persist --> PG[("PostgreSQL + Flyway")]
 ```
 
 ## 核心能力
@@ -70,24 +82,18 @@ oAT-service-web/
 | JGit | Git 仓库访问 |
 | JavaParser / ASM | Java 源码和字节码分析 |
 | 多语言覆盖率解析 | JaCoCo、Istanbul、LCOV、gcov、go cover、coverage.py |
-| LangChain4j | 在独立 `ai-platform` 中调用 LLM（经 `ai-platform-client` 接入） |
+| LangChain4j | 在独立 AI 平台中调用 LLM（经客户端接入） |
 
 ## 依赖服务
 
-- PostgreSQL：保存结构化业务数据、验证结果和图谱数据。
-- Git：用于仓库拉取、Commit 查询、Diff 和源码快照分析。
-- AI 平台：独立项目 `ai-platform`（独立 git 仓库，`ai-platform-service` 提供任务/草稿/会话 API），业务经 `ai-platform-client` artifact 接入，通过 HTTP Tool Registry 读取业务资产并生成草稿。
-- 本地文件目录：保存 Git 缓存、大载荷和源码压缩包。
+- **PostgreSQL**：保存结构化业务数据、验证结果和图谱数据。
+- **Git**：用于仓库拉取、Commit 查询、Diff 和源码快照分析。
+- **AI 平台**：独立项目（独立 git 仓库，`ai-platform-service` 提供任务/草稿/会话 API），业务经客户端 artifact 接入，通过 HTTP Tool Registry 读取业务资产并生成草稿。
+- **本地文件目录**：保存 Git 缓存、大载荷和源码压缩包。
 
 ## 配置
 
-主配置文件：
-
-```text
-src/main/resources/application.yml
-```
-
-常用配置：
+主配置文件：`src/main/resources/application.yml`。
 
 ```yaml
 server:
@@ -117,10 +123,7 @@ ai-platform:
   tool-token: "${OAT_AI_TOOL_TOKEN:local-ai-tool-token}"
 ```
 
-`oAT-service-web` 不在进程内调用模型。请先启动独立 `ai-platform-service`，并确保其
-`AI_TOOL_GATEWAY_TOKEN` 与业务端 `OAT_AI_TOOL_TOKEN` 相同。
-
-`oat.data.path` 需要有读写权限。上传限制默认是 `2048MB`，如果前面有 Nginx、网关或外部 Tomcat，也要同步调整请求体限制。
+`oAT-service-web` 不在进程内调用模型。请先启动独立 AI 平台，并确保其 `AI_TOOL_GATEWAY_TOKEN` 与业务端 `OAT_AI_TOOL_TOKEN` 相同。`oat.data.path` 需要有读写权限。上传限制默认 `2048MB`，若前面有 Nginx / 网关 / 外部 Tomcat，也要同步调整请求体限制。
 
 ### 运行时日志级别
 
@@ -147,73 +150,39 @@ curl -X POST http://localhost:8899/actuator/loggers/com.oAT \
 服务启动时会通过 Flyway 自动执行 `src/main/resources/db/migration/`：
 
 ```text
-V2__api_endpoint.sql
-V5__normalized_core.sql
-V6__ai_verification.sql
-V7__traceability_gate.sql
-V8__graph_facts.sql
-V9__analysis_job_checkpoint.sql
-V10__baseline_graph_versions_and_runtime_execution.sql
-V11__partitioning_and_archive_markers.sql
-V12__gate_enforcement_mode_and_stale_commit_view.sql
-V13__git_impact_jobs.sql
-V14__ai_generated_marker.sql
+V2  api_endpoint
+V5  normalized_core
+V6  ai_verification
+V7  traceability_gate
+V8  graph_facts
+V9  analysis_job_checkpoint
+V10 baseline_graph_versions_and_runtime_execution
+V11 partitioning_and_archive_markers
+V12 gate_enforcement_mode_and_stale_commit_view
+V13 git_impact_jobs
+V14 ai_generated_marker
 ```
 
 `src/main/resources/db/postgresql/` 和 `src/main/resources/db/mysql/` 保留为手工初始化或历史兼容脚本，默认运行路径以 Flyway `db/migration` 为准。
 
-## 构建
-
-从服务端聚合模块构建：
+## 构建与启动
 
 ```bash
+# 从服务端聚合模块构建
 cd oAT-service
 ./oAT-service-web/mvnw -f pom.xml clean package
-```
 
-在本模块目录构建：
-
-```bash
+# 在本模块目录构建
 cd oAT-service/oAT-service-web
-./mvnw -f ../pom.xml package
-```
-
-跳过测试：
-
-```bash
 ./mvnw -f ../pom.xml package -DskipTests
-```
 
-构建产物：
-
-```text
-target/oAT-service-web-1.0.0-SNAPSHOT.war
-```
-
-## 启动
-
-```bash
-cd oAT-service/oAT-service-web
+# 启动
 ./start.sh
 ```
 
-`start.sh` 会执行：
-
-```bash
-java --enable-native-access=ALL-UNNAMED -Dio.netty.noUnsafe=true -jar target/oAT-service-web-1.0.0-SNAPSHOT.war
-```
-
-后台启动示例：
-
-```bash
-nohup ./start.sh > oat.log 2>&1 &
-```
-
-外部 Tomcat 部署时需使用 Tomcat 10+，以匹配 Spring Boot 3.x 的 Servlet 版本要求。
+构建产物：`target/oAT-service-web-1.0.0-SNAPSHOT.war`。后台启动：`nohup ./start.sh > oat.log 2>&1 &`。外部 Tomcat 部署时需使用 Tomcat 10+，以匹配 Spring Boot 3.x 的 Servlet 版本要求。
 
 ## API 前缀
-
-主要前端接口使用 `/api` 前缀：
 
 | 前缀 | 说明 |
 | --- | --- |

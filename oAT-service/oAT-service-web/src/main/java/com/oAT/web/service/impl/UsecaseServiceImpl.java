@@ -36,6 +36,8 @@ public class UsecaseServiceImpl implements UsecaseService {
 
     @Override
     public UsecaseVo doAdd(String author, UsecaseVo usecaseParam) {
+        // A1 需求全系统级：创建用例必须归属系统
+        Assert.hasText(usecaseParam.getAppId(), "param 'appId' must be not empty (需求必须归属系统)");
 
         Usecase usecase = new Usecase();
         // 设置基本信息
@@ -48,7 +50,7 @@ public class UsecaseServiceImpl implements UsecaseService {
     }
 
     @Override
-    public List<UsecaseVo> getUsecases(String projectId, String directory, String sort, String keyword) {
+    public List<UsecaseVo> getUsecases(String projectId, String directory, String sort, String keyword, String appId) {
         Assert.notNull(projectId, "param 'projectId' must be not null");
         Assert.notNull(directory, "param 'directory' must be not null");
 
@@ -56,7 +58,7 @@ public class UsecaseServiceImpl implements UsecaseService {
             sort = "usecase.title.keyword";
         }
 
-        List<CaseCenterIndex> list = centerRepository.findByUsecase_ProjectIdAndAndUsecase_Directory(projectId, directory, PageRequest.of(0, 100, Sort.Direction.DESC, sort));
+        List<CaseCenterIndex> list = centerRepository.findByUsecase_ProjectIdAndUsecase_DirectoryAndAppId(projectId, directory, appId, PageRequest.of(0, 100, Sort.Direction.DESC, sort));
         if (StringUtils.hasText(keyword)) {
             String normalizedKeyword = keyword.trim().toLowerCase();
             list = list.stream()
