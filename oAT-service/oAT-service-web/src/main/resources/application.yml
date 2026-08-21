@@ -98,6 +98,14 @@ oat:
       path: "${oat.data.path}large-payload/"
     static-source:
       inline-threshold-bytes: 8192
+  ovanth:
+    # 业务线向 AI 平台自报的身份标识；保持与调用时 applicationId 一致。
+    application-id: "${OAT_OVANTH_APPLICATION_ID:oAT}"
+    application-name: "${OAT_OVANTH_APPLICATION_NAME:ourAccurateTest 智溯平台}"
+    application-owner: "${OAT_OVANTH_APPLICATION_OWNER:}"
+    application-description: "${OAT_OVANTH_APPLICATION_DESCRIPTION:需求 / 测试用例 / 源码一致性 AI 分析平台}"
+    # 平台令牌本地持久化路径，避免每次重启重新注册。
+    token-file: "${OAT_OVANTH_TOKEN_FILE:${user.home}/.oAT/.ovanth-token}"
 
 ovanth:
   base-url: "${OAT_AI_PLATFORM_URL:http://localhost:8898}"
@@ -108,16 +116,6 @@ ovanth:
   tool-token: "${OAT_AI_TOOL_TOKEN:local-ai-tool-token}"
   # 平台签发令牌：首次启动由 OvanthRegistrar 自动注册后持久化；也可通过环境变量手动注入。
   application-token: "${OAT_AI_PLATFORM_TOKEN:}"
-
-oat:
-  ovanth:
-    # 业务线向 AI 平台自报的身份标识；保持与调用时 applicationId 一致。
-    application-id: "${OAT_OVANTH_APPLICATION_ID:oAT}"
-    application-name: "${OAT_OVANTH_APPLICATION_NAME:ourAccurateTest 智溯平台}"
-    application-owner: "${OAT_OVANTH_APPLICATION_OWNER:}"
-    application-description: "${OAT_OVANTH_APPLICATION_DESCRIPTION:需求 / 测试用例 / 源码一致性 AI 分析平台}"
-    # 平台令牌本地持久化路径，避免每次重启重新注册。
-    token-file: "${OAT_OVANTH_TOKEN_FILE:${user.home}/.oAT/.ovanth-token}"
 
 management:
   endpoints:
