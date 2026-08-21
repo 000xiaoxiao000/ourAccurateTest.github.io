@@ -2,8 +2,11 @@ package com.oAT.web.verification;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ovanth.client.OvanthDraftClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,6 +20,8 @@ import java.util.Map;
  */
 @Component
 public class AiGateway {
+    private static final Logger log = LoggerFactory.getLogger(AiGateway.class);
+
     private final OvanthDraftClient aiDraftClient;
 
     public AiGateway(OvanthDraftClient aiDraftClient) {
@@ -28,20 +33,25 @@ public class AiGateway {
     }
 
     public String chat(String systemPrompt, String userMessage) {
-        Map<String, Object> context = new LinkedHashMap<>();
-        context.put("system", systemPrompt);
-        context.put("user", userMessage);
-        JsonNode response = aiDraftClient.execute("oAT", "model.generate", context);
-        if (response == null) {
-            throw new IllegalStateException("ovanth returned empty response");
+        try {
+            Map<String, Object> context = new LinkedHashMap<>();
+            context.put("system", systemPrompt);
+            context.put("user", userMessage);
+            JsonNode response = aiDraftClient.execute("oAT", "model.generate", context);
+            if (response == null) {
+                throw new IllegalStateException("ovanth returned empty response");
+            }
+            JsonNode textNode = response.path("text");
+            if (StringUtils.hasText(textNode.asText(null))) {
+                return textNode.asText();
+            }
+            if (response.has("fallback")) {
+                throw new IllegalStateException(response.toString());
+            }
+            return response.toString();
+        } catch (RestClientResponseException e) {
+            log.warn("ovanth chat failed: {} {}", e.getStatusCode().value(), e.getMessage());
+            throw new IllegalStateException("AI 平台调用失败：" + e.getStatusCode().value() + " " + e.getStatusText(), e);
         }
-        JsonNode textNode = response.path("text");
-        if (StringUtils.hasText(textNode.asText(null))) {
-            return textNode.asText();
-        }
-        if (response.has("fallback")) {
-            throw new IllegalStateException(response.toString());
-        }
-        return response.toString();
     }
 }

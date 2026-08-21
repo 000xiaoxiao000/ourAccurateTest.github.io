@@ -13,13 +13,16 @@ import com.oAT.web.verification.model.VerificationModels.AssetType;
 import com.oAT.web.verification.model.VerificationModels.SourceType;
 import org.springframework.util.Assert;
 import org.springframework.util.StringUtils;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.SessionAttribute;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -286,5 +289,47 @@ public class AiDraftProxyController {
     }
 
     public record ConfirmRequest(boolean confirmed, String payload) {
+    }
+
+    /**
+     * 统一转译 Ovanth 平台调用异常，避免直接 500 暴露到前端。
+     * 403 表示业务线未接入或令牌失效，给出明确提示；其他状态码透传平台错误消息。
+     */
+    @ExceptionHandler(RestClientResponseException.class)
+    @ResponseStatus(org.springframework.http.HttpStatus.OK)
+    public ResultNotified<Object> handleOvanthException(RestClientResponseException e) {
+        String body = e.getResponseBodyAsString();
+        String message = extractMessage(body);
+        if (message == null || message.isBlank()) {
+            message = e.getStatusText();
+        }
+        if (e.getStatusCode().value() == 403) {
+            message = "AI 平台接入失败：" + (message != null ? message : "业务线未授权");
+        } else {
+            message = "AI 平台调用失败：" + (message != null ? message : ("HTTP " + e.getStatusCode().value()));
+        }
+        ResultNotified<Object> result = new ResultNotified<>(false, message);
+        result.setErrorMessage("OVANTH_" + e.getStatusCode().value());
+        return result;
+    }
+
+    private String extractMessage(String body) {
+        if (body == null || body.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode node = objectMapper.readTree(body);
+            JsonNode message = node.path("message");
+            if (!message.isMissingNode() && !message.isNull()) {
+                return message.asText();
+            }
+            JsonNode error = node.path("error");
+            if (!error.isMissingNode() && !error.isNull()) {
+                return error.asText();
+            }
+        } catch (Exception ignored) {
+            // body is not JSON, return as-is if short
+        }
+        return body.length() > 200 ? body.substring(0, 200) : body;
     }
 }
