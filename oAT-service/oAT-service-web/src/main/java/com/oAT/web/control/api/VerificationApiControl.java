@@ -25,7 +25,6 @@ import com.oAT.web.verification.VerificationService.WriteBackFinding;
 import com.oAT.web.verification.SourceAssetFilter;
 import com.oAT.web.verification.SourceAssetFilter.SourceProfile;
 import com.oAT.web.ai.ConnectorSyncService;
-import com.oAT.web.verification.connector.ConnectorRegistry;
 import com.oAT.web.verification.model.VerificationModels.*;
 import com.oAT.web.verification.qualitygate.QualityGateService;
 import com.oAT.web.verification.traceability.ChangeImpactService;
@@ -104,7 +103,6 @@ public class VerificationApiControl {
     private final MultiUserRequestCoordinator requestCoordinator;
     private final ImpactTraceabilityMapper impactTraceabilityMapper;
     private final GraphService graphService;
-    private final ConnectorRegistry connectorRegistry;
     private final JacocoExecToXmlConverter jacocoExecToXmlConverter;
     private final Executor verificationAiExecutor;
     private final AuditLogger auditLogger;
@@ -120,7 +118,6 @@ public class VerificationApiControl {
                                   MultiUserRequestCoordinator requestCoordinator,
                                   ImpactTraceabilityMapper impactTraceabilityMapper,
                                   GraphService graphService,
-                                  ConnectorRegistry connectorRegistry,
                                   JacocoExecToXmlConverter jacocoExecToXmlConverter,
                                   AuditLogger auditLogger,
                                   @Qualifier("verificationAiExecutor") Executor verificationAiExecutor,
@@ -137,7 +134,6 @@ public class VerificationApiControl {
         this.requestCoordinator = requestCoordinator;
         this.impactTraceabilityMapper = impactTraceabilityMapper;
         this.graphService = graphService;
-        this.connectorRegistry = connectorRegistry;
         this.jacocoExecToXmlConverter = jacocoExecToXmlConverter;
         this.auditLogger = auditLogger;
         this.verificationAiExecutor = verificationAiExecutor;
@@ -799,15 +795,6 @@ public class VerificationApiControl {
         } catch (IOException e) {
             throw new IllegalStateException("Git 影响分析任务结果无法读取: " + job.id(), e);
         }
-    }
-
-    // ── Connector types ───────────────────────────────────────────────────────
-
-    @GetMapping("/connectors/types")
-    public ResultNotified<List<String>> connectorTypes(@PathVariable String projectId,
-                                                       @SessionAttribute UserVo user) {
-        ensureProjectAccess(projectId, user);
-        return ok("获取连接器类型列表成功", connectorRegistry.availableTypes());
     }
 
     // ── Request records ───────────────────────────────────────────────────────

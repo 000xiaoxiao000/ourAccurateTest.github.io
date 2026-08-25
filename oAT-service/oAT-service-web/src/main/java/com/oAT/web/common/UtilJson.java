@@ -21,7 +21,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
-@SuppressWarnings("unused")
 public class UtilJson {
 
     public static final ObjectMapper JSON_MAPPER = newObjectMapper();

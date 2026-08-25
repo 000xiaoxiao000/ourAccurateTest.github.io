@@ -255,6 +255,12 @@ public class VerificationService {
                 asset.externalId(), asset.externalUrl(), asset.sourceVersion(), asset.metadata());
     }
 
+    /** 直接返回资产原始内容（供 AI 写/执行工具端点应用补丁前读取旧内容）。 */
+    public String assetRawContent(String projectId, String assetId) {
+        AssetSnapshot asset = requiredAsset(projectId, assetId, null);
+        return loadAssetContent(asset);
+    }
+
     private void runAnalysisJob(String projectId, String baselineId, String jobId) {
         updateAnalysisProgress(jobId, "正在准备分析资料");
         long started = System.nanoTime();
