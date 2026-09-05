@@ -112,6 +112,10 @@ export interface CodeTreeNode {
   language?: string
   evidenceState: TraceEvidenceState
   coverage?: CoverageSummary
+  /** Fully-qualified class name for CLASS nodes; used to lazy-load methods. */
+  symbol?: string | null
+  /** Number of methods declared in a CLASS node (methods are not pre-expanded into codeTree). */
+  methodCount?: number | null
   children: CodeTreeNode[]
 }
 
@@ -178,6 +182,38 @@ export interface TraceabilityMapQuery {
   includeDynamic?: boolean
   includeAiCalls?: boolean
   view?: 'trace' | 'calls' | 'full'
+}
+
+export interface CodeMethodNode {
+  id: string
+  methodName: string
+  descriptor?: string | null
+  lineNumber?: number | null
+  complexity?: number | null
+  recursive?: boolean | null
+}
+
+export interface CodeMethodListResponse {
+  total: number
+  methods: CodeMethodNode[]
+}
+
+export interface CodeClassMethodsQuery {
+  appId: string
+  className: string
+  keyword?: string
+  limit?: number
+  offset?: number
+}
+
+export function fetchCodeClassMethods(projectId: string, query: CodeClassMethodsQuery) {
+  const params = new URLSearchParams()
+  params.set('appId', query.appId)
+  params.set('className', query.className)
+  if (query.keyword) params.set('keyword', query.keyword)
+  if (query.limit !== undefined) params.set('limit', String(query.limit))
+  if (query.offset !== undefined) params.set('offset', String(query.offset))
+  return apiGetRaw<CodeMethodListResponse>(`/api/projects/${projectId}/map/code-class-methods?${params.toString()}`)
 }
 
 export function fetchTraceabilityMap(projectId: string, query: TraceabilityMapQuery = {}) {

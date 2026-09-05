@@ -22,6 +22,7 @@
         :open-classes="openClasses"
         :selected-id="selectedId"
         :linked-ids="linkedIds"
+        :loading-ids="loadingIds"
         :get-link-count="getLinkCount"
         @toggle-dir="$emit('toggle-dir', $event)"
         @toggle-class="$emit('toggle-class', $event)"
@@ -46,9 +47,11 @@
       </button>
       <span class="tree-icon-file">{{ node.file.name.endsWith('.java') || node.name.endsWith('java') ? '☕' : '📄' }}</span>
       <span class="tree-label" :title="node.file.name || node.name">{{ node.name }}</span>
+      <em v-if="node.file.methodCount !== undefined" class="tree-count tree-count--method">{{ node.file.methodCount }} 方法</em>
       <em v-if="linkedIds.has(node.file.nodeId)" class="tree-count tree-count--linked">{{ linkCount(node.file.nodeId) }}</em>
     </div>
     <div v-if="openClasses.has(node.file.id)" class="tree-methods-block">
+      <div v-if="loadingIds.has(node.file.id)" class="tree-method-loading">加载方法…</div>
       <button
         v-for="method in node.file.methods"
         :key="method.nodeId"
@@ -61,6 +64,7 @@
         <span v-if="method.line" class="tree-lineno">L{{ method.line }}</span>
         <em v-if="linkedIds.has(method.nodeId)" class="tree-count tree-count--linked">{{ linkCount(method.nodeId) }}</em>
       </button>
+      <div v-if="!loadingIds.has(node.file.id) && node.file.methods.length === 0 && node.file.loaded" class="tree-method-empty">无方法级数据</div>
     </div>
   </div>
 </template>
@@ -75,7 +79,7 @@ interface TreeNode {
   displayName: string
   isDir:       boolean
   children:    TreeNode[]
-  file?: { id: string; nodeId: string; name: string; methods: CodeTreeMethod[] }
+  file?: { id: string; nodeId: string; name: string; methods: CodeTreeMethod[]; methodCount?: number; loaded?: boolean; loading?: boolean }
 }
 
 const props = defineProps<{
@@ -85,6 +89,7 @@ const props = defineProps<{
   openClasses: Set<string>
   selectedId:  string
   linkedIds:   Set<string>
+  loadingIds:  Set<string>
   getLinkCount: (nodeId: string) => number
 }>()
 
@@ -188,4 +193,15 @@ function methodTitle(method: CodeTreeMethod): string {
   font-weight: 800;
 }
 .tree-count--linked { background: #ede9fe; color: #6d28d9; }
+.tree-count--method { background: #f1f5f9; color: #64748b; }
+
+.tree-method-loading,
+.tree-method-empty {
+  padding: 6px 8px 6px 34px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.tree-method-loading::before {
+  content: "◌ ";
+}
 </style>

@@ -125,7 +125,28 @@ public final class TraceabilityMapPayloads {
             String language,
             EvidenceState evidenceState,
             CoverageSummary coverage,
+            /** Fully-qualified class name for CLASS nodes; used by the frontend to lazy-load methods. */
+            String symbol,
+            /** Number of methods declared in a CLASS node (methods are no longer pre-expanded into codeTree). */
+            Integer methodCount,
             List<CodeTreeNode> children) {
+    }
+
+    /**
+     * A single method under a class, returned by the lazy-load endpoint
+     * {@code GET /api/projects/{projectId}/map/code-class-methods}. The {@code id}
+     * matches the method node id used in {@code codeTree} so selection/link state align.
+     */
+    public record CodeMethodNode(
+            String id,
+            String methodName,
+            String descriptor,
+            Integer lineNumber,
+            Integer complexity,
+            Boolean recursive) {
+    }
+
+    public record CodeMethodListResponse(int total, List<CodeMethodNode> methods) {
     }
 
     public record CodeGraphData(

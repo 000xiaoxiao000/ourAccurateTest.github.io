@@ -261,6 +261,9 @@
           <span><i class="call-color static"></i>静态方法</span>
           <span><i class="call-color recursive"></i>递归</span>
           <span><i class="line-sample derived"></i>虚线：结构包含 / 源码候选</span>
+          <span><i class="call-border-sample dynamic"></i>彩色边框：有动态覆盖 / 执行证据</span>
+          <span><i class="call-border-sample selected"></i>紫色边框：当前选中</span>
+          <span><i class="call-border-sample linked"></i>绿色边框：选中节点的动态关联</span>
         </div>
         <div v-if="map.loading.value" class="graph-loading-state">
           <span class="spin">◌</span>
@@ -373,19 +376,21 @@
               :key="edge.id"
               :class="['mini-graph-edge', { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
             >
-              <path :d="edge.path" marker-end="url(#dependency-arrow)" />
+              <path :d="miniGraphEdgePath(edge, dependencyGraph)" marker-end="url(#dependency-arrow)" />
             </g>
             <g
               v-for="node in dependencyGraph.nodes"
               :key="node.id"
               :class="['mini-graph-node', node.tone, { executed: node.executed, active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
-              @click.stop="selectMiniGraphNode(node)"
+              @click.stop="handleMiniGraphNodeClick($event, node)"
+              @pointerdown.stop="startMiniGraphDrag($event, node)"
+              @pointerup.stop="finishMiniGraphDrag"
               @pointerenter="showMiniGraphTooltip($event, node)"
               @pointermove="showMiniGraphTooltip($event, node)"
               @pointerleave="hideMiniGraphTooltip"
             >
-              <rect :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
-              <text :x="node.x + node.width / 2" :y="node.y + 24">{{ node.label }}</text>
+              <rect :x="miniGraphNodePosition(node).x" :y="miniGraphNodePosition(node).y" :width="node.width" :height="node.height" rx="5" />
+              <text :x="miniGraphNodePosition(node).x + node.width / 2" :y="miniGraphNodePosition(node).y + 24">{{ node.label }}</text>
             </g>
           </svg>
           <div
@@ -427,33 +432,35 @@
               :class="['mini-graph-edge', coverageClass(edge.coverageState), { active: miniGraphHighlight.relatedEdgeIds.has(edge.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
             >
               <title v-if="controlFlowEdgeCoverageText(edge.coverageState)">{{ controlFlowEdgeCoverageText(edge.coverageState) }}</title>
-              <path :d="edge.path" :marker-end="`url(#${controlFlowMarkerId(edge.coverageState)})`" />
+              <path :d="miniGraphEdgePath(edge, controlFlowGraph)" :marker-end="`url(#${controlFlowMarkerId(edge.coverageState)})`" />
             </g>
             <g
               v-for="node in controlFlowGraph.nodes"
               :key="node.id"
               :class="['mini-graph-node', node.tone, coverageClass(node.coverageState), { active: miniGraphHighlight.activeNodeId === node.id, linked: miniGraphHighlight.relatedNodeIds.has(node.id), dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedNodeIds.has(node.id) }]"
-              @click.stop="selectMiniGraphNode(node)"
+              @click.stop="handleMiniGraphNodeClick($event, node)"
+              @pointerdown.stop="startMiniGraphDrag($event, node)"
+              @pointerup.stop="finishMiniGraphDrag"
               @pointerenter="showMiniGraphTooltip($event, node)"
               @pointermove="showMiniGraphTooltip($event, node)"
               @pointerleave="hideMiniGraphTooltip"
             >
               <polygon
                 v-if="node.shape === 'diamond'"
-                :points="`${node.x + node.width / 2},${node.y} ${node.x + node.width},${node.y + node.height / 2} ${node.x + node.width / 2},${node.y + node.height} ${node.x},${node.y + node.height / 2}`"
+                :points="`${miniGraphNodePosition(node).x + node.width / 2},${miniGraphNodePosition(node).y} ${miniGraphNodePosition(node).x + node.width},${miniGraphNodePosition(node).y + node.height / 2} ${miniGraphNodePosition(node).x + node.width / 2},${miniGraphNodePosition(node).y + node.height} ${miniGraphNodePosition(node).x},${miniGraphNodePosition(node).y + node.height / 2}`"
               />
-              <rect v-else :x="node.x" :y="node.y" :width="node.width" :height="node.height" rx="5" />
-              <text :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 34 : 27)">{{ node.label }}</text>
-              <text class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 57 : 47)">{{ node.subtitle }}</text>
-              <text v-if="node.subtitle2" class="mini-node-subtitle" :x="node.x + node.width / 2" :y="node.y + (node.shape === 'diamond' ? 75 : 63)">{{ node.subtitle2 }}</text>
+              <rect v-else :x="miniGraphNodePosition(node).x" :y="miniGraphNodePosition(node).y" :width="node.width" :height="node.height" rx="5" />
+              <text :x="miniGraphNodePosition(node).x + node.width / 2" :y="miniGraphNodePosition(node).y + (node.shape === 'diamond' ? 34 : 27)">{{ node.label }}</text>
+              <text class="mini-node-subtitle" :x="miniGraphNodePosition(node).x + node.width / 2" :y="miniGraphNodePosition(node).y + (node.shape === 'diamond' ? 57 : 47)">{{ node.subtitle }}</text>
+              <text v-if="node.subtitle2" class="mini-node-subtitle" :x="miniGraphNodePosition(node).x + node.width / 2" :y="miniGraphNodePosition(node).y + (node.shape === 'diamond' ? 75 : 63)">{{ node.subtitle2 }}</text>
             </g>
             <g
               v-for="edge in controlFlowGraph.edges.filter((item) => item.label)"
               :key="`label:${edge.id}`"
               :class="['mini-graph-edge-label', { dimmed: miniGraphHighlight.hasSelection && !miniGraphHighlight.relatedEdgeIds.has(edge.id) }]"
             >
-              <rect class="mini-edge-label-bg" :x="(edge.labelX || 0) - (edge.labelWidth || 42) / 2" :y="(edge.labelY || 0) - 16" :width="edge.labelWidth || 42" height="24" rx="4" />
-              <text class="mini-edge-label" :x="edge.labelX" :y="edge.labelY">{{ edge.label }}</text>
+              <rect class="mini-edge-label-bg" :x="miniGraphEdgeLabelPosition(edge, controlFlowGraph).x - (edge.labelWidth || 42) / 2" :y="miniGraphEdgeLabelPosition(edge, controlFlowGraph).y - 16" :width="edge.labelWidth || 42" height="24" rx="4" />
+              <text class="mini-edge-label" :x="miniGraphEdgeLabelPosition(edge, controlFlowGraph).x" :y="miniGraphEdgeLabelPosition(edge, controlFlowGraph).y">{{ edge.label }}</text>
             </g>
           </svg>
           </template>
@@ -554,6 +561,7 @@
             :open-classes="displayOpenClasses"
             :selected-id="map.focusId.value"
             :linked-ids="map.linkedNodeIds.value"
+            :loading-ids="new Set(Object.keys(loadingClassMethods).filter((k) => loadingClassMethods[k]))"
             :get-link-count="map.linkCount"
             @toggle-dir="toggleDir"
             @toggle-class="toggleClass"
@@ -572,7 +580,8 @@ import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { fetchVerificationOverview } from '@/api/verification'
 import type { VerificationBaseline } from '@/api/verification'
-import type { CodeTreeNode, ControlFlowGraph, ControlFlowNodeType, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'
+import type { CodeTreeNode, CodeMethodNode, ControlFlowGraph, ControlFlowNodeType, TraceabilityEdge, TraceabilityNode, TraceRelation } from '@/api/traceabilityMap'
+import { fetchCodeClassMethods } from '@/api/traceabilityMap'
 import { useTraceabilityMap } from '@/features/map/composables/useTraceabilityMap'
 import type { TraceFilter } from '@/features/map/composables/useTraceabilityMap'
 import { filterBusinessCodeTree } from '@/shared/codeGraphScope'
@@ -583,7 +592,7 @@ interface TreeNode {
   displayName: string
   isDir: boolean
   children: TreeNode[]
-  file?: { id: string; nodeId: string; name: string; methods: Array<{ nodeId: string; name: string; line?: number }> }
+  file?: { id: string; nodeId: string; name: string; methods: Array<{ nodeId: string; name: string; line?: number }>; methodCount?: number; loaded?: boolean; loading?: boolean }
 }
 interface SvgNode {
   id: string
@@ -619,6 +628,11 @@ const openDirs = ref<Set<string>>(new Set())
 const openClasses = ref<Set<string>>(new Set())
 const maxExpandedTreeNodes = 600
 const treeExpandLimited = ref(false)
+
+// Lazy-loaded methods per class id (keyed by the code-tree CLASS node id).
+// Methods are no longer pre-expanded into codeTree to avoid rendering tens of thousands of nodes.
+const classMethods = ref<Record<string, CodeMethodNode[]>>({})
+const loadingClassMethods = ref<Record<string, boolean>>({})
 const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
 const callGraphScope = ref<'overview' | 'impact' | 'context'>('overview')
@@ -635,6 +649,9 @@ const traceGraphKeyword = ref('')
 const miniGraphFocusHighlightDisabled = ref(false)
 const miniGraphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
 const graphTooltip = ref({ visible: false, text: '', left: 0, top: 0 })
+const miniGraphNodeOffsets = ref<Record<string, { x: number; y: number }>>({})
+const miniGraphDrag = ref<{ node: MiniGraphNode; startX: number; startY: number; offsetX: number; offsetY: number } | null>(null)
+const miniGraphDragMoved = ref(false)
 const callGraphGlobalEnabled = ref(false)
 const callZoom = ref(1)
 const callGraphFullscreen = ref(false)
@@ -682,6 +699,12 @@ watch(() => map.nodes.value, () => {
   const available = new Set(map.nodes.value.map((node) => node.id))
   selectedTraceIds.value = new Set([...selectedTraceIds.value].filter((id) => available.has(id)))
 }, { deep: false })
+
+watch([callViewMode, () => map.focusId.value, () => map.keyword.value], () => {
+  miniGraphNodeOffsets.value = {}
+  miniGraphDrag.value = null
+  miniGraphDragMoved.value = false
+})
 
 const filters: Array<{ value: TraceFilter; label: string }> = [
   { value: 'ALL', label: '全部' },
@@ -1239,6 +1262,111 @@ function selectMiniGraphNode(node: MiniGraphNode) {
   }
 }
 
+function miniGraphNodePosition(node: MiniGraphNode) {
+  const offset = miniGraphNodeOffsets.value[node.id]
+  return {
+    x: node.x + (offset?.x || 0),
+    y: node.y + (offset?.y || 0),
+  }
+}
+
+function miniGraphEdgePath(edge: MiniGraphEdge, graph: { nodes: MiniGraphNode[] }) {
+  const source = graph.nodes.find((node) => node.id === edge.source)
+  const target = graph.nodes.find((node) => node.id === edge.target)
+  if (!source || !target) return edge.path
+  const sourcePosition = miniGraphNodePosition(source)
+  const targetPosition = miniGraphNodePosition(target)
+  const sourceBelowTarget = targetPosition.y >= sourcePosition.y
+  const startX = sourceBelowTarget
+    ? sourcePosition.x + source.width / 2
+    : sourcePosition.x + source.width
+  const startY = sourceBelowTarget
+    ? sourcePosition.y + source.height
+    : sourcePosition.y + source.height / 2
+  const endX = sourceBelowTarget
+    ? targetPosition.x + target.width / 2
+    : targetPosition.x
+  const endY = sourceBelowTarget
+    ? targetPosition.y
+    : targetPosition.y + target.height / 2
+  if (sourceBelowTarget) {
+    const midY = (startY + endY) / 2
+    return `M ${startX} ${startY} C ${startX} ${midY}, ${endX} ${midY}, ${endX} ${endY}`
+  }
+  const midX = (startX + endX) / 2
+  return `M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`
+}
+
+function miniGraphEdgeLabelPosition(edge: MiniGraphEdge, graph: { nodes: MiniGraphNode[] }) {
+  const source = graph.nodes.find((node) => node.id === edge.source)
+  const target = graph.nodes.find((node) => node.id === edge.target)
+  if (!source || !target) return { x: edge.labelX || 0, y: edge.labelY || 0 }
+  const sourcePosition = miniGraphNodePosition(source)
+  const targetPosition = miniGraphNodePosition(target)
+  return {
+    x: (sourcePosition.x + source.width / 2 + targetPosition.x + target.width / 2) / 2,
+    y: (sourcePosition.y + source.height + targetPosition.y) / 2 - 8,
+  }
+}
+
+function miniGraphSvgPoint(event: PointerEvent, svg: SVGSVGElement, graph: { width: number; height: number }) {
+  const bounds = svg.getBoundingClientRect()
+  return {
+    x: (event.clientX - bounds.left) * graph.width / bounds.width,
+    y: (event.clientY - bounds.top) * graph.height / bounds.height,
+  }
+}
+
+function startMiniGraphDrag(event: PointerEvent, node: MiniGraphNode) {
+  const svg = (event.currentTarget as Element | null)?.closest('svg') as SVGSVGElement | null
+  const graph = callViewMode.value === 'dependency' ? dependencyGraph.value : controlFlowGraph.value
+  if (!svg || !graph) return
+  const point = miniGraphSvgPoint(event, svg, graph)
+  const position = miniGraphNodePosition(node)
+  miniGraphDragMoved.value = false
+  miniGraphDrag.value = {
+    node,
+    startX: point.x,
+    startY: point.y,
+    offsetX: position.x - node.x,
+    offsetY: position.y - node.y,
+  }
+  window.addEventListener('pointermove', handleMiniGraphDrag)
+  window.addEventListener('pointerup', finishMiniGraphDrag, { once: true })
+}
+
+function handleMiniGraphDrag(event: PointerEvent) {
+  const drag = miniGraphDrag.value
+  if (!drag) return
+  const svg = document.querySelector('.mini-code-graph') as SVGSVGElement | null
+  const graph = callViewMode.value === 'dependency' ? dependencyGraph.value : controlFlowGraph.value
+  if (!svg || !graph) return
+  const point = miniGraphSvgPoint(event, svg, graph)
+  const deltaX = point.x - drag.startX
+  const deltaY = point.y - drag.startY
+  if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) miniGraphDragMoved.value = true
+  miniGraphNodeOffsets.value = {
+    ...miniGraphNodeOffsets.value,
+    [drag.node.id]: {
+      x: drag.offsetX + deltaX,
+      y: drag.offsetY + deltaY,
+    },
+  }
+}
+
+function finishMiniGraphDrag() {
+  window.removeEventListener('pointermove', handleMiniGraphDrag)
+  miniGraphDrag.value = null
+}
+
+function handleMiniGraphNodeClick(event: MouseEvent, node: MiniGraphNode) {
+  if (miniGraphDragMoved.value) {
+    miniGraphDragMoved.value = false
+    return
+  }
+  selectMiniGraphNode(node)
+}
+
 function showMiniGraphTooltip(event: PointerEvent, node: MiniGraphNode) {
   const panel = (event.currentTarget as Element | null)?.closest('.code-analysis-panel') as HTMLElement | null
   if (!panel) return
@@ -1357,8 +1485,38 @@ function toggleDir(path: string) {
 
 function toggleClass(id: string) {
   const next = new Set(openClasses.value)
-  next.has(id) ? next.delete(id) : next.add(id)
+  const willOpen = !next.has(id)
+  willOpen ? next.add(id) : next.delete(id)
   openClasses.value = next
+  if (willOpen) {
+    const appId = map.response.value?.baseline?.sourceAppId
+    const className = findClassSymbol(id)
+    if (appId && className && classMethods.value[id] === undefined && loadingClassMethods.value[id] !== true) {
+      loadClassMethods(id, appId, className)
+    }
+  }
+}
+
+function findClassSymbol(classId: string): string | undefined {
+  const stack: CodeTreeNode[] = [...(map.codeTree.value || [])]
+  while (stack.length) {
+    const node = stack.pop() as CodeTreeNode
+    if (node.id === classId) return node.symbol ?? undefined
+    if (node.children) stack.push(...node.children)
+  }
+  return undefined
+}
+
+async function loadClassMethods(classId: string, appId: string, className: string) {
+  loadingClassMethods.value = { ...loadingClassMethods.value, [classId]: true }
+  try {
+    const res = await fetchCodeClassMethods(projectId.value, { appId, className, limit: 500 })
+    classMethods.value = { ...classMethods.value, [classId]: res.methods || [] }
+  } catch {
+    classMethods.value = { ...classMethods.value, [classId]: [] }
+  } finally {
+    loadingClassMethods.value = { ...loadingClassMethods.value, [classId]: false }
+  }
 }
 
 function expandTree() {
@@ -1418,14 +1576,26 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
     }
   }
   if (node.kind === 'FILE' || node.kind === 'CLASS') {
-    const methodNodes = flattenMethods(node.children)
+    const loaded = classMethods.value[node.id]
+    const loading = loadingClassMethods.value[node.id] === true
+    const methodNodes = node.kind === 'CLASS'
+      ? (loaded || []).map((m) => ({ nodeId: m.id, name: m.methodName, line: m.lineNumber ?? undefined }))
+      : flattenMethods(node.children)
     return {
       key: node.id,
       name: node.label,
       displayName: node.label,
       isDir: false,
       children: [],
-      file: { id: node.id, nodeId: node.id, name: node.label, methods: methodNodes },
+      file: {
+        id: node.id,
+        nodeId: node.id,
+        name: node.label,
+        methods: methodNodes,
+        methodCount: node.kind === 'CLASS' ? (node.methodCount ?? undefined) : undefined,
+        loaded: node.kind === 'CLASS' ? loaded !== undefined : undefined,
+        loading,
+      },
     }
   }
   return { key: node.id, name: node.label, displayName: node.label, isDir: false, children: [] }
@@ -1442,7 +1612,7 @@ function collapseDirectoryChain(node: CodeTreeNode) {
 }
 
 function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNode[] {
-  const businessNodes = filterBusinessCodeTree(nodes) as CodeTreeNode[]
+  const businessNodes = filterBusinessCodeTree(nodes as unknown as Parameters<typeof filterBusinessCodeTree>[0]) as CodeTreeNode[]
   if (!keyword) return businessNodes
   return businessNodes
     .map((node) => {
@@ -2824,6 +2994,9 @@ function traceNodeTitle(node: TraceabilityNode) {
     node.metadata?.staticMethod === true ? '方法类型：静态方法' : '',
     node.metadata?.visibility ? `可见性：${node.metadata.visibility}` : '',
     node.metadata?.recursive === true ? '递归：是' : '',
+    node.kind.startsWith('CODE_')
+      ? `动态证据：${codeNodeHasDynamicCoverage(node) ? '有覆盖 / 执行记录' : '暂无覆盖 / 执行记录'}`
+      : '',
     nodeComplexityText(node),
     `ID：${node.id}`,
   ].filter(Boolean).join('\n')
@@ -3045,6 +3218,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleCallGraphKeydown)
+  finishMiniGraphDrag()
   if (slowLoadingTimer !== undefined) window.clearTimeout(slowLoadingTimer)
   exitCallGraphFullscreen()
 })
@@ -3179,6 +3353,10 @@ onBeforeUnmount(() => {
 .call-graph-legend { display:flex; flex-wrap:wrap; gap:12px; padding:8px 15px; border-bottom:1px solid #eef2f5; color:#64748b; font-size:11px; font-weight:800; }
 .call-graph-legend span { display:flex; align-items:center; gap:5px; }
 .call-color { width:10px; height:10px; border:1px solid; border-radius:2px; }
+.call-border-sample { display:inline-block; width:18px; height:12px; border:2px solid; border-radius:3px; box-sizing:border-box; background:#e0e7ff; }
+.call-border-sample.dynamic { border-color:#6366f1; }
+.call-border-sample.selected { border-color:#7c3aed; }
+.call-border-sample.linked { border-color:#0f766e; }
 .call-color.controller { background:#bfdbfe; border-color:#2563eb; }
 .call-color.method { background:#e0e7ff; border-color:#6366f1; }
 .call-color.private { background:#bbf7d0; border-color:#16a34a; }
@@ -3409,6 +3587,7 @@ onBeforeUnmount(() => {
 .legend-line.partial { border-top-color:#d97706; }
 .legend-line.uncovered { border-top-color:#dc2626; }
 .mini-code-graph { display:block; width:100%; min-width:760px; min-height:560px; padding:20px; box-sizing:border-box; }
+.mini-code-graph:has(.mini-graph-node:active) { cursor:grabbing; }
 .mini-graph-tooltip,
 .graph-tooltip {
   box-sizing:border-box;
@@ -3437,7 +3616,8 @@ onBeforeUnmount(() => {
 .mini-graph-edge.coverage-partial path { stroke:#d97706; opacity:.9; stroke-dasharray:none; }
 .mini-graph-edge.active path { stroke:#475569; stroke-width:2.4; opacity:1; }
 .mini-graph-edge.dimmed { opacity:.14; }
-.mini-graph-node { cursor:pointer; }
+.mini-graph-node { cursor:grab; user-select:none; }
+.mini-graph-node:active { cursor:grabbing; }
 .mini-graph-node rect,
 .mini-graph-node polygon { fill:#f1f5f9; stroke:#cbd5e1; stroke-width:1.2; transition:opacity .16s ease, stroke .16s ease, stroke-width .16s ease, filter .16s ease; }
 .mini-graph-node.source rect { fill:#dbeafe; }

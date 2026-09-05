@@ -1766,6 +1766,11 @@ public class TraceabilityMapService {
         Map<String, MutableTreeNode> roots = new LinkedHashMap<>();
         int includedFiles = 0;
         int totalFiles = 0;
+        // Methods are NOT pre-expanded into codeTree (avoids tens of thousands of nodes on large codebases).
+        // Instead we record a per-class method count and let the frontend lazy-load methods on demand.
+        Map<String, Integer> methodCountByClass = index.nodes.values().stream()
+                .filter(n -> n.kind() == NodeKind.CODE_METHOD && n.parentId() != null)
+                .collect(Collectors.groupingBy(TraceabilityNode::parentId, Collectors.summingInt(n -> 1)));
         for (TraceabilityNode node : index.nodes.values()) {
             if (node.kind() != NodeKind.CODE_FILE || (!visibleNodeIds.isEmpty() && !visibleNodeIds.contains(node.id()))) {
                 continue;
@@ -1792,7 +1797,7 @@ public class TraceabilityMapService {
             file.evidenceState = dynamicNodes.contains(node.id()) ? EvidenceState.BOTH : node.evidenceState();
             file.coverage = node.coverage();
             currentLevel.put(node.id(), file);
-            attachCodeChildren(index, file, node.id(), dynamicNodes);
+            attachCodeChildren(index, file, node.id(), dynamicNodes, methodCountByClass);
         }
         if (totalFiles > includedFiles) {
             warnings.add("代码树文件数超过 " + MAX_CODE_TREE_NODES + "，仅加载前 " + includedFiles + "/" + totalFiles + " 个文件；请使用搜索或缩小源码范围后查看其余内容。");
@@ -1800,18 +1805,73 @@ public class TraceabilityMapService {
         return roots.values().stream().map(MutableTreeNode::toPayload).toList();
     }
 
-    private void attachCodeChildren(CodeIndex index, MutableTreeNode parent, String parentId, Set<String> dynamicNodes) {
+    private void attachCodeChildren(CodeIndex index, MutableTreeNode parent, String parentId, Set<String> dynamicNodes,
+                                    Map<String, Integer> methodCountByClass) {
         index.nodes.values().stream()
                 .filter(node -> Objects.equals(parentId, node.parentId()))
                 .sorted(Comparator.comparing(TraceabilityNode::label))
                 .forEach(node -> {
-                    CodeTreeKind kind = node.kind() == NodeKind.CODE_CLASS ? CodeTreeKind.CLASS : CodeTreeKind.METHOD;
+                    if (node.kind() == NodeKind.CODE_METHOD) {
+                        // Methods are lazy-loaded via /code-class-methods; never pre-expanded into codeTree.
+                        return;
+                    }
+                    CodeTreeKind kind = node.kind() == NodeKind.CODE_CLASS ? CodeTreeKind.CLASS : CodeTreeKind.FILE;
                     MutableTreeNode child = new MutableTreeNode(node.id(), kind, node.label(), node.locator(), parent.id, node.language());
                     child.evidenceState = dynamicNodes.contains(node.id()) ? EvidenceState.BOTH : node.evidenceState();
                     child.coverage = node.coverage();
+                    if (kind == CodeTreeKind.CLASS) {
+                        child.symbol = node.description(); // fully-qualified class name
+                        child.methodCount = methodCountByClass.getOrDefault(node.id(), 0);
+                    }
                     parent.children.put(node.id(), child);
-                    attachCodeChildren(index, child, node.id(), dynamicNodes);
+                    attachCodeChildren(index, child, node.id(), dynamicNodes, methodCountByClass);
                 });
+    }
+
+    /**
+     * Lazy-loads the methods of a single class for the code-tree panel.
+     * Reads the pre-parsed static index ({@link StaticInfoRepository}) instead of re-parsing source,
+     * so it scales to large codebases without exploding the traceability payload.
+     */
+    public TraceabilityMapPayloads.CodeMethodListResponse getClassMethods(String projectId, String appId, String className,
+                                                                          String keyword, int limit, int offset) {
+        if (!StringUtils.hasText(appId) || !StringUtils.hasText(className)) {
+            return new TraceabilityMapPayloads.CodeMethodListResponse(0, List.of());
+        }
+        List<StaticSourceInfo> infos = staticInfoRepository.findByAppIdAndClassInfo_ClassName(appId, className);
+        if (infos.isEmpty() || infos.get(0).getClassInfo() == null) {
+            return new TraceabilityMapPayloads.CodeMethodListResponse(0, List.of());
+        }
+        StaticSourceInfo info = infos.get(0);
+        String path = normalizer.pathFromClassName(className);
+        Map<String, StaticSourceMethodInfo> methods = info.getClassInfo().getMethodMaps();
+        if (methods == null || methods.isEmpty()) {
+            return new TraceabilityMapPayloads.CodeMethodListResponse(0, List.of());
+        }
+        String kw = keyword == null ? "" : keyword.trim().toLowerCase(Locale.ROOT);
+        List<TraceabilityMapPayloads.CodeMethodNode> all = methods.entrySet().stream()
+                .map(entry -> toCodeMethodNode(path, className, entry.getKey(), entry.getValue()))
+                .filter(m -> kw.isEmpty()
+                        || m.methodName().toLowerCase(Locale.ROOT).contains(kw)
+                        || (m.descriptor() != null && m.descriptor().toLowerCase(Locale.ROOT).contains(kw)))
+                .sorted(Comparator.comparing(TraceabilityMapPayloads.CodeMethodNode::methodName))
+                .toList();
+        int total = all.size();
+        List<TraceabilityMapPayloads.CodeMethodNode> page = all.stream()
+                .skip(Math.max(0, offset))
+                .limit(Math.max(1, limit))
+                .toList();
+        return new TraceabilityMapPayloads.CodeMethodListResponse(total, page);
+    }
+
+    private TraceabilityMapPayloads.CodeMethodNode toCodeMethodNode(String path, String className, String key, StaticSourceMethodInfo method) {
+        String methodName = firstText(method == null ? null : method.getMethodName(), key);
+        String desc = method == null ? null : method.getMethodDesc();
+        String methodId = normalizer.methodId(CodeSymbolNormalizer.DEFAULT_LANGUAGE, path, className, methodName, desc);
+        Integer line = firstLine(method);
+        Integer complexity = method == null || method.getCyclomaticComplexityMap() == null ? 0 : method.getCyclomaticComplexityMap();
+        Boolean recursive = method != null && Boolean.TRUE.equals(method.getRecursiveMap());
+        return new TraceabilityMapPayloads.CodeMethodNode(methodId, methodName, desc, line, complexity, recursive);
     }
 
     private CoverageSummary coverageSummary(ClassCoverageIndex index) {
@@ -3143,6 +3203,10 @@ public class TraceabilityMapService {
         private final String language;
         private EvidenceState evidenceState = EvidenceState.STATIC;
         private CoverageSummary coverage;
+        /** Fully-qualified class name for CLASS nodes (used by frontend to lazy-load methods). */
+        private String symbol;
+        /** Number of methods in a CLASS node (methods are not pre-expanded into codeTree). */
+        private Integer methodCount;
         private final Map<String, MutableTreeNode> children = new LinkedHashMap<>();
 
         private MutableTreeNode(String id, CodeTreeKind kind, String label, String path, String parentId, String language) {
@@ -3155,7 +3219,7 @@ public class TraceabilityMapService {
         }
 
         private CodeTreeNode toPayload() {
-            return new CodeTreeNode(id, kind, label, path, parentId, language, evidenceState, coverage,
+            return new CodeTreeNode(id, kind, label, path, parentId, language, evidenceState, coverage, symbol, methodCount,
                     children.values().stream().map(MutableTreeNode::toPayload).toList());
         }
     }

@@ -458,4 +458,20 @@ public class MapApiControl {
                                    @RequestParam String traceId) {
         return mapAppPayloadService.buildTraceStackCodeData(projectId, traceId);
     }
+
+    /**
+     * Lazy-loads the methods of a single class for the code-tree panel.
+     * Avoids pre-expanding tens of thousands of method nodes into the traceability payload;
+     * the frontend calls this when a class is expanded.
+     */
+    @GetMapping("/code-class-methods")
+    public com.oAT.web.api.map.TraceabilityMapPayloads.CodeMethodListResponse codeClassMethods(
+            @PathVariable String projectId,
+            @RequestParam String appId,
+            @RequestParam String className,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "200") int limit,
+            @RequestParam(defaultValue = "0") int offset) {
+        return traceabilityMapService.getClassMethods(projectId, appId, className, keyword, limit, offset);
+    }
 }
