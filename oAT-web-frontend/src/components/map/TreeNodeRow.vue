@@ -1,16 +1,12 @@
 <template>
-  <!-- directory node -->
   <div v-if="node.isDir" class="tree-node">
-    <div
-      class="tree-row tree-row--dir"
-      :style="{ paddingLeft: `${8 + depth * 14}px` }"
-    >
+    <div class="tree-row tree-row--dir" :style="{ paddingLeft: `${8 + depth * 14}px` }">
       <button type="button" class="tree-toggle-button" :aria-label="openDirs.has(node.key) ? '折叠目录' : '展开目录'" @click.stop="$emit('toggle-dir', node.key)">
         {{ openDirs.has(node.key) ? '▾' : '▸' }}
       </button>
-      <span class="tree-icon-file">📁</span>
+      <span class="tree-icon-dir">📁</span>
       <span class="tree-label" :title="node.key">{{ node.displayName }}</span>
-      <em class="tree-count">{{ countFiles(node) }}</em>
+      <em class="tree-count">{{ countDescendants(node) }}</em>
     </div>
     <template v-if="openDirs.has(node.key)">
       <TreeNodeRow
@@ -31,7 +27,6 @@
     </template>
   </div>
 
-  <!-- file / class node -->
   <div v-else-if="node.file" class="tree-node">
     <div
       :class="['tree-row', 'tree-row--file', { active: selectedId === node.file.nodeId, linked: linkedIds.has(node.file.nodeId) }]"
@@ -42,21 +37,48 @@
       @keydown.enter.prevent="$emit('select', node.file.nodeId)"
       @keydown.space.prevent="$emit('select', node.file.nodeId)"
     >
-      <button type="button" class="tree-toggle-button" :aria-label="openClasses.has(node.file.id) ? '折叠方法' : '展开方法'" @click.stop="$emit('toggle-class', node.file.id)">
-        {{ openClasses.has(node.file.id) ? '▾' : '▸' }}
+      <button
+        v-if="isExpandable"
+        type="button"
+        class="tree-toggle-button"
+        :aria-label="isOpen ? '折叠' : '展开'"
+        @click.stop="$emit('toggle-class', node.file.id)"
+      >
+        {{ isOpen ? '▾' : '▸' }}
       </button>
-      <span class="tree-icon-file">{{ node.file.name.endsWith('.java') || node.name.endsWith('java') ? '☕' : '📄' }}</span>
-      <span class="tree-label" :title="node.file.name || node.name">{{ node.name }}</span>
-      <em v-if="node.file.methodCount !== undefined" class="tree-count tree-count--method">{{ node.file.methodCount }} 方法</em>
+      <span v-else class="tree-toggle-spacer"></span>
+      <span :class="['tree-icon-file', { class: isClassNode }]">{{ isClassNode ? '◎' : '📄' }}</span>
+      <span class="tree-label" :title="node.displayName">{{ node.displayName }}</span>
+      <em v-if="countLabel" class="tree-count" :class="{ 'tree-count--method': isClassNode, 'tree-count--class': !isClassNode }">{{ countLabel }}</em>
       <em v-if="linkedIds.has(node.file.nodeId)" class="tree-count tree-count--linked">{{ linkCount(node.file.nodeId) }}</em>
     </div>
-    <div v-if="openClasses.has(node.file.id)" class="tree-methods-block">
-      <div v-if="loadingIds.has(node.file.id)" class="tree-method-loading">加载方法…</div>
+
+    <template v-if="isOpen">
+      <TreeNodeRow
+        v-for="child in node.children"
+        :key="child.key"
+        :node="child"
+        :depth="depth + 1"
+        :open-dirs="openDirs"
+        :open-classes="openClasses"
+        :selected-id="selectedId"
+        :linked-ids="linkedIds"
+        :loading-ids="loadingIds"
+        :get-link-count="getLinkCount"
+        @toggle-dir="$emit('toggle-dir', $event)"
+        @toggle-class="$emit('toggle-class', $event)"
+        @select="$emit('select', $event)"
+      />
+
+      <div v-if="isClassNode && loadingIds.has(node.file.id)" class="tree-method-loading" :style="{ paddingLeft: `${8 + (depth + 1) * 14}px` }">
+        加载方法…
+      </div>
       <button
         v-for="method in node.file.methods"
         :key="method.nodeId"
         :class="['tree-row', 'tree-row--method', { active: selectedId === method.nodeId, linked: linkedIds.has(method.nodeId) }]"
         :style="{ paddingLeft: `${8 + (depth + 1) * 14}px` }"
+        type="button"
         @click="$emit('select', method.nodeId)"
       >
         <span class="tree-icon-method">{{ linkedIds.has(method.nodeId) ? '◉' : '○' }}</span>
@@ -64,51 +86,85 @@
         <span v-if="method.line" class="tree-lineno">L{{ method.line }}</span>
         <em v-if="linkedIds.has(method.nodeId)" class="tree-count tree-count--linked">{{ linkCount(method.nodeId) }}</em>
       </button>
-      <div v-if="!loadingIds.has(node.file.id) && node.file.methods.length === 0 && node.file.loaded" class="tree-method-empty">无方法级数据</div>
-    </div>
+      <div v-if="isClassNode && !loadingIds.has(node.file.id) && node.file.methods.length === 0 && node.file.loaded" class="tree-method-empty" :style="{ paddingLeft: `${8 + (depth + 1) * 14}px` }">
+        无方法级数据
+      </div>
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 defineOptions({ name: 'TreeNodeRow' })
 
-interface CodeTreeMethod { nodeId: string; name: string; line?: number }
+interface CodeTreeMethod {
+  nodeId: string
+  name: string
+  line?: number
+}
+
 interface TreeNode {
-  key:         string
-  name:        string
+  key: string
+  name: string
   displayName: string
-  isDir:       boolean
-  children:    TreeNode[]
-  file?: { id: string; nodeId: string; name: string; methods: CodeTreeMethod[]; methodCount?: number; loaded?: boolean; loading?: boolean }
+  isDir: boolean
+  children: TreeNode[]
+  file?: {
+    id: string
+    nodeId: string
+    name: string
+    methods: CodeTreeMethod[]
+    methodCount?: number
+    loaded?: boolean
+    loading?: boolean
+  }
 }
 
 const props = defineProps<{
-  node:        TreeNode
-  depth:       number
-  openDirs:    Set<string>
+  node: TreeNode
+  depth: number
+  openDirs: Set<string>
   openClasses: Set<string>
-  selectedId:  string
-  linkedIds:   Set<string>
-  loadingIds:  Set<string>
+  selectedId: string
+  linkedIds: Set<string>
+  loadingIds: Set<string>
   getLinkCount: (nodeId: string) => number
 }>()
 
 const emit = defineEmits<{
-  (e: 'toggle-dir',   key: string): void
-  (e: 'toggle-class', id: string):  void
-  (e: 'select',       id: string):  void
+  (e: 'toggle-dir', key: string): void
+  (e: 'toggle-class', id: string): void
+  (e: 'select', id: string): void
 }>()
 
-function countFiles(node: TreeNode): number {
-  if (!node.isDir) return node.file ? 1 : 0
-  return node.children.reduce((sum, c) => sum + countFiles(c), 0)
+const isClassNode = computed(() => props.node.file?.methodCount !== undefined)
+const isOpen = computed(() => props.node.file ? props.openClasses.has(props.node.file.id) : false)
+const isExpandable = computed(() => props.node.children.length > 0 || isClassNode.value)
+const countLabel = computed(() => {
+  if (!props.node.file) return ''
+  if (isClassNode.value) return props.node.file.methodCount !== undefined ? `${props.node.file.methodCount} 方法` : ''
+  return props.node.children.length ? `${props.node.children.length} 类` : ''
+})
+
+function countDescendants(node: TreeNode): string {
+  let count = 0
+  const stack = [...node.children]
+  while (stack.length) {
+    const current = stack.pop() as TreeNode
+    if (current.file) {
+      count += current.file.methodCount !== undefined ? current.file.methodCount : 1
+    }
+    stack.push(...current.children)
+  }
+  return `${count} 项`
 }
 
-function linkCount(nodeId: string): number {
+function linkCount(nodeId: string) {
   return props.getLinkCount(nodeId)
 }
 
-function methodTitle(method: CodeTreeMethod): string {
+function methodTitle(method: CodeTreeMethod) {
   return method.line ? `${method.name} · L${method.line}` : method.name
 }
 </script>
@@ -132,10 +188,14 @@ function methodTitle(method: CodeTreeMethod): string {
   min-width: 0;
 }
 
-.tree-toggle-button {
+.tree-toggle-button,
+.tree-toggle-spacer {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
+}
+
+.tree-toggle-button {
   display: inline-grid;
   place-items: center;
   border: 0;
@@ -168,8 +228,15 @@ function methodTitle(method: CodeTreeMethod): string {
 .tree-row--method.active { background: #ede9fe; color: #6d28d9; }
 .tree-row--method.linked .tree-label--method { color: #7c3aed; font-weight: 600; }
 
-.tree-icon-file   { flex-shrink: 0; font-size: 13px; }
-.tree-icon-method { flex-shrink: 0; width: 14px; text-align: center; color: #9ca3af; font-size: 11px; }
+.tree-icon-dir,
+.tree-icon-file,
+.tree-icon-method {
+  flex-shrink: 0;
+}
+
+.tree-icon-file { font-size: 13px; }
+.tree-icon-file.class { color: #0f766e; }
+.tree-icon-method { width: 14px; text-align: center; color: #9ca3af; font-size: 11px; }
 .tree-row--method.linked .tree-icon-method { color: #7c3aed; }
 
 .tree-label {
@@ -194,10 +261,11 @@ function methodTitle(method: CodeTreeMethod): string {
 }
 .tree-count--linked { background: #ede9fe; color: #6d28d9; }
 .tree-count--method { background: #f1f5f9; color: #64748b; }
+.tree-count--class { background: #ecfeff; color: #0f766e; }
 
 .tree-method-loading,
 .tree-method-empty {
-  padding: 6px 8px 6px 34px;
+  padding: 6px 8px;
   font-size: 11px;
   color: #94a3b8;
 }

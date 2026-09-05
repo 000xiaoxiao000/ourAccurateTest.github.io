@@ -92,15 +92,35 @@
           <span v-else>0 条</span>
         </div>
         <div class="trace-list-scroll">
-          <div v-if="!traceListRows.length" class="empty-card">当前层暂无数据</div>
-          <label v-for="node in traceListRows" :key="node.id" class="trace-list-row" :class="{ selected: selectedTraceIds.has(node.id) }">
-            <input type="checkbox" :checked="selectedTraceIds.has(node.id)" @change="toggleTraceListNode(node.id)" />
-            <span class="trace-list-main">
-              <strong :title="node.label">{{ node.label || node.id }}</strong>
-              <small :title="traceNodeTitle(node)">{{ node.locator || node.symbol || node.id }}</small>
-            </span>
-            <span class="trace-list-links">{{ traceNodeLinkCount(node.id) }}</span>
-          </label>
+          <div v-if="activeTraceLayer !== 'code'">
+            <div v-if="!traceListRows.length" class="empty-card">当前层暂无数据</div>
+            <label v-for="node in traceListRows" :key="node.id" class="trace-list-row" :class="{ selected: selectedTraceIds.has(node.id) }">
+              <input type="checkbox" :checked="selectedTraceIds.has(node.id)" @change="toggleTraceListNode(node.id)" />
+              <span class="trace-list-main">
+                <strong :title="node.label">{{ node.label || node.id }}</strong>
+                <small :title="traceNodeTitle(node)">{{ node.locator || node.symbol || node.id }}</small>
+              </span>
+              <span class="trace-list-links">{{ traceNodeLinkCount(node.id) }}</span>
+            </label>
+          </div>
+          <div v-else class="trace-code-tree">
+            <div v-if="!traceCodeTreeNodes.length" class="empty-card">当前层暂无代码节点</div>
+            <TraceCodeTreeRow
+              v-for="node in traceCodeTreeNodes"
+              :key="node.key"
+              :node="node"
+              :depth="0"
+              :open-dirs="traceCodeOpenDirs"
+              :open-classes="traceCodeOpenClasses"
+              :selected-ids="selectedTraceIds"
+              :linked-ids="traceCodeLinkedIds"
+              :loading-ids="traceCodeLoadingIds"
+              :get-link-count="traceNodeLinkCount"
+              @toggle-dir="toggleTraceCodeDir"
+              @toggle-class="toggleTraceCodeClass"
+              @toggle-select="toggleTraceCodeSelection"
+            />
+          </div>
         </div>
         <div class="trace-list-pagination">
           <button type="button" :disabled="traceListPage <= 1" @click="traceListPage -= 1">上一页</button>
@@ -576,6 +596,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import TraceCodeTreeRow from '@/components/map/TraceCodeTreeRow.vue'
 import TreeNodeRow from '@/components/map/TreeNodeRow.vue'
 import AppRefreshButton from '@/components/AppRefreshButton.vue'
 import { fetchVerificationOverview } from '@/api/verification'
@@ -593,6 +614,22 @@ interface TreeNode {
   isDir: boolean
   children: TreeNode[]
   file?: { id: string; nodeId: string; name: string; methods: Array<{ nodeId: string; name: string; line?: number }>; methodCount?: number; loaded?: boolean; loading?: boolean }
+}
+interface TraceCodeTreeNode {
+  key: string
+  kind: 'dir' | 'class' | 'method'
+  displayName: string
+  title: string
+  children: TraceCodeTreeNode[]
+  descendantCount: number
+  nodeId: string
+  linkCount: number
+  methodCount?: number
+  loaded?: boolean
+  loading?: boolean
+  expandable?: boolean
+  line?: number
+  symbol?: string
 }
 interface SvgNode {
   id: string
@@ -626,6 +663,8 @@ const baselines = ref<VerificationBaseline[]>([])
 const selectedBaselineId = ref('')
 const openDirs = ref<Set<string>>(new Set())
 const openClasses = ref<Set<string>>(new Set())
+const traceCodeOpenDirs = ref<Set<string>>(new Set())
+const traceCodeOpenClasses = ref<Set<string>>(new Set())
 const maxExpandedTreeNodes = 600
 const treeExpandLimited = ref(false)
 
@@ -744,6 +783,9 @@ const codeTreeSummaryText = computed(() => {
   if (!summary) return '0 个代码符号'
   return `文件 ${summary.codeFileCount ?? 0} · 类 ${summary.codeClassCount ?? 0} · 方法 ${summary.codeMethodCount ?? 0} · 共 ${summary.codeCount || 0} 个符号`
 })
+const traceCodeTreeNodes = computed(() => buildTraceCodeTreeNodes())
+const traceCodeLinkedIds = computed(() => new Set(traceListNodes('code').map((node) => node.id).filter((id) => map.linkedNodeIds.value.has(id) || selectedTraceIds.value.has(id))))
+const traceCodeLoadingIds = computed(() => new Set(Object.keys(loadingClassMethods.value).filter((key) => loadingClassMethods.value[key])))
 
 const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
 const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value).map(toTreeNode))
@@ -758,6 +800,26 @@ const displayOpenClasses = computed(() => {
   const classes = new Set<string>()
   treeNodes.value.forEach((node) => collectTreeOpenKeys(node, new Set(), classes))
   return classes
+})
+
+watch(codeKeyword, (keyword) => {
+  if (!keyword) return
+  const dirs = new Set(traceCodeOpenDirs.value)
+  const classes = new Set(traceCodeOpenClasses.value)
+  const visit = (node: TraceCodeTreeNode) => {
+    if (node.kind === 'dir') {
+      dirs.add(node.key)
+      node.children.forEach(visit)
+      return
+    }
+    if (node.kind === 'class') {
+      classes.add(node.key)
+      node.children.forEach(visit)
+    }
+  }
+  traceCodeTreeNodes.value.forEach(visit)
+  traceCodeOpenDirs.value = dirs
+  traceCodeOpenClasses.value = classes
 })
 const selectedTraceNode = computed(() => selectedTraceId.value ? map.nodeById.value.get(selectedTraceId.value) || null : null)
 const traceListLayers = computed(() => [
@@ -1181,6 +1243,123 @@ function traceNodeLinkCount(id: string) {
   return map.filteredEdges.value.filter((edge) => edge.source === id || edge.target === id).length
 }
 
+function buildTraceCodeTreeNodes(): TraceCodeTreeNode[] {
+  const nodes = traceListNodes('code')
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const dirMap = new Map<string, TraceCodeTreeNode>()
+  const classMap = new Map<string, TraceCodeTreeNode>()
+  const fileDirMap = new Map<string, TraceCodeTreeNode>()
+  const methodCountByClass = new Map<string, number>()
+
+  nodes.forEach((node) => {
+    if (node.kind === 'CODE_METHOD' && node.parentId) {
+      methodCountByClass.set(node.parentId, (methodCountByClass.get(node.parentId) || 0) + 1)
+    }
+  })
+
+  function ensureDir(path: string, displayName: string) {
+    const key = path || displayName || '代码'
+    const existing = dirMap.get(key)
+    if (existing) return existing
+    const created: TraceCodeTreeNode = {
+      key,
+      kind: 'dir',
+      displayName,
+      title: key,
+      children: [],
+      descendantCount: 0,
+      nodeId: key,
+      linkCount: 0,
+    }
+    dirMap.set(key, created)
+    return created
+  }
+
+  function attachDirChain(path: string) {
+    const parts = path.split('/').filter(Boolean)
+    let currentPath = ''
+    let parent: TraceCodeTreeNode | null = null
+    parts.forEach((part) => {
+      currentPath = currentPath ? `${currentPath}/${part}` : part
+      const dir = ensureDir(currentPath, part)
+      if (parent && !parent.children.includes(dir)) parent.children.push(dir)
+      parent = dir
+    })
+    return parent || ensureDir('代码', '代码')
+  }
+
+  const fileNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_FILE')
+  const classNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_CLASS')
+  const methodNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_METHOD')
+
+  fileNodes.forEach((file) => {
+    const fileDirPath = file.locator ? file.locator.split('/').slice(0, -1).join('/') : '代码'
+    const dirNode = attachDirChain(fileDirPath || '代码')
+    fileDirMap.set(file.id, dirNode)
+  })
+
+  classNodes.forEach((klass) => {
+    const parentFile = klass.parentId ? nodeById.get(klass.parentId) : undefined
+    const parentDir = parentFile ? fileDirMap.get(parentFile.id) || attachDirChain(parentFile.locator ? parentFile.locator.split('/').slice(0, -1).join('/') : '代码') : attachDirChain(klass.locator ? klass.locator.split('/').slice(0, -1).join('/') : '代码')
+    const classNode: TraceCodeTreeNode = {
+      key: klass.id,
+      kind: 'class',
+      displayName: klass.label,
+      title: klass.symbol || klass.locator || klass.label,
+      children: [],
+      descendantCount: methodCountByClass.get(klass.id) || 0,
+      nodeId: klass.id,
+      methodCount: methodCountByClass.get(klass.id) || 0,
+      loaded: classMethods.value[klass.id] !== undefined,
+      loading: loadingClassMethods.value[klass.id] === true,
+      expandable: true,
+      linkCount: traceNodeLinkCount(klass.id),
+    }
+    parentDir.children.push(classNode)
+    classMap.set(klass.id, classNode)
+  })
+
+  methodNodes.forEach((method) => {
+    const parent = method.parentId ? classMap.get(method.parentId) : undefined
+    if (!parent) return
+    parent.children.push({
+      key: method.id,
+      kind: 'method',
+      displayName: method.label,
+      title: method.locator || method.label,
+      children: [],
+      descendantCount: 0,
+      nodeId: method.id,
+      line: lineFromLocator(method.locator),
+      linkCount: traceNodeLinkCount(method.id),
+    })
+  })
+
+  const roots = [...dirMap.values()].filter((node) => ![...dirMap.values()].some((other) => other !== node && other.children.includes(node)))
+  return roots.sort((left, right) => left.displayName.localeCompare(right.displayName))
+}
+
+function toggleTraceCodeDir(key: string) {
+  const next = new Set(traceCodeOpenDirs.value)
+  next.has(key) ? next.delete(key) : next.add(key)
+  traceCodeOpenDirs.value = next
+}
+
+function toggleTraceCodeClass(key: string) {
+  const next = new Set(traceCodeOpenClasses.value)
+  const willOpen = !next.has(key)
+  willOpen ? next.add(key) : next.delete(key)
+  traceCodeOpenClasses.value = next
+  if (willOpen) ensureClassMethodsLoaded(key)
+}
+
+function toggleTraceCodeSelection(nodeId: string) {
+  const next = new Set(selectedTraceIds.value)
+  next.has(nodeId) ? next.delete(nodeId) : next.add(nodeId)
+  selectedTraceIds.value = next
+  selectedTraceId.value = nodeId
+}
+
 function traceLayerNodeIds(layer: 'requirements' | 'testcases' | 'code') {
   return traceListNodes(layer).map((node) => node.id)
 }
@@ -1489,12 +1668,16 @@ function toggleClass(id: string) {
   willOpen ? next.add(id) : next.delete(id)
   openClasses.value = next
   if (willOpen) {
-    const appId = map.response.value?.baseline?.sourceAppId
-    const className = findClassSymbol(id)
-    if (appId && className && classMethods.value[id] === undefined && loadingClassMethods.value[id] !== true) {
-      loadClassMethods(id, appId, className)
-    }
+    void ensureClassMethodsLoaded(id)
   }
+}
+
+function ensureClassMethodsLoaded(classId: string) {
+  const appId = map.response.value?.baseline?.sourceAppId
+  const className = findClassSymbol(classId)
+  if (!appId || !className) return
+  if (classMethods.value[classId] !== undefined || loadingClassMethods.value[classId] === true) return
+  void loadClassMethods(classId, appId, className)
 }
 
 function findClassSymbol(classId: string): string | undefined {
@@ -1543,6 +1726,7 @@ function collectTreeOpenKeys(node: TreeNode, dirs: Set<string>, classes: Set<str
     return
   }
   if (node.file) classes.add(node.file.id)
+  node.children.forEach((child) => collectTreeOpenKeys(child, dirs, classes, budget))
 }
 
 function openAncestors(id: string, nodes: CodeTreeNode[], parents: string[] = []) {
@@ -1553,8 +1737,12 @@ function openAncestors(id: string, nodes: CodeTreeNode[], parents: string[] = []
       openDirs.value = dirs
       if (node.kind === 'CLASS' || node.kind === 'METHOD') {
         const classes = new Set(openClasses.value)
-        classes.add(node.kind === 'CLASS' ? node.id : node.parentId || '')
+        const classId = node.kind === 'CLASS' ? node.id : node.parentId || ''
+        classes.add(classId)
         openClasses.value = classes
+        if (classId) {
+          void ensureClassMethodsLoaded(classId)
+        }
       }
       return true
     }
@@ -1580,13 +1768,13 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
     const loading = loadingClassMethods.value[node.id] === true
     const methodNodes = node.kind === 'CLASS'
       ? (loaded || []).map((m) => ({ nodeId: m.id, name: m.methodName, line: m.lineNumber ?? undefined }))
-      : flattenMethods(node.children)
+      : []
     return {
       key: node.id,
       name: node.label,
       displayName: node.label,
       isDir: false,
-      children: [],
+      children: node.kind === 'FILE' ? node.children.map(toTreeNode) : [],
       file: {
         id: node.id,
         nodeId: node.id,
@@ -1627,13 +1815,6 @@ function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNo
 
 function searchableCodeTreeNode(node: CodeTreeNode) {
   return normalizeSearch([node.id, node.label, node.path, node.parentId, node.language, node.kind].join(' '))
-}
-
-function flattenMethods(nodes: CodeTreeNode[]): Array<{ nodeId: string; name: string; line?: number }> {
-  return nodes.flatMap((node) => {
-    if (node.kind === 'METHOD') return [{ nodeId: node.id, name: node.label, line: lineFromLocator(node.path) }]
-    return flattenMethods(node.children || [])
-  })
 }
 
 function lineFromLocator(locator?: string) {
