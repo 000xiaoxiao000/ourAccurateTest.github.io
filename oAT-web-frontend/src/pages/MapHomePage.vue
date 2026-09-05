@@ -783,7 +783,7 @@ const codeTreeSummaryText = computed(() => {
   if (!summary) return '0 个代码符号'
   return `文件 ${summary.codeFileCount ?? 0} · 类 ${summary.codeClassCount ?? 0} · 方法 ${summary.codeMethodCount ?? 0} · 共 ${summary.codeCount || 0} 个符号`
 })
-const traceCodeTreeNodes = computed(() => buildTraceCodeTreeNodes())
+const traceCodeTreeNodes = computed(() => buildTraceCodeTreeNodes(normalizeSearch(traceListKeyword.value)))
 const traceCodeLinkedIds = computed(() => new Set(traceListNodes('code').map((node) => node.id).filter((id) => map.linkedNodeIds.value.has(id) || selectedTraceIds.value.has(id))))
 const traceCodeLoadingIds = computed(() => new Set(Object.keys(loadingClassMethods.value).filter((key) => loadingClassMethods.value[key])))
 
@@ -802,7 +802,7 @@ const displayOpenClasses = computed(() => {
   return classes
 })
 
-watch(codeKeyword, (keyword) => {
+watch(() => normalizeSearch(traceListKeyword.value), (keyword) => {
   if (!keyword) return
   const dirs = new Set(traceCodeOpenDirs.value)
   const classes = new Set(traceCodeOpenClasses.value)
@@ -1243,13 +1243,13 @@ function traceNodeLinkCount(id: string) {
   return map.filteredEdges.value.filter((edge) => edge.source === id || edge.target === id).length
 }
 
-function buildTraceCodeTreeNodes(): TraceCodeTreeNode[] {
+function buildTraceCodeTreeNodes(keyword = ''): TraceCodeTreeNode[] {
   const nodes = traceListNodes('code')
   const nodeById = new Map(nodes.map((node) => [node.id, node]))
   const dirMap = new Map<string, TraceCodeTreeNode>()
-  const classMap = new Map<string, TraceCodeTreeNode>()
   const fileDirMap = new Map<string, TraceCodeTreeNode>()
   const methodCountByClass = new Map<string, number>()
+  const normalizedKeyword = normalizeSearch(keyword)
 
   nodes.forEach((node) => {
     if (node.kind === 'CODE_METHOD' && node.parentId) {
@@ -1291,48 +1291,113 @@ function buildTraceCodeTreeNodes(): TraceCodeTreeNode[] {
   const fileNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_FILE')
   const classNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_CLASS')
   const methodNodes = nodes.filter((node): node is TraceabilityNode => node.kind === 'CODE_METHOD')
+  const methodsByClass = new Map<string, Array<{
+    id: string
+    label: string
+    title: string
+    line?: number
+  }>>()
+
+  methodNodes.forEach((method) => {
+    if (!method.parentId) return
+    const methods = methodsByClass.get(method.parentId) || []
+    methods.push({
+      id: method.id,
+      label: method.label,
+      title: method.locator || method.symbol || method.label,
+      line: lineFromLocator(method.locator),
+    })
+    methodsByClass.set(method.parentId, methods)
+  })
+  Object.entries(classMethods.value).forEach(([classId, methods]) => {
+    const existing = methodsByClass.get(classId) || []
+    const existingIds = new Set(existing.map((method) => method.id))
+    methods.forEach((method) => {
+      if (existingIds.has(method.id)) return
+      existing.push({
+        id: method.id,
+        label: method.methodName,
+        title: [method.methodName, method.descriptor].filter(Boolean).join(' '),
+        line: method.lineNumber ?? undefined,
+      })
+    })
+    methodsByClass.set(classId, existing)
+  })
+
+  const classMatches = new Map<string, boolean>()
+  const matchingMethodsByClass = new Map<string, Array<{
+    id: string
+    label: string
+    title: string
+    line?: number
+  }>>()
+  const classSearchText = (klass: TraceabilityNode) => normalizeSearch([
+    klass.id,
+    klass.label,
+    klass.symbol,
+    klass.locator,
+    klass.description,
+  ].join(' '))
+  const methodSearchText = (method: { id: string; label: string; title: string }) => normalizeSearch([
+    method.id,
+    method.label,
+    method.title,
+  ].join(' '))
+
+  classNodes.forEach((klass) => {
+    const methods = methodsByClass.get(klass.id) || []
+    const classMatched = !normalizedKeyword || classSearchText(klass).includes(normalizedKeyword)
+    const matchingMethods = !normalizedKeyword || classMatched
+      ? methods
+      : methods.filter((method) => methodSearchText(method).includes(normalizedKeyword))
+    classMatches.set(klass.id, classMatched)
+    matchingMethodsByClass.set(klass.id, matchingMethods)
+  })
+
+  const visibleClassIds = new Set(classNodes
+    .filter((klass) => !normalizedKeyword || classMatches.get(klass.id) || (matchingMethodsByClass.get(klass.id)?.length || 0) > 0)
+    .map((klass) => klass.id))
 
   fileNodes.forEach((file) => {
+    if (!classNodes.some((klass) => klass.parentId === file.id && visibleClassIds.has(klass.id))) return
     const fileDirPath = file.locator ? file.locator.split('/').slice(0, -1).join('/') : '代码'
     const dirNode = attachDirChain(fileDirPath || '代码')
     fileDirMap.set(file.id, dirNode)
   })
 
   classNodes.forEach((klass) => {
+    if (!visibleClassIds.has(klass.id)) return
     const parentFile = klass.parentId ? nodeById.get(klass.parentId) : undefined
     const parentDir = parentFile ? fileDirMap.get(parentFile.id) || attachDirChain(parentFile.locator ? parentFile.locator.split('/').slice(0, -1).join('/') : '代码') : attachDirChain(klass.locator ? klass.locator.split('/').slice(0, -1).join('/') : '代码')
+    const methods = methodsByClass.get(klass.id) || []
+    const visibleMethods = normalizedKeyword && !classMatches.get(klass.id)
+      ? matchingMethodsByClass.get(klass.id) || []
+      : methods
     const classNode: TraceCodeTreeNode = {
       key: klass.id,
       kind: 'class',
       displayName: klass.label,
       title: klass.symbol || klass.locator || klass.label,
-      children: [],
-      descendantCount: methodCountByClass.get(klass.id) || 0,
+      children: visibleMethods.map((method) => ({
+        key: method.id,
+        kind: 'method',
+        displayName: method.label,
+        title: method.title,
+        children: [],
+        descendantCount: 0,
+        nodeId: method.id,
+        line: method.line,
+        linkCount: traceNodeLinkCount(method.id),
+      })),
+      descendantCount: Math.max(methodCountByClass.get(klass.id) || 0, methods.length),
       nodeId: klass.id,
-      methodCount: methodCountByClass.get(klass.id) || 0,
+      methodCount: Math.max(methodCountByClass.get(klass.id) || 0, methods.length),
       loaded: classMethods.value[klass.id] !== undefined,
       loading: loadingClassMethods.value[klass.id] === true,
       expandable: true,
       linkCount: traceNodeLinkCount(klass.id),
     }
     parentDir.children.push(classNode)
-    classMap.set(klass.id, classNode)
-  })
-
-  methodNodes.forEach((method) => {
-    const parent = method.parentId ? classMap.get(method.parentId) : undefined
-    if (!parent) return
-    parent.children.push({
-      key: method.id,
-      kind: 'method',
-      displayName: method.label,
-      title: method.locator || method.label,
-      children: [],
-      descendantCount: 0,
-      nodeId: method.id,
-      line: lineFromLocator(method.locator),
-      linkCount: traceNodeLinkCount(method.id),
-    })
   })
 
   const roots = [...dirMap.values()].filter((node) => ![...dirMap.values()].some((other) => other !== node && other.children.includes(node)))
