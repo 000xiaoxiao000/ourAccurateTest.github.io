@@ -70,9 +70,21 @@
           <button type="button" class="trace-list-clear" :disabled="!selectedTraceIds.size" @click="clearTraceListSelection">清空</button>
         </div>
         <div class="trace-list-tabs" role="tablist" aria-label="追溯数据层">
-          <button v-for="layer in traceListLayers" :key="layer.key" type="button" :class="{ active: activeTraceLayer === layer.key }" @click="switchTraceLayer(layer.key)">
-            {{ layer.label }} <b>{{ layer.count }}</b>
-          </button>
+          <div v-for="layer in traceListLayers" :key="layer.key" class="trace-list-tab" :class="{ active: activeTraceLayer === layer.key }">
+            <button type="button" role="tab" :aria-selected="activeTraceLayer === layer.key" @click="switchTraceLayer(layer.key)">
+              {{ layer.label }} <b>{{ layer.count }}</b>
+            </button>
+            <input
+              type="checkbox"
+              :checked="isTraceLayerFullySelected(layer.key)"
+              :indeterminate="isTraceLayerPartiallySelected(layer.key)"
+              :disabled="!layer.count"
+              :aria-label="`全选${layer.label}`"
+              :title="`全选${layer.label}`"
+              @click.stop
+              @change="toggleTraceLayerSelection(layer.key)"
+            />
+          </div>
         </div>
         <div class="trace-list-toolbar">
           <input v-model.trim="traceListKeyword" type="search" placeholder="搜索名称、ID、描述、定位" />
@@ -1144,6 +1156,34 @@ function isBusinessTraceCode(node: TraceabilityNode) {
 
 function traceNodeLinkCount(id: string) {
   return map.filteredEdges.value.filter((edge) => edge.source === id || edge.target === id).length
+}
+
+function traceLayerNodeIds(layer: 'requirements' | 'testcases' | 'code') {
+  return traceListNodes(layer).map((node) => node.id)
+}
+
+function isTraceLayerFullySelected(layer: 'requirements' | 'testcases' | 'code') {
+  const ids = traceLayerNodeIds(layer)
+  return ids.length > 0 && ids.every((id) => selectedTraceIds.value.has(id))
+}
+
+function isTraceLayerPartiallySelected(layer: 'requirements' | 'testcases' | 'code') {
+  const ids = traceLayerNodeIds(layer)
+  const selectedCount = ids.filter((id) => selectedTraceIds.value.has(id)).length
+  return selectedCount > 0 && selectedCount < ids.length
+}
+
+function toggleTraceLayerSelection(layer: 'requirements' | 'testcases' | 'code') {
+  const ids = traceLayerNodeIds(layer)
+  if (!ids.length) return
+  const next = new Set(selectedTraceIds.value)
+  if (isTraceLayerFullySelected(layer)) {
+    ids.forEach((id) => next.delete(id))
+  } else {
+    ids.forEach((id) => next.add(id))
+  }
+  selectedTraceIds.value = next
+  selectedTraceId.value = ids.find((id) => next.has(id)) || ''
 }
 
 function switchTraceLayer(layer: 'requirements' | 'testcases' | 'code') {
@@ -3074,8 +3114,12 @@ onBeforeUnmount(() => {
 .trace-list-clear:hover:not(:disabled) { border-color:#0f766e; color:#0f766e; }
 .trace-list-clear:disabled { cursor:not-allowed; opacity:.45; }
 .trace-list-tabs { display:flex; border-bottom:1px solid #eef2f5; }
-.trace-list-tabs button { flex:1; min-width:0; border:0; border-bottom:2px solid transparent; padding:10px 5px; background:#fff; color:#64748b; font-size:11px; font-weight:900; cursor:pointer; }
-.trace-list-tabs button.active { border-color:#0f766e; background:#f0fdfa; color:#0f766e; }
+.trace-list-tab { display:flex; flex:1; min-width:0; align-items:center; border-bottom:2px solid transparent; background:#fff; }
+.trace-list-tab.active { border-color:#0f766e; background:#f0fdfa; }
+.trace-list-tab button { flex:1; min-width:0; border:0; padding:10px 3px 10px 5px; background:transparent; color:#64748b; font-size:11px; font-weight:900; cursor:pointer; }
+.trace-list-tab.active button { color:#0f766e; }
+.trace-list-tab input { flex:0 0 auto; margin:0 6px 0 0; accent-color:#0f766e; cursor:pointer; }
+.trace-list-tab input:disabled { cursor:not-allowed; opacity:.4; }
 .trace-list-tabs b { margin-left:2px; color:inherit; }
 .trace-list-toolbar { display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid #eef2f5; }
 .trace-list-toolbar input { flex:1; min-width:0; box-sizing:border-box; border:1px solid #dbe4ee; border-radius:7px; padding:7px 9px; color:#172033; font-size:12px; outline:0; }
