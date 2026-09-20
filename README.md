@@ -155,11 +155,3 @@ https://github.com/000xiaoxiao000/ourAccurateTest.github.io.git
 ```text
 https://000xiaoxiao000.github.io/ourAccurateTest.github.io/
 ```
-
-## 交流与反馈
-
-项目交流资源位于 `docs/assets/`：
-
-| 添加作者微信 | 微信公众号入口 | AI + 精准测试实战交流群 |
-| --- | --- | --- |
-| <img src="docs/assets/wechat-friend.png" alt="添加作者微信二维码" width="220"> | <img src="docs/assets/wechat-contact.jpg" alt="微信公众号二维码" width="220"> | <img src="docs/assets/ai-testing-group.png" alt="AI + 精准测试实战交流群二维码" width="220"> |
