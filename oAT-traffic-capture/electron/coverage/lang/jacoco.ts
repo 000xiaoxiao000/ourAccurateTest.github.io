@@ -67,7 +67,10 @@ function buildReportArgs(values: Record<string, string>, env: RuntimeEnv, ctx: C
   if (asBool(values.html)) args.push('--html', out)
   if (asBool(values.xml)) args.push('--xml', path.join(out, 'jacoco.xml'))
   if (asBool(values.csv)) args.push('--csv', path.join(out, 'jacoco.csv'))
-  if (asBool(values.perKey)) args.push('--perkey')
+  // --perkey 可带 key：填了 key 就只出该 key 的报告（--perkey 1）；不填则是「每个 key 一份」
+  const perKeyFilter = asStr(values.perKeyFilter)
+  if (perKeyFilter) args.push('--perkey', perKeyFilter)
+  else if (asBool(values.perKey)) args.push('--perkey')
   const baseline = resolveBaseline(asStr(values.baseline))
   if (baseline) args.push('--baseline', baseline)
   return args
@@ -91,7 +94,8 @@ export const jacocoBackend: CoverageBackend = {
     { key: 'html', label: 'HTML 报告', type: 'boolean', default: 'true', help: '--html 原生 HTML 报告' },
     { key: 'xml', label: 'XML 报告', type: 'boolean', default: 'false', help: '--xml（jacoco.xml）' },
     { key: 'csv', label: 'CSV 报告', type: 'boolean', default: 'false', help: '--csv（jacoco.csv）' },
-    { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告' },
+    { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告（可再用下方「仅生成该 Key」指定单个 key）' },
+    { key: 'perKeyFilter', label: '仅生成该 Key（可选）', type: 'text', default: '', showWhen: { key: 'perKey', value: 'true' }, placeholder: '如 1', help: '--perkey <key> 只生成该 key 的报告；留空则不筛选（填了就隐含开启 perkey）' },
     { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（可与基线同/异目录）' },
     { key: 'baseline', label: '基线目录', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析（可选）' },
     { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）' }
@@ -141,11 +145,12 @@ export const jacocoBackend: CoverageBackend = {
         { key: 'html', label: 'HTML 报告', type: 'boolean', default: 'true', help: '--html 原生 HTML 报告' },
         { key: 'xml', label: 'XML 报告', type: 'boolean', default: 'false', help: '--xml（jacoco.xml）' },
         { key: 'csv', label: 'CSV 报告', type: 'boolean', default: 'false', help: '--csv（jacoco.csv）' },
-        { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告' },
-        { key: 'reportOutDir', label: '报告输出目录', type: 'path', pick: 'dir', default: '', help: '--html/--xml/--csv 输出目录；缺省 = <应用数据>/oat-coverage/execs/report' },
-        { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
-        { key: 'baseline', label: '基线目录', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析（可选）' },
-        { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）' }
+        { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告（可再用下方「仅生成该 Key」指定单个 key）' },
+        { key: 'perKeyFilter', label: '仅生成该 Key（可选）', type: 'text', default: '', showWhen: { key: 'perKey', value: 'true' }, placeholder: '如 1', help: '--perkey <key> 只生成该 key 的报告；留空则不筛选（填了就隐含开启 perkey）' },
+        { key: 'reportOutDir', label: '报告输出目录', type: 'path', pick: 'dir', default: '', required: true, help: '--html/--xml/--csv 输出目录；缺省 = <应用数据>/oat-coverage/execs/report' },
+        { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', required: true, help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
+        { key: 'baseline', label: '基线目录（可选）', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析' },
+        { key: 'sourcefilesPath', label: '源码目录（可选）', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；多模块用 ; 分隔' }
       ],
       build(values, env, ctx) {
         return [cliStep(env, buildReportArgs(values, env, ctx), '生成 JaCoCo 原生报告')]

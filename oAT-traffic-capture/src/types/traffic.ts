@@ -38,6 +38,8 @@ export interface CoverageParamSpec {
   placeholder?: string
   help?: string
   pick?: 'file' | 'dir'   // path 类型：选文件还是目录
+  /** 条件显示：仅当另一参数等于指定值时才在 UI 展示 */
+  showWhen?: { key: string; value: string }
 }
 
 export interface CoverageConfig {
@@ -52,10 +54,6 @@ export interface CoverageConfig {
   backend: string
   /** classfiles（覆盖率分母）本地路径，仅本地路径 */
   classfilesPath: string
-  /** 项目根目录：自动推导 classfiles 与源码目录的起点 */
-  projectDir: string
-  /** classfiles 归档仓库目录（项目内无构建产物时按项目名匹配 zip/jar） */
-  classfilesRepo: string
 }
 
 export interface CoverageExecInfo {

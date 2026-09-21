@@ -18,6 +18,11 @@ const toolsOpen = ref(true)
 function cmdNeeds(what: 'agent' | 'classfiles'): boolean {
   return !!activeCommand.value?.needs?.includes(what)
 }
+
+/** 参数条件显示：声明了 showWhen 时，仅当依赖参数等于指定值才渲染（如「仅生成该 Key」依赖「按 Key 拆分」开关） */
+function paramVisible(p: CoverageParamSpec): boolean {
+  return !p.showWhen || commandValues.value[p.showWhen.key] === p.showWhen.value
+}
 const activeCommandId = ref('')
 const activeCommand = computed(() => selectedBackend.value?.commands.find((c) => c.id === activeCommandId.value))
 // 每条指令持有自己的参数值（目录对应指令），切 tab 不串不丢
@@ -25,11 +30,10 @@ const commandValuesMap = ref<Record<string, Record<string, string>>>({})
 const commandValues = computed(() => commandValuesMap.value[activeCommandId.value] ?? {})
 const commandPreviewText = ref('')
 const commandOutput = ref('')
+const copied = ref(false)
 const busyCmd = ref(false)
-const detecting = ref(false)
 const cfProbe = ref<CoveragePathProbe | null>(null)
 const srcProbe = ref<CoveragePathProbe | null>(null)
-const cfCandidates = ref<CoveragePathProbe[]>([])
 
 const backends = computed(() => store.coverageBackends)
 const selectedBackend = computed<CoverageBackendInfo | undefined>(
@@ -158,42 +162,6 @@ async function pickClassfiles() {
   }
 }
 
-async function pickProjectDir() {
-  const r = await window.electronAPI?.coveragePickPath({ pick: 'dir', title: '选择项目根目录' })
-  if (r?.success && r.path) store.saveCoverageConfig({ projectDir: r.path })
-}
-
-/** 由项目根目录自动推导 classfiles（覆盖率分母）与源码目录（精确到 src/main/java 一层） */
-async function autoDetect() {
-  detecting.value = true
-  try {
-    const r = await window.electronAPI?.coverageDetectProject({ projectDir: cfg().projectDir, classfilesRepo: cfg().classfilesRepo })
-    if (!r) { msg.value = '自动推导失败：无返回'; return }
-    if (!r.success && !r.classfilesPath && !r.sourcefilesPath) { msg.value = '自动推导失败：' + (r.error ?? '未知原因'); return }
-    if (r.classfilesPath) store.saveCoverageConfig({ classfilesPath: r.classfilesPath })
-    if (r.sourcefilesPath) commandValues.value['sourcefilesPath'] = r.sourcefilesPath
-    cfProbe.value = r.classfiles ?? null
-    srcProbe.value = r.sourcefiles ?? null
-    cfCandidates.value = r.classfilesCandidates ?? []
-    msg.value = [
-      '✓ 已自动推导（项目根目录：' + r.projectDir + '）',
-      'classfiles = ' + (r.classfilesPath || '(未找到，需手动指定)'),
-      '源码目录   = ' + (r.sourcefilesPath || '(未找到，报告将无源码跳转)'),
-      ...(r.warnings?.length ? ['', '提示：', ...r.warnings.map((w) => '· ' + w)] : [])
-    ].join('\n')
-    await refreshCommandPreview()
-  } finally {
-    detecting.value = false
-  }
-}
-
-/** 一键切换到探测到的其他候选（如仓库 zip ↔ target/classes） */
-async function useCandidate(p: string) {
-  store.saveCoverageConfig({ classfilesPath: p })
-  await refreshCommandPreview()
-  await runProbes()
-}
-
 /** 路径即时校验（防抖，避免每敲一个字符就扫描磁盘） */
 let probeTimer: ReturnType<typeof setTimeout> | undefined
 function scheduleProbe() {
@@ -222,6 +190,38 @@ function probeBadge(p: CoveragePathProbe | null, optional = false) {
 }
 const cfBadge = computed(() => probeBadge(cfProbe.value))
 const srcBadge = computed(() => probeBadge(srcProbe.value, true))
+
+/** 文件大小人性化显示：<1KB 显示字节，避免小 .exec 显示成 0 KB */
+function fmtSize(n: number): string {
+  if (!n) return '0 B'
+  if (n < 1024) return n + ' B'
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+  return (n / 1024 / 1024).toFixed(2) + ' MB'
+}
+
+/** 复制真实命令预览到剪贴板（clipboard API 不可用时回退 execCommand） */
+async function copyPreview() {
+  const text = commandPreviewText.value || ''
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 1500)
+  } catch {
+    msg.value = '复制失败，请手动选择文本复制'
+  }
+}
 
 onMounted(refreshBackends)
 watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) selectBackend(id) })
@@ -280,60 +280,44 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       <div v-if="activeCommand" class="cmd-detail">
         <p class="sub" style="margin-top:10px"><b>{{ activeCommand.label }}</b>：{{ activeCommand.description }}</p>
         <div class="param-grid" v-if="activeCommand.params.length">
-          <label v-for="p in activeCommand.params" :key="p.key" class="param" :class="'pt-' + p.type">
-            <span class="pl">{{ p.label }}<i v-if="p.required" class="req">*</i></span>
-            <input v-if="p.type === 'text' || p.type === 'number'" :type="p.type === 'number' ? 'number' : 'text'" v-model="commandValues[p.key]" :placeholder="p.placeholder" @input="refreshCommandPreview()" />
-            <select v-else-if="p.type === 'select'" v-model="commandValues[p.key]" @change="refreshCommandPreview()">
-              <option v-for="o in p.options" :key="o" :value="o">{{ o }}</option>
-            </select>
-            <span v-else-if="p.type === 'boolean'" class="bool">
-              <label class="switch" :class="{ on: commandValues[p.key] === 'true' }">
-                <input type="checkbox" v-model="commandValues[p.key]" true-value="true" false-value="false" @change="refreshCommandPreview()" hidden />
-              </label>
-              <em>{{ commandValues[p.key] === 'true' ? '开' : '关' }}</em>
-            </span>
-            <span v-else-if="p.type === 'path'" class="path">
-              <input v-model="commandValues[p.key]" :placeholder="p.placeholder || '选择路径'" @input="refreshCommandPreview()" />
-              <button class="btn btn-outline btn-sm" @click="pickCommandPath(p)">选择</button>
-            </span>
-            <small v-if="p.help" class="ph">{{ p.help }}</small>
-            <small v-if="p.key === 'sourcefilesPath' && srcBadge" class="pb" :class="srcBadge.cls">{{ srcBadge.text }}</small>
-          </label>
+          <template v-for="p in activeCommand.params" :key="p.key">
+            <label v-if="paramVisible(p)" class="param" :class="'pt-' + p.type">
+              <span class="pl">{{ p.label }}<i v-if="p.required" class="req">*</i></span>
+              <input v-if="p.type === 'text' || p.type === 'number'" :type="p.type === 'number' ? 'number' : 'text'" v-model="commandValues[p.key]" :placeholder="p.placeholder" @input="refreshCommandPreview()" />
+              <select v-else-if="p.type === 'select'" v-model="commandValues[p.key]" @change="refreshCommandPreview()">
+                <option v-for="o in p.options" :key="o" :value="o">{{ o }}</option>
+              </select>
+              <span v-else-if="p.type === 'boolean'" class="bool">
+                <label class="switch" :class="{ on: commandValues[p.key] === 'true' }">
+                  <input type="checkbox" v-model="commandValues[p.key]" true-value="true" false-value="false" @change="refreshCommandPreview()" hidden />
+                </label>
+                <em>{{ commandValues[p.key] === 'true' ? '开' : '关' }}</em>
+              </span>
+              <span v-else-if="p.type === 'path'" class="path">
+                <input v-model="commandValues[p.key]" :placeholder="p.placeholder || '选择路径'" @input="refreshCommandPreview()" />
+                <button class="btn btn-outline btn-sm" @click="pickCommandPath(p)">选择</button>
+              </span>
+              <small v-if="p.help" class="ph">{{ p.help }}</small>
+              <small v-if="p.key === 'sourcefilesPath' && srcBadge" class="pb" :class="srcBadge.cls">{{ srcBadge.text }}</small>
+            </label>
+            <!-- classfiles 本地路径（报告分母）：紧跟 exec 目录之后、基线目录之前 -->
+            <label v-if="p.key === 'execDir' && cmdNeeds('classfiles')" class="param pt-path">
+              <span class="pl">classfiles 本地路径<i class="req">*</i><span v-if="cfBadge" class="pb" :class="cfBadge.cls">{{ cfBadge.text }}</span></span>
+              <span class="path">
+                <input :value="cfg().classfilesPath" placeholder="/path/to/target/classes 或 classfiles/xxx.zip" @input="store.saveCoverageConfig({ classfilesPath: ($event.target as HTMLInputElement).value }); onClassfilesChange(); refreshCommandPreview()" />
+                <button class="btn btn-outline btn-sm" @click="pickClassfiles">选择</button>
+              </span>
+              <small class="ph">报告分母字节码，仅本地路径；可为构建产物目录、zip 或 jar，多模块用 ; 分隔</small>
+            </label>
+          </template>
         </div>
         <p v-else class="muted" style="margin:6px 0">该指令无参数</p>
-        <!-- 项目根目录：填一次，自动推导 classfiles（覆盖率分母）与源码目录 -->
-        <div v-if="cmdNeeds('classfiles')" class="param-grid">
-          <label class="param pt-path">
-            <span class="pl">项目根目录（自动推导）</span>
-            <span class="path">
-              <input :value="cfg().projectDir" placeholder="选择路径" @input="store.saveCoverageConfig({ projectDir: ($event.target as HTMLInputElement).value })" />
-              <button class="btn btn-outline btn-sm" @click="pickProjectDir">选择</button>
-              <button class="btn btn-primary btn-sm" :disabled="detecting" @click="autoDetect">{{ detecting ? '推导中…' : '自动推导' }}</button>
-            </span>
-            <small class="ph">填项目根即可：自动找 classfiles（target/classes → build/classes → classfiles 仓库里的同名 zip）与源码根（src/main/java 这一层）</small>
-          </label>
-        </div>
-
-        <!-- classfiles 数据源（报告分母）：与其他参数同款样式，排在路径参数之后 -->
-        <div v-if="cmdNeeds('classfiles')" class="param-grid">
-          <label class="param pt-path">
-            <span class="pl">classfiles 本地路径<span v-if="cfBadge" class="pb" :class="cfBadge.cls">{{ cfBadge.text }}</span></span>
-            <span class="path">
-              <input :value="cfg().classfilesPath" placeholder="/path/to/target/classes 或 classfiles/xxx.zip" @input="store.saveCoverageConfig({ classfilesPath: ($event.target as HTMLInputElement).value }); onClassfilesChange(); refreshCommandPreview()" />
-              <button class="btn btn-outline btn-sm" @click="pickClassfiles">选择</button>
-            </span>
-            <small class="ph">报告分母字节码，仅本地路径；可为构建产物目录、zip 或 jar，多模块用 ; 分隔</small>
-            <span v-if="cfCandidates.length > 1" class="cand-row">
-              <small class="ph" style="margin-right:4px">候选：</small>
-              <button v-for="c in cfCandidates" :key="c.path" type="button" class="cand-chip" :class="{ on: c.path === cfg().classfilesPath }" :title="c.note" @click="useCandidate(c.path)">
-                {{ c.path.split('/').pop() }} · {{ c.fileCount }} 个 .class
-              </button>
-            </span>
-          </label>
-        </div>
 
         <div class="cmd-preview">
-          <div class="cp-head">真实命令预览</div>
+          <div class="cp-head" style="display:flex; align-items:center; justify-content:space-between">
+            <span>真实命令预览</span>
+            <button class="btn btn-outline btn-sm" @click="copyPreview">{{ copied ? '已复制 ✓' : '复制' }}</button>
+          </div>
           <pre class="code-block">{{ commandPreviewText || '# 加载中…' }}</pre>
         </div>
         <div class="control-row" style="margin-top:12px">
@@ -351,7 +335,7 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
                 <td class="mono">{{ e.file.split('/').pop() }}</td>
                 <td class="mono" style="color:#2563eb">{{ e.key }}</td>
                 <td>{{ e.source }}</td>
-                <td>{{ (e.size / 1024).toFixed(0) }} KB</td>
+                <td>{{ fmtSize(e.size) }}</td>
                 <td class="mono">{{ new Date(e.fetchedAt).toLocaleTimeString() }}</td>
                 <td><span class="tag tag-green">就绪</span></td>
               </tr>
@@ -462,9 +446,4 @@ table.data tr:last-child td { border-bottom: none; }
 .pb-green { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
 .pb-amber { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 .pb-red { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
-/* 自动推导候选：zip 与构建产物目录一键切换 */
-.cand-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; }
-.cand-chip { border: 1px solid #d7dde5; background: #fff; color: #33404d; border-radius: 999px; padding: 3px 10px; font-size: 11.5px; cursor: pointer; }
-.cand-chip:hover { border-color: #2563eb; color: #2563eb; }
-.cand-chip.on { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; }
 </style>

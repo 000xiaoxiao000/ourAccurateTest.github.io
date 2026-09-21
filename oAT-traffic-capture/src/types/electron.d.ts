@@ -106,7 +106,6 @@ declare global {
       coverageMerge: (opts: { execs: string[]; destfile: string }) => Promise<{ success: boolean; file?: string; error?: string }>
       coverageExportReport: (opts: { reportDir: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       coverageOpenReport: (opts: { reportDir: string }) => Promise<{ success: boolean; error?: string }>
-      coverageDetectProject: (opts: { projectDir: string; classfilesRepo?: string }) => Promise<{ success: boolean; projectDir: string; classfilesPath: string; sourcefilesPath: string; classfiles?: CoveragePathProbe; sourcefiles?: CoveragePathProbe; classfilesCandidates: CoveragePathProbe[]; sourcefilesCandidates: CoveragePathProbe[]; warnings: string[]; error?: string }>
       coverageCheckPath: (opts: { path: string; role: classfiles | sourcefiles; classfilesPath?: string }) => Promise<CoveragePathProbe>
     }
   }

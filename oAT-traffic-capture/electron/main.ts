@@ -54,9 +54,7 @@ let coverageConfig: CoverageConfig = {
   headerName: 'X-Coverage-Key',
   agentAddress: '127.0.0.1:8899',
   backend: 'jacoco',
-  classfilesPath: '',
-  projectDir: '',
-  classfilesRepo: '/Users/xiaoxiao/oATagent/classfiles'
+  classfilesPath: ''
 }
 let filterRules: TrafficFilterRule[] = []
 const DEFAULT_PROXY_PORT = 8888
@@ -768,6 +766,5 @@ ipcMain.handle('coverage-pick-path', async (_event, opts: any) => {
   return { success: true, path: result.filePaths[0] }
 })
 
-// 由项目根目录自动推导 classfiles（覆盖率分母）与源码目录，并做可达性校验
-ipcMain.handle('coverage-detect-project', async (_event, opts: any) => coverage.detectProject(opts ?? {}))
+// 单路径即时校验（classfiles 数 .class；源码根验包结构可达性）
 ipcMain.handle('coverage-check-path', async (_event, opts: any) => coverage.checkPath(opts ?? {}))

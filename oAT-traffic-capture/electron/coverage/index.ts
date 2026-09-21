@@ -9,8 +9,8 @@ import { resolveClassfiles } from './classfiles.js'
 import { buildRuntimeEnv, getBackend } from './backends.js'
 import { fmtStep } from './lang/types.js'
 import type { RunStep } from './lang/types.js'
-export { detectProject, checkPath } from './projectDetect.js'
-export type { DetectResult, PathProbe } from './projectDetect.js'
+export { checkPath } from './projectDetect.js'
+export type { PathProbe } from './projectDetect.js'
 
 export { resolveClassfiles }
 
