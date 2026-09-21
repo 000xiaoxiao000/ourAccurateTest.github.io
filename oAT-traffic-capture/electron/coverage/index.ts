@@ -9,6 +9,8 @@ import { resolveClassfiles } from './classfiles.js'
 import { buildRuntimeEnv, getBackend } from './backends.js'
 import { fmtStep } from './lang/types.js'
 import type { RunStep } from './lang/types.js'
+export { detectProject, checkPath } from './projectDetect.js'
+export type { DetectResult, PathProbe } from './projectDetect.js'
 
 export { resolveClassfiles }
 
@@ -92,9 +94,16 @@ function collectOutputPaths(steps: RunStep[]): string[] {
 /** 推断 HTML 报告目录（iframe 按 reportDir/index.html 加载） */
 function inferReportDir(backendId: string, commandId: string, values: Record<string, string>, workdir: string): string | undefined {
   const resolveIn = (base: string | undefined, d: string) => (path.isAbsolute(d) ? d : path.resolve(base || process.cwd(), d))
+  const asReportOut = (v: Record<string, string>) => {
+    const raw = (v.reportOutDir || '').trim()
+    return raw ? resolveIn(workdir, raw) : undefined
+  }
   switch (backendId) {
     case 'jacoco':
-      return commandId === 'report' ? path.join(workdir, 'report') : undefined
+      // ⚠️ 必须与 buildReportArgs 的输出目录解析完全一致（含自定义 reportOutDir），否则报告目录指向不存在的路径
+      return commandId === 'report'
+        ? (asReportOut(values) ?? path.join(workdir, 'report'))
+        : undefined
     case 'nyc':
       return commandId === 'report' ? resolveIn(values.projectDir, values.reportDir || 'coverage') : undefined
     case 'coverage-py':
@@ -155,7 +164,7 @@ export async function runCommand(config: CoverageConfig, backendId: string, comm
     execsInfo = execOuts.map((f) => ({ file: f, key: key || 'default', size: fileSize(f), fetchedAt: Date.now(), source: 'dump · tcpserver 远程拉取' }))
   }
   console.info('[覆盖率] 指令完成 %s.%s 产出=%d 个%s', backendId, commandId, outputs.length, reportDir ? ` 报告=${reportDir}` : '')
-  return { success: true, text: run.stdout || run.stderr || undefined, outputs, reportDir, execs: execsInfo }
+  return { success: true, text: run.stdout || run.stderr || undefined, outputs, reportDir, hasHtml: reportDir ? fs.existsSync(path.join(reportDir, 'index.html')) : undefined, execs: execsInfo }
 }
 
 /** 命令预览（UI 展示真实指令与参数） */
@@ -193,8 +202,12 @@ export async function generateReport(config: CoverageConfig, backendId: string, 
   }
   const run = await runSteps(plan.steps)
   if (!run.success) return { success: false, error: run.error }
+  if (!fs.existsSync(plan.reportDir)) {
+    console.error('[覆盖率] 报告目录未落盘: %s', plan.reportDir)
+    return { success: false, error: '报告目录未生成: ' + plan.reportDir + '（请确认勾选了 HTML 报告，或查看指令输出排查）' }
+  }
   console.info('[覆盖率] 报告生成完成: %s', plan.reportDir)
-  return { success: true, reportDir: plan.reportDir }
+  return { success: true, reportDir: plan.reportDir, hasHtml: fs.existsSync(path.join(plan.reportDir, 'index.html')) }
 }
 
 // ===== 以下为 xiaoxiao-jacoco-cli 直接命令（Java 后端辅助能力） =====
@@ -245,21 +258,34 @@ export async function mergeExecs(config: CoverageConfig, opts: { execs: string[]
   return { success: true, file: opts.destfile }
 }
 
-/** 导出报告：打包报告目录为 zip（mac/linux 用 zip，缺失则 tar） */
+/** 导出报告：打包报告目录为 zip（GUI 启动 PATH 受限，按绝对路径候选探测 zip；任何异常显式回传，绝不裸崩主进程） */
 export async function exportReport(opts: { reportDir: string }) {
-  const out = `${opts.reportDir}.zip`
-  const useZip = await new Promise<boolean>((resolve) => {
-    const p = spawn('zip', ['--version'], { windowsHide: true })
-    p.on('error', () => resolve(false))
-    p.on('close', (c) => resolve(c === 0))
-  })
-  const cmd = useZip ? 'zip' : 'tar'
-  const args = useZip
-    ? ['-r', out, '.', '-i', '*']
-    : ['-czf', out, '-C', opts.reportDir, '.']
-  await new Promise<void>((resolve) => {
-    const p = spawn(cmd, args, { cwd: opts.reportDir, windowsHide: true })
-    p.on('close', () => resolve())
-  })
-  return { success: true, filePath: out }
+  try {
+    const out = `${opts.reportDir}.zip`
+    // ⚠️ Node spawn 在 cwd 不存在时会把错误误报成 "spawn <bin> ENOENT"，必须先校验目录
+    if (!fs.existsSync(opts.reportDir) || !fs.statSync(opts.reportDir).isDirectory()) {
+      return { success: false, error: '报告目录不存在: ' + opts.reportDir + '（请先生成报告）' }
+    }
+    const candidates = ['/usr/bin/zip', '/usr/local/bin/zip', '/opt/homebrew/bin/zip', 'zip']
+    let zipBin: string | undefined
+    for (const c of candidates) {
+      const ok = await new Promise<boolean>((resolve) => {
+        const p = spawn(c, ['--version'], { windowsHide: true })
+        p.on('error', () => resolve(false))
+        p.on('close', (code) => resolve(code === 0))
+      })
+      if (ok) { zipBin = c; break }
+    }
+    if (!zipBin) return { success: false, error: '系统未找到 zip 命令，无法打包；可手动压缩报告目录: ' + opts.reportDir }
+    const code = await new Promise<number>((resolve) => {
+      const p = spawn(zipBin as string, ['-r', out, '.', '-i', '*'], { cwd: opts.reportDir, windowsHide: true })
+      p.on('error', (e) => { console.error('[覆盖率] zip 打包异常: %s', (e as Error).message); resolve(-1) }) // ENOENT 多半是 cwd（报告目录）缺失
+      p.on('close', (c) => resolve(c ?? -1))
+    })
+    if (code !== 0) return { success: false, error: `zip 打包失败（exit ${code}）` }
+    return { success: true, filePath: out }
+  } catch (e) {
+    console.error('[覆盖率] 导出异常: %s', (e as Error)?.stack || e)
+    return { success: false, error: '导出异常: ' + ((e as Error)?.message || String(e)) }
+  }
 }

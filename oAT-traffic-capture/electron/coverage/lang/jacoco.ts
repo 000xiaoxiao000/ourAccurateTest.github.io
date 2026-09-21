@@ -3,6 +3,11 @@ import path from 'path'
 import type { CoverageBackend, CollectResult, CoverageContext, ReportResult, RunStep, RuntimeEnv } from './types.js'
 import { asBool, asStr } from './util.js'
 
+/** 多个路径（多模块）用 ';' 分隔；路径本身含 ';' 的概率极低，且 CLI 支持重复传参 */
+export function splitPaths(v: string): string[] {
+  return (v || '').split(';').map((s) => s.trim()).filter(Boolean)
+}
+
 function agentHostPort(agentAddress: string): { host: string; port: string } {
   const [h, p] = (agentAddress || '127.0.0.1:8899').split(':')
   return { host: h || '127.0.0.1', port: p || '8899' }
@@ -48,15 +53,17 @@ function resolveBaseline(p: string): string | undefined {
 }
 
 function buildReportArgs(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): string[] {
-  const out = path.join(ctx.workdir || '.', 'report')
+  // 报告输出目录统一转绝对路径（相对 cli 进程 cwd 解析会漂移，锚定到 workdir 才能和 inferReportDir 对齐）
+  const raw = asStr(values.reportOutDir) || path.join(ctx.workdir || '.', 'report')
+  const out = path.isAbsolute(raw) ? raw : path.resolve(ctx.workdir || process.cwd(), raw)
   const args = ['report']
   // .exec 输入：目录（--execdir 读该目录全部 .exec）或已抓取的 exec 列表，二者可同/异目录
   const execDir = asStr(values.execDir)
   if (execDir) args.push('--execdir', execDir)
   else args.push(...ctx.execs)
-  args.push('--classfiles', env.classfilesPath)
-  const sourcefiles = asStr(values.sourcefilesPath)
-  if (sourcefiles) args.push('--sourcefiles', sourcefiles)
+  // 多模块/多路径：以 ';' 分隔，CLI 支持 --classfiles / --sourcefiles 重复传
+  for (const c of splitPaths(env.classfilesPath)) args.push('--classfiles', c)
+  for (const s of splitPaths(asStr(values.sourcefilesPath))) args.push('--sourcefiles', s)
   if (asBool(values.html)) args.push('--html', out)
   if (asBool(values.xml)) args.push('--xml', path.join(out, 'jacoco.xml'))
   if (asBool(values.csv)) args.push('--csv', path.join(out, 'jacoco.csv'))
@@ -87,14 +94,14 @@ export const jacocoBackend: CoverageBackend = {
     { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告' },
     { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（可与基线同/异目录）' },
     { key: 'baseline', label: '基线目录', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析（可选）' },
-    { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 报告中跳转源码（可选）' }
+    { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）' }
   ],
   collect(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): CollectResult {
     const dest = dumpDest(values, ctx)
     return { steps: [cliStep(env, buildCollectArgs(values, ctx), '远程 dump .exec')], outputs: [dest] }
   },
   report(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): ReportResult {
-    const out = path.join(ctx.workdir, 'report')
+    const out = asStr(values.reportOutDir) || path.join(ctx.workdir, 'report')
     return { steps: [cliStep(env, buildReportArgs(values, env, ctx), '生成 JaCoCo 原生报告')], reportDir: out }
   },
   preview(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): string {
@@ -116,6 +123,7 @@ export const jacocoBackend: CoverageBackend = {
   commands: [
     {
       id: 'dump',
+      needs: ['agent'],
       label: 'dump · 抓取 .exec',
       description: '经 tcpserver 远程 dump agent 覆盖数据到 .exec（--address/--port/--destfile/--key/--reset）',
       params: [
@@ -126,16 +134,18 @@ export const jacocoBackend: CoverageBackend = {
     },
     {
       id: 'report',
+      needs: ['classfiles'],
       label: 'report · 生成报告',
       description: '由 .exec + classfiles 生成 JaCoCo 原生报告（--html/--xml/--csv/--perkey/--baseline）',
       params: [
-        { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
         { key: 'html', label: 'HTML 报告', type: 'boolean', default: 'true', help: '--html 原生 HTML 报告' },
         { key: 'xml', label: 'XML 报告', type: 'boolean', default: 'false', help: '--xml（jacoco.xml）' },
         { key: 'csv', label: 'CSV 报告', type: 'boolean', default: 'false', help: '--csv（jacoco.csv）' },
         { key: 'perKey', label: '按 Key 拆分', type: 'boolean', default: 'false', help: '--perkey 每个 key 一份报告' },
+        { key: 'reportOutDir', label: '报告输出目录', type: 'path', pick: 'dir', default: '', help: '--html/--xml/--csv 输出目录；缺省 = <应用数据>/oat-coverage/execs/report' },
+        { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
         { key: 'baseline', label: '基线目录', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析（可选）' },
-        { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 报告中跳转源码（可选）' }
+        { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）' }
       ],
       build(values, env, ctx) {
         return [cliStep(env, buildReportArgs(values, env, ctx), '生成 JaCoCo 原生报告')]
@@ -146,16 +156,19 @@ export const jacocoBackend: CoverageBackend = {
       label: 'merge · 合并 exec',
       description: '把多个 .exec 合并为一个（--destfile）',
       params: [
-        { key: 'destfile', label: '合并输出', type: 'text', default: 'jacoco-merged.exec', help: '--destfile 合并后的 exec 路径' }
+        { key: 'mergeDir', label: '输出目录', type: 'path', pick: 'dir', default: '', help: '选目录则合并结果落到 <该目录>/<输出文件名>' },
+        { key: 'destfile', label: '输出文件名', type: 'text', default: 'jacoco-merged.exec', help: '--destfile 文件名或绝对路径；仅填文件名且未选目录时落到 <应用数据>/oat-coverage/execs/' }
       ],
       build(values, env, ctx) {
         const dest = asStr(values.destfile) || 'jacoco-merged.exec'
-        const destAbs = path.isAbsolute(dest) ? dest : path.join(ctx.workdir, dest)
+        const mergeDir = asStr(values.mergeDir)
+        const destAbs = mergeDir ? path.join(mergeDir, path.basename(dest)) : (path.isAbsolute(dest) ? dest : path.join(ctx.workdir, dest))
         return [cliStep(env, ['merge', ...ctx.execs, '--destfile', destAbs], '合并 exec')]
       }
     },
     {
       id: 'keys',
+      needs: ['agent'],
       label: 'keys · key 列表',
       description: '列出 agent 已采集的归因 key（--address/--port）',
       params: [],
@@ -166,6 +179,7 @@ export const jacocoBackend: CoverageBackend = {
     },
     {
       id: 'stats',
+      needs: ['agent'],
       label: 'stats · 插桩统计',
       description: '查看 agent 插桩类/探针统计（--limit 前 N 类）',
       params: [
@@ -181,20 +195,24 @@ export const jacocoBackend: CoverageBackend = {
     },
     {
       id: 'dumpclasses',
+      needs: ['agent'],
       label: 'dumpclasses · 拉字节码',
       description: '从运行 agent 拉取被插桩类原始字节码 zip（classfiles 缺失/不一致时用）',
       params: [
-        { key: 'zip', label: '输出 zip', type: 'text', default: 'classfiles.zip', placeholder: 'classfiles.zip', help: '--zip 输出压缩包路径；填相对名时输出到 <应用数据>/oat-coverage/execs/（macOS 为 ~/Library/Application Support/oat-traffic-capture/oat-coverage/execs/），填绝对路径则原样输出' }
+        { key: 'zipDir', label: '输出目录', type: 'path', pick: 'dir', default: '', help: '选目录则 zip 落到 <该目录>/<输出 zip 文件名>' },
+        { key: 'zip', label: '输出 zip 文件名', type: 'text', default: 'classfiles.zip', placeholder: 'classfiles.zip', help: '文件名或绝对路径；仅填文件名且未选目录时输出到 <应用数据>/oat-coverage/execs/' }
       ],
       build(values, env, ctx) {
         const { host, port } = agentHostPort(ctx.agentAddress)
         const zip = asStr(values.zip) || 'classfiles.zip'
-        const zipAbs = path.isAbsolute(zip) ? zip : path.join(ctx.workdir, zip)
+        const zipDir = asStr(values.zipDir)
+        const zipAbs = zipDir ? path.join(zipDir, path.basename(zip)) : (path.isAbsolute(zip) ? zip : path.join(ctx.workdir, zip))
         return [cliStep(env, ['dumpclasses', '--address', host, '--port', port, '--zip', zipAbs], '拉取被插桩类原始字节码')]
       }
     },
     {
       id: 'setkey',
+      needs: ['agent'],
       label: 'setkey · 远程设 key',
       description: '进程外设定全局 CURRENT_KEY，零改业务代码驱动分离（--key/--clear）',
       params: [
@@ -211,20 +229,23 @@ export const jacocoBackend: CoverageBackend = {
     },
     {
       id: 'instrument',
+      needs: ['classfiles'],
       label: 'instrument · 离线插桩',
       description: '离线插桩 class 目录到指定输出（--destfile）',
       params: [
         { key: 'classesDir', label: 'class 目录', type: 'path', pick: 'dir', default: '', help: '待插桩的 classes 目录' },
-        { key: 'destDir', label: '插桩输出', type: 'text', default: 'instrumented', help: '--destfile 插桩后输出目录' }
+        { key: 'destDir', label: '插桩输出目录', type: 'path', pick: 'dir', default: '', help: '--destfile 插桩后输出目录（选绝对目录则原样输出；缺省 = <应用数据>/oat-coverage/execs/instrumented）' }
       ],
       build(values, env, ctx) {
         const classes = asStr(values.classesDir) || env.classfilesPath
-        const dest = path.isAbsolute(asStr(values.destDir)) ? asStr(values.destDir) : path.join(ctx.workdir, asStr(values.destDir) || 'instrumented')
+        const destDir = asStr(values.destDir)
+        const dest = destDir ? (path.isAbsolute(destDir) ? destDir : path.join(ctx.workdir, destDir)) : path.join(ctx.workdir, 'instrumented')
         return [cliStep(env, ['instrument', classes, '--destfile', dest], '离线插桩')]
       }
     },
     {
       id: 'classinfo',
+      needs: ['classfiles'],
       label: 'classinfo · 类信息',
       description: '列出 classfiles 中的类与方法签名（--classfiles）',
       params: [],

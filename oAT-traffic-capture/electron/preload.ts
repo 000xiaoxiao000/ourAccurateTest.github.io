@@ -74,5 +74,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   coverageCommandPreview: (opts: any) => ipcRenderer.invoke('coverage-command-preview', opts),
   coverageReport: (opts: any) => ipcRenderer.invoke('coverage-report', opts),
   coverageMerge: (opts: any) => ipcRenderer.invoke('coverage-merge', opts),
-  coverageExportReport: (opts: any) => ipcRenderer.invoke('coverage-export-report', opts)
+  coverageExportReport: (opts: any) => ipcRenderer.invoke('coverage-export-report', opts),
+  coverageOpenReport: (opts: any) => ipcRenderer.invoke('coverage-open-report', opts),
+  coverageDetectProject: (opts: any) => ipcRenderer.invoke('coverage-detect-project', opts),
+  coverageCheckPath: (opts: any) => ipcRenderer.invoke('coverage-check-path', opts)
 })

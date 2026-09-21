@@ -42,6 +42,8 @@ export interface CoverageCommandDef {
   label: string
   description: string
   params: CoverageParamSpec[]
+  /** 该指令依赖的共享配置：agent=Agent 地址/归属 Key；classfiles=classfiles 本地路径（UI 据此按需显示配置条） */
+  needs?: ('agent' | 'classfiles')[]
   /** 由参数值构造真实命令步骤（供执行与预览） */
   build(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): RunStep[]
 }

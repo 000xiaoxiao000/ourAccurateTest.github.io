@@ -61,7 +61,7 @@ export const nycBackend: CoverageBackend = {
       description: 'nyc instrument：对源码做 Istanbul 插桩输出到指定目录',
       params: [
         { key: 'inputDir', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '待插桩的源码/构建产物目录' },
-        { key: 'outputDir', label: '插桩输出', type: 'text', default: 'instrumented', help: '插桩产物输出目录' }
+        { key: 'outputDir', label: '插桩输出目录', type: 'path', pick: 'dir', default: '', help: '插桩产物输出目录（绝对目录原样输出；相对名基于项目目录）' }
       ],
       build(values, env, ctx) {
         const projectDir = asStr(values.projectDir) || process.cwd()

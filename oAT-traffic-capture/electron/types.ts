@@ -45,6 +45,8 @@ export interface CoverageConfig {
   agentAddress: string
   backend: string
   classfilesPath: string   // 本地路径（被插桩类的字节码目录），覆盖率分母；仅本地路径
+  projectDir: string       // 项目根目录：自动推导 classfiles / 源码目录的起点
+  classfilesRepo: string   // classfiles 归档仓库（项目内无构建产物时按项目名匹配 zip/jar）
 }
 
 export interface CoverageExecInfo {
@@ -61,6 +63,8 @@ export interface CoverageCommandInfo {
   label: string
   description: string
   params: CoverageParamSpec[]
+  /** 依赖的共享配置：agent / classfiles（UI 按需显示配置条） */
+  needs?: string[]
 }
 
 export interface CoverageBackendInfo {

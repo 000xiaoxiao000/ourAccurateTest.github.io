@@ -6,10 +6,17 @@ import fs from 'fs'
  */
 export async function resolveClassfiles(localPath: string): Promise<{ success: boolean; resolvedPath?: string; error?: string }> {
   try {
-    if (!localPath || !fs.existsSync(localPath)) {
-      return { success: false, error: `本地 classfiles 不存在: ${localPath || ''}` }
+    // 支持多路径（多模块）以 ';' 分隔：目录、zip、jar 均可（CLI 侧按 entry 分析）
+    const parts = (localPath || '').split(';').map((s) => s.trim()).filter(Boolean)
+    if (parts.length === 0) {
+      return { success: false, error: '未填写 classfiles 本地路径（可用「自动推导」从项目根目录生成）' }
     }
-    return { success: true, resolvedPath: localPath }
+    for (const p of parts) {
+      if (!fs.existsSync(p)) {
+        return { success: false, error: `本地 classfiles 不存在: ${p}` }
+      }
+    }
+    return { success: true, resolvedPath: parts.join(';') }
   } catch (e: any) {
     return { success: false, error: e?.message ?? String(e) }
   }

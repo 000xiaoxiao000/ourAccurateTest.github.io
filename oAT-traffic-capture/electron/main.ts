@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
 import path from 'path'
 import util from 'util'
 import fs from 'fs'
@@ -54,7 +54,9 @@ let coverageConfig: CoverageConfig = {
   headerName: 'X-Coverage-Key',
   agentAddress: '127.0.0.1:8899',
   backend: 'jacoco',
-  classfilesPath: ''
+  classfilesPath: '',
+  projectDir: '',
+  classfilesRepo: '/Users/xiaoxiao/oATagent/classfiles'
 }
 let filterRules: TrafficFilterRule[] = []
 const DEFAULT_PROXY_PORT = 8888
@@ -741,10 +743,31 @@ ipcMain.handle('coverage-report', async (_event, opts: any) =>
 ipcMain.handle('coverage-merge', async (_event, opts: any) => coverage.mergeExecs(coverageConfig, opts ?? {}))
 
 ipcMain.handle('coverage-export-report', async (_event, opts: any) => coverage.exportReport(opts ?? {}))
+ipcMain.handle('coverage-open-report', async (_event, opts: any) => {
+  try {
+    const dir = opts?.reportDir
+    if (!dir) return { success: false, error: '缺少报告目录' }
+    if (!fs.existsSync(dir)) return { success: false, error: '报告目录不存在: ' + dir + '（请先生成报告）' }
+    const indexHtml = path.join(dir, 'index.html')
+    if (!fs.existsSync(indexHtml)) return { success: false, error: '报告中没有 index.html（请确认生成时勾选了 HTML 报告）: ' + dir }
+    // file:// 无法用 window.open 打开（Electron 默认拦截），改系统默认浏览器/访达打开
+    const err = await shell.openPath(indexHtml)
+    return err ? { success: false, error: err } : { success: true }
+  } catch (e) {
+    return { success: false, error: (e as Error)?.message || String(e) }
+  }
+})
 
 ipcMain.handle('coverage-pick-path', async (_event, opts: any) => {
   const properties: ('openFile' | 'openDirectory')[] = opts?.pick === 'dir' ? ['openDirectory'] : ['openFile']
-  const result = await dialog.showOpenDialog({ properties, title: opts?.title ?? '选择路径' })
+  // 目录或归档（zip/jar）都能当 classfiles：同时允许选文件与目录
+  if (opts?.pick === 'dirOrFile') properties.push('openFile')
+  const filters = opts?.pick === 'dirOrFile' ? [{ name: '构建产物', extensions: ['zip', 'jar', 'war'] }] : undefined
+  const result = await dialog.showOpenDialog({ properties, filters, title: opts?.title ?? '选择路径' })
   if (result.canceled || result.filePaths.length === 0) return { success: true, path: '' }
   return { success: true, path: result.filePaths[0] }
 })
+
+// 由项目根目录自动推导 classfiles（覆盖率分母）与源码目录，并做可达性校验
+ipcMain.handle('coverage-detect-project', async (_event, opts: any) => coverage.detectProject(opts ?? {}))
+ipcMain.handle('coverage-check-path', async (_event, opts: any) => coverage.checkPath(opts ?? {}))

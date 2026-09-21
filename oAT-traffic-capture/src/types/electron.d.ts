@@ -9,6 +9,15 @@ import type {
   TrafficRecord
 } from '../types/traffic'
 
+export interface CoveragePathProbe {
+  path: string
+  kind: dir | zip | jar | none
+  exists: boolean
+  fileCount: number
+  packageHits: number
+  note: string
+}
+
 export interface CaptureProtocolConfig {
   http: boolean
   https: boolean
@@ -86,16 +95,19 @@ declare global {
       resolveClassfiles: (localPath: string) => Promise<{ success: boolean; resolvedPath?: string; error?: string }>
       coverageDump: (opts: { backendId?: string; values?: Record<string, string>; key?: string }) => Promise<{ success: boolean; execs?: CoverageExecInfo[]; error?: string }>
       coveragePreview: (opts: { backendId?: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
-      coveragePickPath: (opts: { pick?: 'file' | 'dir'; title?: string }) => Promise<{ success: boolean; path?: string }>
+      coveragePickPath: (opts: { pick?: 'file' | 'dir' | 'dirOrFile'; title?: string }) => Promise<{ success: boolean; path?: string }>
       coverageKeys: () => Promise<{ success: boolean; keys?: string[]; error?: string }>
       coverageStats: (opts: { limit?: number }) => Promise<{ success: boolean; text?: string; error?: string }>
       coverageDumpclasses: (opts: { zip?: string }) => Promise<{ success: boolean; file?: string; error?: string }>
       coverageSetkey: (opts: { key?: string; clear?: boolean }) => Promise<{ success: boolean; error?: string }>
-      coverageRunCommand: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; key?: string; execs?: string[] }) => Promise<{ success: boolean; text?: string; outputs?: string[]; reportDir?: string; execs?: CoverageExecInfo[]; error?: string; stdout?: string; stderr?: string }>
+      coverageRunCommand: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; key?: string; execs?: string[] }) => Promise<{ success: boolean; text?: string; outputs?: string[]; reportDir?: string; hasHtml?: boolean; execs?: CoverageExecInfo[]; error?: string; stdout?: string; stderr?: string }>
       coverageCommandPreview: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
-      coverageReport: (opts: { backendId?: string; values?: Record<string, string>; execs: string[] }) => Promise<{ success: boolean; reportDir?: string; error?: string }>
+      coverageReport: (opts: { backendId?: string; values?: Record<string, string>; execs: string[] }) => Promise<{ success: boolean; reportDir?: string; hasHtml?: boolean; error?: string }>
       coverageMerge: (opts: { execs: string[]; destfile: string }) => Promise<{ success: boolean; file?: string; error?: string }>
       coverageExportReport: (opts: { reportDir: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
+      coverageOpenReport: (opts: { reportDir: string }) => Promise<{ success: boolean; error?: string }>
+      coverageDetectProject: (opts: { projectDir: string; classfilesRepo?: string }) => Promise<{ success: boolean; projectDir: string; classfilesPath: string; sourcefilesPath: string; classfiles?: CoveragePathProbe; sourcefiles?: CoveragePathProbe; classfilesCandidates: CoveragePathProbe[]; sourcefilesCandidates: CoveragePathProbe[]; warnings: string[]; error?: string }>
+      coverageCheckPath: (opts: { path: string; role: classfiles | sourcefiles; classfilesPath?: string }) => Promise<CoveragePathProbe>
     }
   }
 }

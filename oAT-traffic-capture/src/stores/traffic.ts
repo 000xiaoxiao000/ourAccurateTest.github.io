@@ -16,7 +16,9 @@ function defaultCoverageConfig(): CoverageConfig {
     headerName: 'X-Coverage-Key',
     agentAddress: '127.0.0.1:8899',
     backend: 'jacoco',
-    classfilesPath: ''
+    classfilesPath: '',
+    projectDir: '',
+    classfilesRepo: '/Users/xiaoxiao/oATagent/classfiles'
   }
 }
 

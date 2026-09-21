@@ -43,6 +43,6 @@ export function listBackends(): CoverageBackendInfo[] {
     description: b.description,
     collect: !!b.collect,
     params: b.params,
-    commands: b.commands.map((c) => ({ id: c.id, label: c.label, description: c.description, params: c.params }))
+    commands: b.commands.map((c) => ({ id: c.id, label: c.label, description: c.description, params: c.params, needs: c.needs }))
   }))
 }
