@@ -18,6 +18,61 @@ export interface TrafficRecord {
   replayTime?: number
   tags?: string[]
   websocketMessages?: WsMessage[]
+  coverageKey?: string
+}
+
+// ===== 覆盖率功能相关类型（与主进程共享） =====
+
+export type CoverageParamType = 'text' | 'path' | 'number' | 'boolean' | 'select'
+
+/** 后端插件暴露给 UI 的参数定义，驱动表单渲染与命令预览 */
+export interface CoverageParamSpec {
+  key: string
+  label: string
+  type: CoverageParamType
+  default?: string
+  required?: boolean
+  options?: string[]
+  placeholder?: string
+  help?: string
+  pick?: 'file' | 'dir'
+}
+
+export interface CoverageConfig {
+  enabled: boolean
+  key: string
+  headerName: string
+  agentAddress: string
+  backend: string
+  classfilesPath: string   // 本地路径（被插桩类的字节码目录），覆盖率分母；仅本地路径
+}
+
+export interface CoverageExecInfo {
+  file: string
+  key: string
+  size: number
+  fetchedAt: number
+  source: string
+}
+
+/** 后端插件暴露的一条 CLI 指令（全部指令 + 参数 UI 化的载体） */
+export interface CoverageCommandInfo {
+  id: string
+  label: string
+  description: string
+  params: CoverageParamSpec[]
+}
+
+export interface CoverageBackendInfo {
+  id: string
+  name: string
+  languages: string[]
+  status: 'builtin' | 'pending'
+  description: string
+  collect?: boolean
+  params: CoverageParamSpec[]
+  /** 该插件工具链的全部指令（每条指令带自己的参数 schema，UI 据此渲染） */
+  commands: CoverageCommandInfo[]
 }
 
 export interface CaptureProtocolConfig {

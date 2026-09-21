@@ -19,6 +19,70 @@ export interface TrafficRecord {
   replayTime?: number
   tags?: string[]
   websocketMessages?: WsMessage[]
+  /** 覆盖率采集：本次请求注入的 X-Coverage-Key 值（探针侧 headerkey 归因，零改业务代码） */
+  coverageKey?: string
+}
+
+// ===== 覆盖率功能相关类型 =====
+
+export type CoverageParamType = 'text' | 'path' | 'number' | 'boolean' | 'select'
+
+/** 后端插件暴露给 UI 的参数定义，驱动表单渲染与命令预览 */
+export interface CoverageParamSpec {
+  key: string
+  label: string
+  type: CoverageParamType
+  default?: string
+  required?: boolean
+  options?: string[]      // select 类型可选项
+  placeholder?: string
+  help?: string
+  pick?: 'file' | 'dir'   // path 类型：选文件还是目录
+}
+
+export interface CoverageConfig {
+  enabled: boolean
+  /** X-Coverage-Key 值：uuid 或拼音/英文用户名 */
+  key: string
+  /** 注入的请求头名，默认 X-Coverage-Key */
+  headerName: string
+  /** xiaoxiao-jacoco agent 的 tcpserver 地址 host:port（远程 dump，无需进容器） */
+  agentAddress: string
+  /** 选定的语言后端 id，如 jacoco / nyc / coverage-py / go-cov / gcov-lcov */
+  backend: string
+  /** classfiles（覆盖率分母）本地路径，仅本地路径 */
+  classfilesPath: string
+}
+
+export interface CoverageExecInfo {
+  file: string
+  key: string
+  size: number
+  fetchedAt: number
+  source: string
+}
+
+/** 后端插件暴露的一条 CLI 指令（全部指令 + 参数 UI 化的载体） */
+export interface CoverageCommandInfo {
+  id: string
+  label: string
+  description: string
+  params: CoverageParamSpec[]
+}
+
+export interface CoverageBackendInfo {
+  id: string
+  name: string
+  languages: string[]
+  status: 'builtin' | 'pending'
+  /** 后端说明 */
+  description: string
+  /** 是否需要抓取步骤（Java 有；其余语言采集在服务运行期完成） */
+  collect?: boolean
+  /** 暴露给 UI 的参数定义（驱动表单 + 命令预览） */
+  params: CoverageParamSpec[]
+  /** 该插件工具链的全部指令（每条指令带自己的参数 schema，UI 据此渲染） */
+  commands: CoverageCommandInfo[]
 }
 
 export interface ProxyStatus {

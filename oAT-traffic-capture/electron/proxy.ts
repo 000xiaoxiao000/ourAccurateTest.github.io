@@ -1,5 +1,5 @@
 import Proxy from 'http-mitm-proxy'
-import type { CaptureProtocolConfig, TrafficRecord, WsMessage } from './types.js'
+import type { CaptureProtocolConfig, CoverageConfig, TrafficRecord, WsMessage } from './types.js'
 
 const defaultProtocols: CaptureProtocolConfig = {
   http: true,
@@ -11,7 +11,8 @@ const defaultProtocols: CaptureProtocolConfig = {
 export function createProxyServer(
   onTraffic: (record: TrafficRecord) => void,
   sslCaDir?: string,
-  enabledProtocols: CaptureProtocolConfig = defaultProtocols
+  enabledProtocols: CaptureProtocolConfig = defaultProtocols,
+  coverage?: CoverageConfig
 ) {
   const proxyFactory = Proxy as unknown as () => any
   const proxy = proxyFactory()
@@ -72,7 +73,21 @@ export function createProxyServer(
     }
     const startTime = Date.now()
     const requestId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-    
+
+    // 覆盖率采集：仅在开启时注入 X-Coverage-Key 请求头（探针侧 headerkey 归因，零改业务代码）
+    // ⚠️ http-mitm-proxy 在调用 onRequest 回调【之前】就把 clientToProxyRequest.headers 浅拷贝成了
+    //    proxyToServerRequestOptions.headers（lib/proxy.js 构造上游请求用），改 clientToProxyRequest.headers
+    //    不会传到被测服务 —— 必须同时写 proxyToServerRequestOptions.headers 才真正生效。
+    let coverageKey: string | undefined
+    if (coverage?.enabled && coverage.headerName && coverage.key) {
+      ctx.clientToProxyRequest.headers[coverage.headerName] = coverage.key
+      if (ctx.proxyToServerRequestOptions?.headers) {
+        ctx.proxyToServerRequestOptions.headers[coverage.headerName] = coverage.key
+      }
+      coverageKey = coverage.key
+      console.info('[覆盖率] 注入 %s=%s → %s %s', coverage.headerName, coverage.key, ctx.clientToProxyRequest.method, ctx.clientToProxyRequest.url)
+    }
+
     const record: Partial<TrafficRecord> = {
       id: requestId,
       caseName: '',
@@ -81,7 +96,8 @@ export function createProxyServer(
       protocol: protocol.toUpperCase(),
       timestamp: Date.now(),
       requestHeaders: headerRecord(ctx.clientToProxyRequest.headers),
-      source: 'capture'
+      source: 'capture',
+      coverageKey
     }
 
     let requestBody = ''
@@ -133,6 +149,13 @@ export function createProxyServer(
       return
     }
     const req = ctx.clientToProxyWebSocket?.upgradeReq
+    if (coverage?.enabled && coverage.headerName && coverage.key && req?.headers) {
+      req.headers[coverage.headerName] = coverage.key
+      // 上游 WS 头同样是回调前就拷贝好的（ptosHeaders），必须写 options 才能传到服务端
+      if (ctx.proxyToServerWebSocketOptions?.headers) {
+        ctx.proxyToServerWebSocketOptions.headers[coverage.headerName] = coverage.key
+      }
+    }
     const record: TrafficRecord = {
       id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       caseName: '',
@@ -144,6 +167,7 @@ export function createProxyServer(
       timestamp: Date.now(),
       requestHeaders: headerRecord(req?.headers),
       source: 'capture',
+      coverageKey: coverage?.enabled && coverage.key ? coverage.key : undefined,
       websocketMessages: []
     }
     websocketRecords.set(ctx, record)

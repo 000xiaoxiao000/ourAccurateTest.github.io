@@ -6,6 +6,7 @@ import DetailModal from './components/DetailModal.vue'
 import FilterRulesPanel from './components/FilterRulesPanel.vue'
 import MqInputModal from './components/MqInputModal.vue'
 import PluginPanel from './components/PluginPanel.vue'
+import CoveragePanel from './components/CoveragePanel.vue'
 import ProxyControl from './components/ProxyControl.vue'
 import SessionHistory from './components/SessionHistory.vue'
 import TrafficStatsPanel from './components/TrafficStatsPanel.vue'
@@ -20,10 +21,14 @@ const selectedRecord = ref<TrafficRecord | null>(null)
 const proxyInfoVisible = ref(false)
 const selectedRecordIds = ref<string[]>([])
 const activePanel = ref<'none' | 'stats' | 'rules' | 'plugins'>('none')
-const activeSection = ref<'capture' | 'requests' | 'sessions' | 'settings'>('capture')
+const activeSection = ref<'capture' | 'requests' | 'sessions' | 'coverage' | 'settings'>('capture')
 const pluginsPath = ref('')
 const proxyPort = ref(8888)
 const runtimeLogs = ref<RuntimeLogEntry[]>([])
+const logLevelFilter = ref<'all' | 'debug' | 'info' | 'warn' | 'error'>('all')
+const filteredRuntimeLogs = computed(() =>
+  logLevelFilter.value === 'all' ? runtimeLogs.value : runtimeLogs.value.filter((e) => e.level === logLevelFilter.value)
+)
 const runtimeLogAutoScroll = ref(true)
 const runtimeLogBody = ref<HTMLElement | null>(null)
 const isFloatingMode = new URLSearchParams(window.location.search).get('floating') === '1'
@@ -32,6 +37,7 @@ const currentSectionTitle = computed(() => {
     capture: '采集工作台',
     requests: '请求记录',
     sessions: '会话管理',
+    coverage: '覆盖率分析',
     settings: '系统设置'
   }
   return titles[activeSection.value]
@@ -41,6 +47,7 @@ const currentSectionSubtitle = computed(() => {
     capture: '实时捕获并观察请求、状态和响应详情',
     requests: '按用例、协议、状态检索历史请求并执行重放或导出',
     sessions: '加载、删除和复用历史采集会话',
+    coverage: '多语言覆盖工具（前端 + 后端）：采集数据 → 原生报告 → 覆盖率视图',
     settings: '管理系统代理、证书、协议、过滤规则和插件'
   }
   return subtitles[activeSection.value]
@@ -62,6 +69,7 @@ onMounted(() => {
   })
   store.loadFilterRules()
   store.loadPlugins()
+  store.loadCoverageConfig()
   window.electronAPI?.getPluginsPath().then((path) => {
     pluginsPath.value = path ?? ''
   })
@@ -94,6 +102,10 @@ onUnmounted(() => {
   unsubscribeRuntimeLog?.()
   unsubscribeRuntimeLogClear?.()
 })
+
+async function generateCoverageKey() {
+  store.saveCoverageConfig({ key: (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10)) })
+}
 
 async function toggleCapture() {
   if (store.isCapturing) {
@@ -300,6 +312,7 @@ function handleFloatingClick() {
         <button type="button" :class="{ active: activeSection === 'capture' }" @click="selectSection('capture')">采集工作台</button>
         <button type="button" :class="{ active: activeSection === 'requests' }" @click="selectSection('requests')">请求记录</button>
         <button type="button" :class="{ active: activeSection === 'sessions' }" @click="selectSection('sessions')">会话管理</button>
+        <button type="button" :class="{ active: activeSection === 'coverage' }" @click="selectSection('coverage')">覆盖率分析</button>
         <button type="button" :class="{ active: activeSection === 'settings' }" @click="selectSection('settings')">系统设置</button>
       </nav>
       <div class="sidebar-status">
@@ -353,6 +366,32 @@ function handleFloatingClick() {
           <div v-if="proxyInfoVisible" class="proxy-tip">
             代理已启动在端口 <strong>{{ store.proxyPort }}</strong>，请配置 HTTP 代理为 <strong>127.0.0.1:{{ store.proxyPort }}</strong>
           </div>
+        </div>
+
+        <!-- 覆盖率采集配置：与代理同生命周期，开启代理即开启采集 -->
+        <div class="card">
+          <div class="card-head cov-head">
+            <h3>覆盖率采集 <span class="tag tag-blue">与代理同生命周期</span></h3>
+            <label class="cov-toggle" @click.prevent="store.saveCoverageConfig({ enabled: !store.coverageConfig.enabled })">
+              <span class="switch" :class="{ on: store.coverageConfig.enabled }"></span>
+              <b>{{ store.coverageConfig.enabled ? '已开启：代理注入 ' + store.coverageConfig.headerName : '已关闭：代理不注入请求头' }}</b>
+            </label>
+            <span class="muted">开启代理 = 开启采集；探针适应被测系统，不改动业务代码</span>
+          </div>
+          <div class="control-row" :class="{ 'cov-off': !store.coverageConfig.enabled }" style="margin-bottom:14px">
+            <label class="input-group"><span>X-Coverage-Key（本用例归属标识）</span>
+              <div style="display:flex;gap:8px">
+                <input :value="store.coverageConfig.key" placeholder="uuid 或拼音/英文用户名" style="min-width:220px" @input="store.saveCoverageConfig({ key: ($event.target as HTMLInputElement).value })" />
+                <button class="btn btn-outline btn-sm" @click="generateCoverageKey">自动生成</button>
+              </div>
+            </label>
+            <label class="input-group"><span>请求头名（可配置）</span><input :value="store.coverageConfig.headerName" style="min-width:160px" @input="store.saveCoverageConfig({ headerName: ($event.target as HTMLInputElement).value })" /></label>
+          </div>
+          <p class="muted" style="margin:6px 0 0;font-size:12px" v-if="store.coverageConfig.enabled">
+            只有经过 oAT 代理（127.0.0.1:{{ store.proxyPort }}）的请求才会注入 {{ store.coverageConfig.headerName }}；
+            直连被测系统的请求（如 xxl-job 执行器心跳/回调、未走代理的访问）不携带该头，探针会丢弃（属正常现象）。
+            Agent 挂载参数与远程 dump 见「覆盖率分析」页。
+          </p>
         </div>
 
         <div class="metric-grid">
@@ -447,6 +486,10 @@ function handleFloatingClick() {
         <SessionHistory @load="handleLoadSession" />
       </section>
 
+      <section v-else-if="activeSection === 'coverage'" class="page-content single-column">
+        <CoveragePanel />
+      </section>
+
       <section v-else class="page-content single-column settings-content">
         <section class="panel settings-panel">
           <div class="panel-header">
@@ -501,6 +544,13 @@ function handleFloatingClick() {
           <header class="runtime-log-header">
             <h2>运行日志</h2>
             <div class="runtime-log-actions">
+              <select v-model="logLevelFilter" class="btn btn-outline runtime-log-filter" style="appearance:auto">
+                <option value="all">全部级别</option>
+                <option value="debug">DEBUG</option>
+                <option value="info">INFO</option>
+                <option value="warn">WARN</option>
+                <option value="error">ERROR</option>
+              </select>
               <button class="btn btn-outline" type="button" @click="clearRuntimeLogs">清空</button>
               <button class="btn btn-outline" type="button" @click="runtimeLogAutoScroll = !runtimeLogAutoScroll">
                 {{ runtimeLogAutoScroll ? '暂停滚动' : '继续滚动' }}
@@ -510,8 +560,9 @@ function handleFloatingClick() {
           </header>
           <div ref="runtimeLogBody" class="runtime-log-body">
             <div v-if="runtimeLogs.length === 0" class="runtime-log-empty">暂无运行日志</div>
+            <div v-if="runtimeLogs.length > 0 && filteredRuntimeLogs.length === 0" class="runtime-log-empty">该级别暂无日志</div>
             <div
-              v-for="entry in runtimeLogs"
+              v-for="entry in filteredRuntimeLogs"
               :key="entry.id"
               class="runtime-log-line"
               :class="entry.level"
@@ -1278,4 +1329,15 @@ button.metric-card {
   }
 }
 
+
+/* 覆盖率采集开关（App.vue 之前缺少 .switch 样式，开关从未渲染） */
+.cov-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.cov-head .muted { flex: 1; min-width: 200px; text-align: right; }
+.cov-toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #33404d; white-space: nowrap; }
+.cov-toggle b { font-weight: 600; }
+.cov-toggle .switch { position: relative; display: inline-block; width: 40px; height: 22px; border-radius: 11px; background: #cbd5e1; transition: background .2s; flex-shrink: 0; cursor: pointer; }
+.cov-toggle .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .2s; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
+.cov-toggle .switch.on { background: #16a34a; }
+.cov-toggle .switch.on::after { left: 21px; }
+.cov-off { opacity: .55; }
 </style>

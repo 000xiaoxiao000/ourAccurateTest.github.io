@@ -1,4 +1,13 @@
-import type { BuiltinPluginId, PluginInfo, ReplayResult, TrafficFilterRule, TrafficRecord } from '../types/traffic'
+import type {
+  BuiltinPluginId,
+  CoverageBackendInfo,
+  CoverageConfig,
+  CoverageExecInfo,
+  PluginInfo,
+  ReplayResult,
+  TrafficFilterRule,
+  TrafficRecord
+} from '../types/traffic'
 
 export interface CaptureProtocolConfig {
   http: boolean
@@ -19,7 +28,7 @@ declare global {
     electronAPI: {
       startCapture: (caseName: string) => Promise<{ success: boolean; port?: number; error?: string }>
       stopCapture: () => Promise<{ success: boolean }>
-      getCaptureState: () => Promise<{ isCapturing: boolean; caseName: string; port: number; recordCount: number; protocols?: CaptureProtocolConfig }>
+      getCaptureState: () => Promise<{ isCapturing: boolean; caseName: string; port: number; recordCount: number; protocols?: CaptureProtocolConfig; coverage: CoverageConfig }>
       getRuntimeLogs: () => Promise<RuntimeLogEntry[]>
       clearRuntimeLogs: () => Promise<{ success: boolean }>
       onRuntimeLogAppended: (callback: (entry: RuntimeLogEntry) => void) => () => void
@@ -35,7 +44,7 @@ declare global {
       replayRecords: (records: TrafficRecord[]) => Promise<ReplayResult[]>
       exportRecords: (format: string, records: TrafficRecord[]) => Promise<{ success: boolean; filePath?: string }>
       onTrafficCaptured: (callback: (record: TrafficRecord) => void) => void
-      onCaptureStateChanged: (callback: (state: { isCapturing: boolean; caseName: string; port: number; recordCount: number; protocols?: CaptureProtocolConfig }) => void) => void
+      onCaptureStateChanged: (callback: (state: { isCapturing: boolean; caseName: string; port: number; recordCount: number; protocols?: CaptureProtocolConfig; coverage: CoverageConfig }) => void) => void
       getProxyStatus: () => Promise<{ enabled: boolean; port?: number; protocols?: CaptureProtocolConfig }>
       enableSystemProxy: (port: number, protocols: CaptureProtocolConfig) => Promise<{ success: boolean; error?: string }>
       disableSystemProxy: () => Promise<{ success: boolean; error?: string }>
@@ -70,6 +79,23 @@ declare global {
       uninstallBuiltinPlugin: () => Promise<PluginInfo[]>
       uninstallPlugin: (pluginId: string) => Promise<PluginInfo[]>
       setProxyPort: (port: number) => Promise<{ proxyPort: number }>
+      // ===== 覆盖率功能 IPC =====
+      getCoverageConfig: () => Promise<CoverageConfig>
+      setCoverageConfig: (config: CoverageConfig) => Promise<{ success: boolean }>
+      listCoverageBackends: () => Promise<CoverageBackendInfo[]>
+      resolveClassfiles: (localPath: string) => Promise<{ success: boolean; resolvedPath?: string; error?: string }>
+      coverageDump: (opts: { backendId?: string; values?: Record<string, string>; key?: string }) => Promise<{ success: boolean; execs?: CoverageExecInfo[]; error?: string }>
+      coveragePreview: (opts: { backendId?: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
+      coveragePickPath: (opts: { pick?: 'file' | 'dir'; title?: string }) => Promise<{ success: boolean; path?: string }>
+      coverageKeys: () => Promise<{ success: boolean; keys?: string[]; error?: string }>
+      coverageStats: (opts: { limit?: number }) => Promise<{ success: boolean; text?: string; error?: string }>
+      coverageDumpclasses: (opts: { zip?: string }) => Promise<{ success: boolean; file?: string; error?: string }>
+      coverageSetkey: (opts: { key?: string; clear?: boolean }) => Promise<{ success: boolean; error?: string }>
+      coverageRunCommand: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; key?: string; execs?: string[] }) => Promise<{ success: boolean; text?: string; outputs?: string[]; reportDir?: string; execs?: CoverageExecInfo[]; error?: string; stdout?: string; stderr?: string }>
+      coverageCommandPreview: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
+      coverageReport: (opts: { backendId?: string; values?: Record<string, string>; execs: string[] }) => Promise<{ success: boolean; reportDir?: string; error?: string }>
+      coverageMerge: (opts: { execs: string[]; destfile: string }) => Promise<{ success: boolean; file?: string; error?: string }>
+      coverageExportReport: (opts: { reportDir: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
     }
   }
 }

@@ -1,6 +1,24 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { BuiltinPluginId, PluginInfo, TrafficFilterRule, TrafficRecord } from '../types/traffic'
+import type {
+  BuiltinPluginId,
+  CoverageBackendInfo,
+  CoverageConfig,
+  PluginInfo,
+  TrafficFilterRule,
+  TrafficRecord
+} from '../types/traffic'
+
+function defaultCoverageConfig(): CoverageConfig {
+  return {
+    enabled: false,
+    key: '',
+    headerName: 'X-Coverage-Key',
+    agentAddress: '127.0.0.1:8899',
+    backend: 'jacoco',
+    classfilesPath: ''
+  }
+}
 
 export const useTrafficStore = defineStore('traffic', () => {
   const records = ref<TrafficRecord[]>([])
@@ -12,6 +30,8 @@ export const useTrafficStore = defineStore('traffic', () => {
   const capturedCount = ref(0)
   const filterRules = ref<TrafficFilterRule[]>([])
   const plugins = ref<PluginInfo[]>([])
+  const coverageConfig = ref<CoverageConfig>(defaultCoverageConfig())
+  const coverageBackends = ref<CoverageBackendInfo[]>([])
 
   function isSuccessRecord(record: TrafficRecord): boolean {
     const code = Number(record.statusCode)
@@ -167,7 +187,7 @@ export const useTrafficStore = defineStore('traffic', () => {
     isCapturing.value = false
   }
 
-  function syncCaptureState(state: { isCapturing: boolean; caseName: string; port: number; recordCount?: number }) {
+  function syncCaptureState(state: { isCapturing: boolean; caseName: string; port: number; recordCount?: number; coverage?: CoverageConfig }) {
     isCapturing.value = state.isCapturing
     proxyPort.value = state.port
     if (typeof state.recordCount === 'number') {
@@ -176,6 +196,25 @@ export const useTrafficStore = defineStore('traffic', () => {
     if (state.caseName) {
       currentCaseName.value = state.caseName
     }
+    // 覆盖率配置以渲染端为唯一数据源（loadCoverageConfig 初始化 + saveCoverageConfig 保存）。
+    // 这里不回写 state.coverage：否则每次保存触发的广播会在连续输入时用旧值覆盖正在编辑的字段。
+  }
+
+  async function loadCoverageConfig() {
+    const cfg = await window.electronAPI?.getCoverageConfig()
+    if (cfg) coverageConfig.value = { ...defaultCoverageConfig(), ...cfg }
+    return coverageConfig.value
+  }
+
+  async function saveCoverageConfig(partial?: Partial<CoverageConfig>) {
+    if (partial) coverageConfig.value = { ...coverageConfig.value, ...partial }
+    await window.electronAPI?.setCoverageConfig(JSON.parse(JSON.stringify(coverageConfig.value)))
+    return coverageConfig.value
+  }
+
+  async function loadCoverageBackends() {
+    coverageBackends.value = await window.electronAPI?.listCoverageBackends() ?? []
+    return coverageBackends.value
   }
 
   return {
@@ -188,6 +227,8 @@ export const useTrafficStore = defineStore('traffic', () => {
     capturedCount,
     filterRules,
     plugins,
+    coverageConfig,
+    coverageBackends,
     filteredRecords,
     stats,
     chartStats,
@@ -208,6 +249,9 @@ export const useTrafficStore = defineStore('traffic', () => {
     saveProxyPort,
     startCapture,
     stopCapture,
-    syncCaptureState
+    syncCaptureState,
+    loadCoverageConfig,
+    saveCoverageConfig,
+    loadCoverageBackends
   }
 })

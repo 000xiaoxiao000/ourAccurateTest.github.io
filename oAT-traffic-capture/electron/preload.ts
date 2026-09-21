@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { TrafficFilterRule, TrafficRecord } from './types.js'
+import type { CoverageConfig, TrafficFilterRule, TrafficRecord } from './types.js'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   startCapture: (caseName: string) => ipcRenderer.invoke('start-capture', caseName),
@@ -57,5 +57,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
   installBuiltinPlugin: (pluginId?: 'traffic-cleanup-plugin' | 'all') => ipcRenderer.invoke('install-builtin-plugin', pluginId),
   uninstallBuiltinPlugin: () => ipcRenderer.invoke('uninstall-builtin-plugin'),
   uninstallPlugin: (pluginId: string) => ipcRenderer.invoke('uninstall-plugin', pluginId),
-  setProxyPort: (port: number) => ipcRenderer.invoke('set-proxy-port', port)
+  setProxyPort: (port: number) => ipcRenderer.invoke('set-proxy-port', port),
+  // ===== 覆盖率功能 IPC =====
+  getCoverageConfig: () => ipcRenderer.invoke('get-coverage-config'),
+  setCoverageConfig: (config: CoverageConfig) => ipcRenderer.invoke('set-coverage-config', config),
+  listCoverageBackends: () => ipcRenderer.invoke('list-coverage-backends'),
+  resolveClassfiles: (localPath: string) => ipcRenderer.invoke('resolve-classfiles', localPath),
+  coverageDump: (opts: any) => ipcRenderer.invoke('coverage-dump', opts),
+  coveragePreview: (opts: any) => ipcRenderer.invoke('coverage-preview', opts),
+  coveragePickPath: (opts: any) => ipcRenderer.invoke('coverage-pick-path', opts),
+  coverageKeys: () => ipcRenderer.invoke('coverage-keys'),
+  coverageStats: (opts: any) => ipcRenderer.invoke('coverage-stats', opts),
+  coverageDumpclasses: (opts: any) => ipcRenderer.invoke('coverage-dumpclasses', opts),
+  coverageSetkey: (opts: any) => ipcRenderer.invoke('coverage-setkey', opts),
+  coverageRunCommand: (opts: any) => ipcRenderer.invoke('coverage-run-command', opts),
+  coverageCommandPreview: (opts: any) => ipcRenderer.invoke('coverage-command-preview', opts),
+  coverageReport: (opts: any) => ipcRenderer.invoke('coverage-report', opts),
+  coverageMerge: (opts: any) => ipcRenderer.invoke('coverage-merge', opts),
+  coverageExportReport: (opts: any) => ipcRenderer.invoke('coverage-export-report', opts)
 })

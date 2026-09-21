@@ -7,7 +7,7 @@
   "scripts": {
     "dev:vite": "vite",
     "dev:electron": "cross-env NODE_ENV=development node scripts/run-electron.cjs .",
-    "build:electron": "tsc -p tsconfig.electron.json && cp electron/preload.cjs dist-electron/preload.cjs",
+    "build:electron": "tsc -p tsconfig.electron.json && node_modules/.bin/esbuild electron/preload.ts --bundle --platform=node --format=cjs --external:electron --outfile=dist-electron/preload.cjs",
     "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on tcp:5173 && cross-env NODE_ENV=development node scripts/run-electron.cjs .\"",
     "build": "vue-tsc --noEmit && vite build && npm run build:electron",
     "start": "npm run build && node scripts/run-electron.cjs .",
@@ -56,7 +56,9 @@
       {
         "from": "resources/",
         "to": "resources/",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
