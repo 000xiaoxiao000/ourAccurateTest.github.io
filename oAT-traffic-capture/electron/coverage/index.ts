@@ -7,6 +7,7 @@ import type { CoverageConfig, CoverageExecInfo } from '../types.js'
 import { fileSize, runJacocoCli } from './cliRunner.js'
 import { resolveClassfiles } from './classfiles.js'
 import { buildRuntimeEnv, getBackend } from './backends.js'
+import { injectReportI18n } from './reportI18n.js'
 import { fmtStep } from './lang/types.js'
 import type { RunStep } from './lang/types.js'
 export { checkPath } from './projectDetect.js'
@@ -207,7 +208,9 @@ export async function generateReport(config: CoverageConfig, backendId: string, 
     return { success: false, error: '报告目录未生成: ' + plan.reportDir + '（请确认勾选了 HTML 报告，或查看指令输出排查）' }
   }
   console.info('[覆盖率] 报告生成完成: %s', plan.reportDir)
-  return { success: true, reportDir: plan.reportDir, hasHtml: fs.existsSync(path.join(plan.reportDir, 'index.html')) }
+  const hasHtml = fs.existsSync(path.join(plan.reportDir, 'index.html'))
+  if (hasHtml) injectReportI18n(plan.reportDir)
+  return { success: true, reportDir: plan.reportDir, hasHtml }
 }
 
 // ===== 以下为 xiaoxiao-jacoco-cli 直接命令（Java 后端辅助能力） =====

@@ -1,8 +1,8 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
 import path from 'path'
 import util from 'util'
 import fs from 'fs'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { createProxyServer } from './proxy.js'
 import { disableSystemProxy, enableSystemProxy, getSystemProxyStatus } from './systemProxy.js'
 import { generateRootCert, getCertInfo, getProxyCaDir, installCertMacOS, openCertFolder, uninstallCertMacOS } from './certificate.js'
@@ -314,9 +314,32 @@ function restoreMainWindow() {
   floatingWindow?.close()
 }
 
+// ===== oat-report:// 协议：把本地 JaCoCo 报告文件流进 iframe =====
+// 背景：dev 下页面从 http://localhost:5173 加载，http 父页的 iframe 加载 file:// 会被 webSecurity 拦成白屏；
+// 注册自定义协议后 iframe 用 oat-report://local/<绝对路径> 即可正常渲染（dev 与打包后都一致）。
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'oat-report', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+])
+
+function registerReportProtocol() {
+  protocol.handle('oat-report', (request) => {
+    try {
+      // oat-report://local/Users/xxx/report/index.html → /Users/xxx/report/index.html
+      const u = new URL(request.url)
+      if (u.host !== 'local') return new Response('bad host', { status: 400 })
+      const filePath = decodeURIComponent(u.pathname)
+      if (!path.isAbsolute(filePath) || filePath.includes('\0')) return new Response('bad path', { status: 400 })
+      return net.fetch(pathToFileURL(filePath).toString())
+    } catch (e: any) {
+      return new Response('oat-report error: ' + (e?.message ?? e), { status: 500 })
+    }
+  })
+}
+
 app.whenReady().then(async () => {
   installRuntimeLogCapture()
   initDatabase()
+  registerReportProtocol()
   filterRules = listFilterRules()
   loadCaptureConfig()
   await loadPlugins()

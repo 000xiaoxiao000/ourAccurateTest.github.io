@@ -9,6 +9,11 @@ const execs = ref<CoverageExecInfo[]>([])
 const backendId = ref(store.coverageConfig.backend || 'jacoco')
 const reportUrl = ref('')
 const reportDir = ref('')
+
+/** 报告目录 → URL 路径：/Users/xx/a b/ → /Users/xx/a%20b/（保留开头 /，逐段编码防 # ? 破坏 URL） */
+function reportDirToUrlPath(dir: string): string {
+  return dir.split('/').map(encodeURIComponent).join('/')
+}
 const msg = ref('')
 
 // ===== 指令级 UI 状态：每个后端(插件)声明全部指令，每条指令有自己的参数 schema / 真实命令 / 可执行 =====
@@ -29,8 +34,13 @@ const activeCommand = computed(() => selectedBackend.value?.commands.find((c) =>
 const commandValuesMap = ref<Record<string, Record<string, string>>>({})
 const commandValues = computed(() => commandValuesMap.value[activeCommandId.value] ?? {})
 const commandPreviewText = ref('')
-const commandOutput = ref('')
+// 执行结果按指令各存一份：切到别的指令时显示各自的（或空），不残留上一个指令的结果
+const outputMap = ref<Record<string, string>>({})
+const cmdOutput = computed(() => outputMap.value[activeCommandId.value] ?? '')
+function setCmdOutput(text: string) { outputMap.value[activeCommandId.value] = text }
+function clearCmdOutput() { outputMap.value[activeCommandId.value] = '' }
 const copied = ref(false)
+const copiedOut = ref(false)
 const busyCmd = ref(false)
 const cfProbe = ref<CoveragePathProbe | null>(null)
 const srcProbe = ref<CoveragePathProbe | null>(null)
@@ -87,7 +97,6 @@ async function refreshCommandPreview() {
 
 function selectCommand(id: string) {
   activeCommandId.value = id
-  commandOutput.value = ''
   refreshCommandPreview()
 }
 
@@ -107,12 +116,15 @@ async function runCoverageCommand() {
     busyCmd.value = false
   }
   if (r?.success) {
-    commandOutput.value = r.text ?? '(无标准输出)'
+    setCmdOutput('✓ 执行成功\n\n' + (r.text ?? '(无标准输出)'))
     for (const e of r.execs ?? []) if (!execs.value.find((x) => x.file === e.file)) execs.value.push(e)
-    if (r.reportDir) { reportDir.value = r.reportDir; reportUrl.value = r.hasHtml === false ? '' : 'file://' + r.reportDir + '/index.html' }
-    msg.value = '指令执行完成'
+    if (r.reportDir) {
+      reportDir.value = r.reportDir
+      // http/file 父页面的 iframe 加载 file:// 都会被拦成白屏，统一走 oat-report:// 自定义协议（主进程注册）
+      reportUrl.value = r.hasHtml === false ? '' : 'oat-report://local' + reportDirToUrlPath(r.reportDir) + '/index.html'
+    }
   } else {
-    commandOutput.value = ((r?.stdout || r?.stderr || '') + '\n✗ ' + (r?.error ?? '执行失败')).trim()
+    setCmdOutput(((r?.stdout || r?.stderr || '') + '\n✗ ' + (r?.error ?? '执行失败')).trim())
   }
 }
 
@@ -199,10 +211,9 @@ function fmtSize(n: number): string {
   return (n / 1024 / 1024).toFixed(2) + ' MB'
 }
 
-/** 复制真实命令预览到剪贴板（clipboard API 不可用时回退 execCommand） */
-async function copyPreview() {
-  const text = commandPreviewText.value || ''
-  if (!text) return
+/** 复制文本到剪贴板（clipboard API 不可用时回退 execCommand），返回是否成功 */
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (!text) return false
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text)
@@ -216,11 +227,23 @@ async function copyPreview() {
       document.execCommand('copy')
       document.body.removeChild(ta)
     }
-    copied.value = true
-    setTimeout(() => { copied.value = false }, 1500)
+    return true
   } catch {
-    msg.value = '复制失败，请手动选择文本复制'
+    return false
   }
+}
+
+async function copyPreview() {
+  if (!(await copyToClipboard(commandPreviewText.value))) { msg.value = '复制失败，请手动选择文本复制'; return }
+  copied.value = true
+  setTimeout(() => { copied.value = false }, 1500)
+}
+
+/** 复制执行结果 */
+async function copyOutput() {
+  if (!(await copyToClipboard(cmdOutput.value))) { msg.value = '复制失败，请手动选择文本复制'; return }
+  copiedOut.value = true
+  setTimeout(() => { copiedOut.value = false }, 1500)
 }
 
 onMounted(refreshBackends)
@@ -323,7 +346,16 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
         <div class="control-row" style="margin-top:12px">
           <button class="btn btn-primary" :disabled="busyCmd" @click="runCoverageCommand">{{ busyCmd ? '执行中…' : '执行该指令' }}</button>
         </div>
-        <pre v-if="commandOutput" class="code-block" style="margin-top:12px; max-height:260px; overflow:auto">{{ commandOutput }}</pre>
+        <div v-if="cmdOutput" class="cmd-output">
+          <div class="co-head">
+            <span>执行结果</span>
+            <span style="display:flex; align-items:center; gap:4px">
+              <button class="co-close" title="复制结果" @click="copyOutput">{{ copiedOut ? '已复制 ✓' : '复制' }}</button>
+              <button class="co-close" title="关闭" @click="clearCmdOutput">✕</button>
+            </span>
+          </div>
+          <pre class="code-block" style="margin:0; max-height:260px; overflow:auto">{{ cmdOutput }}</pre>
+        </div>
 
         <!-- 产出：dump 抓到的 .exec 列表（jacoco） -->
         <div v-if="selectedBackend.id === 'jacoco'" style="margin-top:16px">
@@ -346,7 +378,8 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       </div>
     </div>
 
-    <div class="card" v-if="reportDir">
+    <!-- 报告卡跟随所属指令：只在 report 生成报告下显示 -->
+    <div class="card" v-if="reportDir && activeCommandId === 'report'">
       <div class="card-head">
         <h3>覆盖率报告（原生生成）</h3>
         <div class="btn-group">
@@ -354,12 +387,30 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
           <button class="btn btn-outline btn-sm" @click="openReport">新窗口打开</button>
         </div>
       </div>
+      <!-- 列头图例：Missed=未测到的数量，Cov.=覆盖率，Cxty=圈复杂度 -->
+      <details class="legend">
+        <summary>列头说明 <em>Missed=未测到的数量 · Cov.=覆盖率 · Cxty=圈复杂度</em></summary>
+        <div class="legend-grid">
+          <div><b>元素 / Element</b>：一行 = 一个类 / 包，类名可点进方法级明细</div>
+          <div><b>未覆盖指令 · 覆盖 / Missed Instructions · Cov.</b>：没执行到的字节码指令数 / 指令覆盖率%（最核心指标）</div>
+          <div><b>未覆盖分支 · 覆盖 / Missed Branches · Cov.</b>：if、switch 等分支没走到的数量 / 分支覆盖率%</div>
+          <div><b>未覆盖 · 复杂度 / Missed · Cxty</b>：圈复杂度＝代码路径数量，越大越难测全</div>
+          <div><b>行 / 方法 / 类</b>：各自的「未覆盖数 · 总数」</div>
+          <div><b>总计 / Total</b>：全报告汇总</div>
+        </div>
+      </details>
       <iframe v-if="reportUrl" :src="reportUrl" class="report-iframe"></iframe>
-      <p v-else class="muted">报告目录：{{ reportDir }}（当前环境下以原生文件打开）</p>
+      <div v-else class="report-empty">
+        <p class="re-title">报告已在「{{ reportDir }}」</p>
+        <p class="re-sub">本次生成未勾选 HTML（无 index.html 可预览），可勾选 HTML 后重新生成，或用「新窗口打开」查看</p>
+      </div>
     </div>
 
     <div class="card" v-if="msg">
-      <pre class="msg-box">{{ msg }}</pre>
+      <div class="msg-row">
+        <pre class="msg-box">{{ msg }}</pre>
+        <button class="co-close" title="关闭" @click="msg = ''">✕</button>
+      </div>
     </div>
   </div>
 </template>
@@ -397,7 +448,24 @@ table.data td { padding: 9px 14px; border-bottom: 1px solid #f1f5f9; color: #334
 table.data tr:last-child td { border-bottom: none; }
 
 .report-iframe { width: 100%; height: 520px; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
+/* 列头图例条 */
+.legend { margin-bottom: 8px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc; font-size: 12.5px; }
+.legend summary { cursor: pointer; padding: 6px 12px; color: #334155; user-select: none; }
+.legend summary em { font-style: normal; color: #94a3b8; margin-left: 6px; }
+.legend[open] summary { border-bottom: 1px solid #eef2f7; }
+.legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 4px 16px; padding: 8px 12px; color: #475569; }
+.legend-grid b { font-weight: 600; color: #1e293b; }
+.report-empty { height: 520px; border: 1px dashed #cbd5e1; border-radius: 10px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: #f8fafc; }
+.report-empty .re-title { font-weight: 600; color: #334155; margin: 0; }
+.report-empty .re-sub { color: #64748b; font-size: 12.5px; margin: 0; max-width: 80%; text-align: center; }
 .msg-box { white-space: pre-wrap; font-size: 12px; color: #334155; font-family: ui-monospace, Menlo, monospace; margin: 0; }
+/* 执行结果块与提示卡的可关闭头部 */
+.cmd-output { margin-top: 12px; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.co-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #f8fafc; border-bottom: 1px solid #eef2f7; font-size: 12.5px; font-weight: 600; color: #475569; }
+.msg-row { display: flex; align-items: flex-start; gap: 10px; }
+.msg-row .msg-box { flex: 1; }
+.co-close { border: none; background: transparent; color: #94a3b8; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.co-close:hover { color: #334155; background: #eef2f7; }
 .plugin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .plugin-card { background: #fff; border: 1px solid #eef1f5; border-radius: 12px; padding: 16px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
 .plugin-card:hover { border-color: #cbd5e1; }

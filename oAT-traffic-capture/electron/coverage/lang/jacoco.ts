@@ -126,6 +126,23 @@ export const jacocoBackend: CoverageBackend = {
   // ===== xiaoxiao-jacoco-cli 全部 12 条指令（与 cli 子命令一一对应，参数 UI 化） =====
   commands: [
     {
+      id: 'dumpclasses',
+      needs: ['agent'],
+      label: 'dumpclasses · 拉字节码',
+      description: '从运行 agent 拉取被插桩类原始字节码 zip（classfiles 缺失/不一致时用）',
+      params: [
+        { key: 'zipDir', label: '输出目录', type: 'path', pick: 'dir', default: '', help: '选目录则 zip 落到 <该目录>/<输出 zip 文件名>' },
+        { key: 'zip', label: '输出 zip 文件名', type: 'text', default: 'classfiles.zip', placeholder: 'classfiles.zip', help: '文件名或绝对路径；仅填文件名且未选目录时输出到 <应用数据>/oat-coverage/execs/' }
+      ],
+      build(values, env, ctx) {
+        const { host, port } = agentHostPort(ctx.agentAddress)
+        const zip = asStr(values.zip) || 'classfiles.zip'
+        const zipDir = asStr(values.zipDir)
+        const zipAbs = zipDir ? path.join(zipDir, path.basename(zip)) : (path.isAbsolute(zip) ? zip : path.join(ctx.workdir, zip))
+        return [cliStep(env, ['dumpclasses', '--address', host, '--port', port, '--zip', zipAbs], '拉取被插桩类原始字节码')]
+      }
+    },
+    {
       id: 'dump',
       needs: ['agent'],
       label: 'dump · 抓取 .exec',
@@ -196,23 +213,6 @@ export const jacocoBackend: CoverageBackend = {
         const limit = asStr(values.limit)
         if (limit) args.push('--limit', limit)
         return [cliStep(env, args, '查询插桩统计')]
-      }
-    },
-    {
-      id: 'dumpclasses',
-      needs: ['agent'],
-      label: 'dumpclasses · 拉字节码',
-      description: '从运行 agent 拉取被插桩类原始字节码 zip（classfiles 缺失/不一致时用）',
-      params: [
-        { key: 'zipDir', label: '输出目录', type: 'path', pick: 'dir', default: '', help: '选目录则 zip 落到 <该目录>/<输出 zip 文件名>' },
-        { key: 'zip', label: '输出 zip 文件名', type: 'text', default: 'classfiles.zip', placeholder: 'classfiles.zip', help: '文件名或绝对路径；仅填文件名且未选目录时输出到 <应用数据>/oat-coverage/execs/' }
-      ],
-      build(values, env, ctx) {
-        const { host, port } = agentHostPort(ctx.agentAddress)
-        const zip = asStr(values.zip) || 'classfiles.zip'
-        const zipDir = asStr(values.zipDir)
-        const zipAbs = zipDir ? path.join(zipDir, path.basename(zip)) : (path.isAbsolute(zip) ? zip : path.join(ctx.workdir, zip))
-        return [cliStep(env, ['dumpclasses', '--address', host, '--port', port, '--zip', zipAbs], '拉取被插桩类原始字节码')]
       }
     },
     {
