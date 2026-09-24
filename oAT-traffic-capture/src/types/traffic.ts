@@ -37,7 +37,8 @@ export interface CoverageParamSpec {
   options?: string[]      // select 类型可选项
   placeholder?: string
   help?: string
-  pick?: 'file' | 'dir'   // path 类型：选文件还是目录
+  /** path 类型：选文件 / 目录 / 目录或归档 / 目录或 Git 仓库（dirOrGit 触发「Git 拉取」面板） */
+  pick?: 'file' | 'dir' | 'dirOrFile' | 'dirOrGit'
   /** 条件显示：仅当另一参数等于指定值时才在 UI 展示 */
   showWhen?: { key: string; value: string }
 }

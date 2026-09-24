@@ -47,3 +47,11 @@ textarea:focus {
 ::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
 }
+
+/* ===== 通用按钮（全局：CoveragePanel / GitSourcePanel / 弹窗等共用同一套外观） ===== */
+.btn { border: 1px solid transparent; border-radius: 8px; padding: 7px 14px; font-size: 13px; transition: all .15s; cursor: pointer; }
+.btn-primary { background: #2563eb; color: #fff; } .btn-primary:hover { background: #1d4ed8; }
+.btn-primary:disabled, .btn-outline:disabled { opacity: .5; cursor: not-allowed; }
+.btn-outline { background: #fff; color: #334155; border-color: #cbd5e1; } .btn-outline:hover { border-color: #2563eb; color: #2563eb; }
+.btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }

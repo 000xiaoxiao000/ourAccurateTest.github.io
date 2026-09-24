@@ -18,6 +18,92 @@ export interface CoveragePathProbe {
   note: string
 }
 
+// ===== Git 源码供给（增量报告的源码输入） =====
+export interface GitCapability {
+  available: boolean
+  bin?: string
+  version?: string
+  sparseOk: boolean
+  worktreeOk: boolean
+  reason?: string
+  installHint?: string
+}
+
+export interface GitCredentials {
+  mode: 'system' | 'password' | 'token' | 'ssh'
+  username?: string
+  secret?: string
+  sshKeyPath?: string
+  allowInsecureSsl?: boolean
+  caFilePath?: string
+}
+
+export interface GitRefItem {
+  name: string
+  sha?: string
+  remote?: boolean
+}
+
+export interface GitCommit {
+  sha: string
+  shortSha: string
+  author: string
+  date: string
+  message: string
+  refs?: string[]
+}
+
+export interface GitRefQuery {
+  source: 'local' | 'remote'
+  repoPath?: string
+  url?: string
+  credentials?: GitCredentials
+  ref?: string
+  limit?: number
+  keyword?: string
+}
+
+export interface GitPrepareRequest {
+  mode: 'local' | 'remote' | 'archive'
+  repoPath?: string
+  url?: string
+  newRef?: string
+  oldRef?: string
+  credentials?: GitCredentials
+  archivePath?: string
+  label?: string
+  /** 检出落点：留空 = 应用缓存目录；填了就检到该目录（必须为空目录） */
+  outDir?: string
+}
+
+export interface GitPrepareResult {
+  success: boolean
+  newSourceRoot?: string
+  oldSourceRoot?: string
+  resolvedNewRef?: string
+  resolvedOldRef?: string
+  reused?: boolean
+  warnings: string[]
+  error?: string
+  errorKind?: 'auth' | 'network' | 'notfound' | 'nogit' | 'io'
+}
+
+export interface GitRefsResult {
+  success: boolean
+  branches: GitRefItem[]
+  tags: GitRefItem[]
+  error?: string
+  errorKind?: 'auth' | 'network' | 'notfound' | 'nogit' | 'io'
+}
+
+export interface GitCommitsResult {
+  success: boolean
+  commits: GitCommit[]
+  truncated: boolean
+  error?: string
+  errorKind?: 'auth' | 'network' | 'notfound' | 'nogit' | 'io'
+}
+
 export interface CaptureProtocolConfig {
   http: boolean
   https: boolean
@@ -107,6 +193,13 @@ declare global {
       coverageExportReport: (opts: { reportDir: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>
       coverageOpenReport: (opts: { reportDir: string }) => Promise<{ success: boolean; error?: string }>
       coverageCheckPath: (opts: { path: string; role: classfiles | sourcefiles; classfilesPath?: string }) => Promise<CoveragePathProbe>
+      // ===== Git 源码供给 =====
+      coverageGitCapability: (force?: boolean) => Promise<GitCapability>
+      coverageGitRefs: (q: GitRefQuery) => Promise<GitRefsResult>
+      coverageGitCommits: (q: GitRefQuery) => Promise<GitCommitsResult>
+      coverageGitPrepare: (req: GitPrepareRequest) => Promise<GitPrepareResult>
+      coverageGitCleanup: (opts?: { all?: boolean }) => Promise<{ success: boolean; freed?: number; error?: string }>
+      onCoverageGitLog: (callback: (p: { phase: string; text: string; percent?: number }) => void) => () => void
     }
   }
 }

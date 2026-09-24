@@ -249,13 +249,46 @@ export function detectProject(opts: { projectDir: string; classfilesRepo?: strin
   }
 }
 
+/**
+ * 源码根定位（供 Git 检出后的工作区复用）：在项目根/各模块下按候选表找第一个含 .java 的目录。
+ * 多模块用 ';' 拼接（CLI 的 --sourcefiles 支持重复传参）。找不到则退化为「目录本身含 .java 就用它」。
+ */
+export function detectSourceRoot(dir: string): string {
+  if (!dir || !statDir(dir)) return ''
+  const mods = collectModules(dir)
+  const out: string[] = []
+  for (const m of mods) {
+    for (const rel of SOURCE_DIR_CANDIDATES) {
+      const p = path.join(m, rel)
+      if (!statDir(p)) continue
+      if (countFilesDeep(p, '.java') === 0) continue
+      out.push(p)
+      break
+    }
+  }
+  if (out.length) return out.join(';')
+  return countFilesDeep(dir, '.java') > 0 ? dir : ''
+}
+
 /** 单路径即时校验（输入框改动时调用，轻量） */
 export function checkPath(opts: { path: string; role: 'classfiles' | 'sourcefiles'; classfilesPath?: string }): PathProbe {
   const p = (opts.path || '').trim()
   if (opts.role === 'sourcefiles') {
     const pkgs = (opts.classfilesPath || '').split(';').map((s) => s.trim()).filter(Boolean)
       .slice(0, 1).flatMap((c) => samplePackages(c, 6))
-    return probeSourcefiles(p, pkgs)
+    // 源码目录支持 ; 拼接多个源码根（Git 拉取多模块仓库时会回填多个），逐个探测后汇总
+    const parts = p.split(';').map((s) => s.trim()).filter(Boolean)
+    if (parts.length <= 1) return probeSourcefiles(p, pkgs)
+    const probes = parts.map((s) => probeSourcefiles(s, pkgs))
+    const missing = parts.filter((s, i) => !probes[i].exists)
+    if (missing.length === parts.length) return probes[0]
+    const files = probes.reduce((n, r) => n + r.fileCount, 0)
+    const hits = probes.reduce((n, r) => n + r.packageHits, 0)
+    const hitTotal = probes.length * (pkgs.length || 0)
+    let note = `${parts.length} 个源码根，共 ${files} 个 .java`
+    if (pkgs.length) note += `，包结构命中 ${hits}/${hitTotal}`
+    if (missing.length) note += `；⚠ ${missing.length} 个源码根不存在：${missing.join(' , ')}`
+    return { path: p, kind: 'dir', exists: missing.length < parts.length, fileCount: files, packageHits: pkgs.length ? hits : 0, note }
   }
   return probeClassfiles(p)
 }

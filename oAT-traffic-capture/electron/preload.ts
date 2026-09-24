@@ -76,5 +76,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   coverageMerge: (opts: any) => ipcRenderer.invoke('coverage-merge', opts),
   coverageExportReport: (opts: any) => ipcRenderer.invoke('coverage-export-report', opts),
   coverageOpenReport: (opts: any) => ipcRenderer.invoke('coverage-open-report', opts),
-  coverageCheckPath: (opts: any) => ipcRenderer.invoke('coverage-check-path', opts)
+  coverageCheckPath: (opts: any) => ipcRenderer.invoke('coverage-check-path', opts),
+  // ===== Git 源码供给 =====
+  coverageGitCapability: (force?: boolean) => ipcRenderer.invoke('coverage-git-capability', force),
+  coverageGitRefs: (q: any) => ipcRenderer.invoke('coverage-git-refs', q),
+  coverageGitCommits: (q: any) => ipcRenderer.invoke('coverage-git-commits', q),
+  coverageGitPrepare: (req: any) => ipcRenderer.invoke('coverage-git-prepare', req),
+  coverageGitCleanup: (opts: any) => ipcRenderer.invoke('coverage-git-cleanup', opts),
+  onCoverageGitLog: (callback: (p: { phase: string; text: string; percent?: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: { phase: string; text: string; percent?: number }) => callback(p)
+    ipcRenderer.on('coverage-git-log', listener)
+    return () => ipcRenderer.removeListener('coverage-git-log', listener)
+  }
 })

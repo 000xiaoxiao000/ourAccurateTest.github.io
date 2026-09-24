@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useTrafficStore } from '../stores/traffic'
+import GitSourcePanel from './GitSourcePanel.vue'
 import type { CoverageBackendInfo, CoverageExecInfo, CoverageParamSpec } from '../types/traffic'
-import type { CoveragePathProbe } from '../types/electron'
+import type { CoveragePathProbe, GitCapability } from '../types/electron'
 
 const store = useTrafficStore()
 const execs = ref<CoverageExecInfo[]>([])
@@ -44,6 +45,26 @@ const copiedOut = ref(false)
 const busyCmd = ref(false)
 const cfProbe = ref<CoveragePathProbe | null>(null)
 const srcProbe = ref<CoveragePathProbe | null>(null)
+
+// ===== Git 源码供给：能力档位决定面板形态（无 git 时不渲染 URL / ref 输入） =====
+const gitCap = ref<GitCapability | null>(null)
+const gitOpenKey = ref('')
+async function loadGitCap(force = false) {
+  try { gitCap.value = (await window.electronAPI?.coverageGitCapability(force)) ?? null } catch { gitCap.value = null }
+}
+function toggleGitPanel(key: string) {
+  gitOpenKey.value = gitOpenKey.value === key ? '' : key
+}
+/** 拉取完成后回填：新版源码填当前参数，旧版源码填到 oldSourcefilesPath（若该指令有这个参数） */
+async function onGitApply(key: string, payload: { newSourceRoot?: string; oldSourceRoot?: string }) {
+  if (payload.newSourceRoot) commandValues.value[key] = payload.newSourceRoot
+  if (payload.oldSourceRoot && commandValues.value['oldSourcefilesPath'] !== undefined) {
+    commandValues.value['oldSourcefilesPath'] = payload.oldSourceRoot
+  }
+  msg.value = payload.oldSourceRoot ? '已回填新版 + 旧版源码目录' : '已回填源码目录'
+  gitOpenKey.value = ''
+  await refreshCommandPreview()
+}
 
 const backends = computed(() => store.coverageBackends)
 const selectedBackend = computed<CoverageBackendInfo | undefined>(
@@ -121,7 +142,8 @@ async function runCoverageCommand() {
     if (r.reportDir) {
       reportDir.value = r.reportDir
       // http/file 父页面的 iframe 加载 file:// 都会被拦成白屏，统一走 oat-report:// 自定义协议（主进程注册）
-      reportUrl.value = r.hasHtml === false ? '' : 'oat-report://local' + reportDirToUrlPath(r.reportDir) + '/index.html'
+      // 入口页名由指令决定：report=index.html，incremental=incremental-summary.html
+      reportUrl.value = r.hasHtml === false ? '' : 'oat-report://local' + reportDirToUrlPath(r.reportDir) + '/' + (r.reportEntry || 'index.html')
     }
   } else {
     setCmdOutput(((r?.stdout || r?.stderr || '') + '\n✗ ' + (r?.error ?? '执行失败')).trim())
@@ -129,7 +151,9 @@ async function runCoverageCommand() {
 }
 
 async function pickCommandPath(p: CoverageParamSpec) {
-  const r = await window.electronAPI?.coveragePickPath({ pick: p.pick, title: p.label })
+  // dirOrGit 表示「本地目录或 Git 仓库」，但文件选择框只能选目录
+  const pick = p.pick === 'dirOrGit' ? 'dir' : p.pick
+  const r = await window.electronAPI?.coveragePickPath({ pick, title: p.label })
   if (r?.success && r.path) {
     commandValues.value[p.key] = r.path
     await refreshCommandPreview()
@@ -246,7 +270,7 @@ async function copyOutput() {
   setTimeout(() => { copiedOut.value = false }, 1500)
 }
 
-onMounted(refreshBackends)
+onMounted(async () => { await refreshBackends(); await loadGitCap() })
 watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) selectBackend(id) })
 </script>
 
@@ -319,10 +343,22 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
               <span v-else-if="p.type === 'path'" class="path">
                 <input v-model="commandValues[p.key]" :placeholder="p.placeholder || '选择路径'" @input="refreshCommandPreview()" />
                 <button class="btn btn-outline btn-sm" @click="pickCommandPath(p)">选择</button>
+                <button v-if="p.pick === 'dirOrGit'" class="btn btn-outline btn-sm" @click="toggleGitPanel(p.key)">{{ gitOpenKey === p.key ? '收起 ▲' : 'Git 拉取' }}</button>
               </span>
               <small v-if="p.help" class="ph">{{ p.help }}</small>
               <small v-if="p.key === 'sourcefilesPath' && srcBadge" class="pb" :class="srcBadge.cls">{{ srcBadge.text }}</small>
             </label>
+            <!-- Git 源码获取：内联挂在该参数下方（与 classfiles label 同一手法，都是 label 的兄弟节点） -->
+            <div v-if="p.pick === 'dirOrGit' && gitOpenKey === p.key" class="git-src">
+              <GitSourcePanel
+                :param-key="p.key"
+                :target="p.key === 'oldSourcefilesPath' ? 'old' : 'new'"
+                :cap="gitCap"
+                :current-value="commandValues[p.key] ?? ''"
+                @apply="onGitApply(p.key, $event)"
+                @recheck="loadGitCap(true)"
+              />
+            </div>
             <!-- classfiles 本地路径（报告分母）：紧跟 exec 目录之后、基线目录之前 -->
             <label v-if="p.key === 'execDir' && cmdNeeds('classfiles')" class="param pt-path">
               <span class="pl">classfiles 本地路径<i class="req">*</i><span v-if="cfBadge" class="pb" :class="cfBadge.cls">{{ cfBadge.text }}</span></span>
@@ -428,12 +464,7 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
 .input-group span { font-size: 12px; color: #64748b; }
 .input-group input, .input-group select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #1f2937; background: #fff; min-width: 160px; transition: border-color .15s; }
 .input-group input:focus, .input-group select:focus { border-color: #2563eb; }
-.btn { border: 1px solid transparent; border-radius: 8px; padding: 7px 14px; font-size: 13px; transition: all .15s; }
-.btn-primary { background: #2563eb; color: #fff; } .btn-primary:hover { background: #1d4ed8; }
-.btn-primary:disabled, .btn-outline:disabled { opacity: .5; cursor: not-allowed; }
-.btn-outline { background: #fff; color: #334155; border-color: #cbd5e1; } .btn-outline:hover { border-color: #2563eb; color: #2563eb; }
-.btn-sm { padding: 4px 10px; font-size: 12px; border-radius: 6px; }
-.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+/* .btn 系列已上移到全局 src/style.css（子组件 GitSourcePanel 也要用） */
 .code-block { background: #17202b; color: #e5edf6; border-radius: 10px; padding: 12px 14px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.7; overflow-x: auto; white-space: pre; }
 .tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
 .tag-blue { background: #eff6ff; color: #1d4ed8; }

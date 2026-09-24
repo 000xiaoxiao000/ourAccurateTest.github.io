@@ -98,7 +98,7 @@ export const jacocoBackend: CoverageBackend = {
     { key: 'perKeyFilter', label: '仅生成该 Key（可选）', type: 'text', default: '', showWhen: { key: 'perKey', value: 'true' }, placeholder: '如 1', help: '--perkey <key> 只生成该 key 的报告；留空则不筛选（填了就隐含开启 perkey）' },
     { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', help: '--execdir 读该目录全部 .exec（可与基线同/异目录）' },
     { key: 'baseline', label: '基线目录', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析（可选）' },
-    { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）' }
+    { key: 'sourcefilesPath', label: '源码目录', type: 'path', pick: 'dirOrGit', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；可用「自动推导」自动定位，多模块用 ; 分隔（可选）。点「Git 拉取」可从仓库按分支/Commit 检出' }
   ],
   collect(values: Record<string, string>, env: RuntimeEnv, ctx: CoverageContext): CollectResult {
     const dest = dumpDest(values, ctx)
@@ -167,10 +167,38 @@ export const jacocoBackend: CoverageBackend = {
         { key: 'reportOutDir', label: '报告输出目录', type: 'path', pick: 'dir', default: '', required: true, help: '--html/--xml/--csv 输出目录；缺省 = <应用数据>/oat-coverage/execs/report' },
         { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', required: true, help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
         { key: 'baseline', label: '基线目录（可选）', type: 'path', pick: 'dir', default: '', help: '--baseline 增量基线 JSON 所在目录，自动解析' },
-        { key: 'sourcefilesPath', label: '源码目录（可选）', type: 'path', pick: 'dir', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；多模块用 ; 分隔' }
+        { key: 'sourcefilesPath', label: '源码目录（可选）', type: 'path', pick: 'dirOrGit', default: '', help: '--sourcefiles 需精确到包结构的父层（通常 src/main/java）；多模块用 ; 分隔。点「Git 拉取」可从仓库按分支/Commit 检出' }
       ],
       build(values, env, ctx) {
         return [cliStep(env, buildReportArgs(values, env, ctx), '生成 JaCoCo 原生报告')]
+      }
+    },
+    {
+      id: 'incremental',
+      needs: ['classfiles'],
+      label: 'incremental · 增量报告',
+      description: '增量报告：比对基准二选一——新旧 classfiles（字节码比对）或 新旧源码（纯源码比对）；报告只统计变更行',
+      params: [
+        { key: 'reportOutDir', label: '报告输出目录', type: 'path', pick: 'dir', default: '', required: true, help: '--html 输出目录；缺省 = <应用数据>/oat-coverage/execs/incremental-report' },
+        { key: 'execDir', label: 'exec 目录', type: 'path', pick: 'dir', default: '', required: true, help: '--execdir 读该目录全部 .exec（不选则用已抓取的 exec）' },
+        { key: 'oldClassfilesPath', label: '旧版 classfiles（与旧版源码二选一）', type: 'path', pick: 'dirOrFile', default: '', placeholder: '/data/builds/0001/classes 或 old.zip', help: '--old-classfiles 基线构建产物（目录 / zip / jar），多模块用 ; 分隔。不填也可以：改为同时填 新版源码 + 旧版源码 走纯源码比对' },
+        { key: 'sourcefilesPath', label: '新版源码目录（可选）', type: 'path', pick: 'dirOrGit', default: '', help: '--sourcefiles 精确到 src/main/java；与旧版源码同时给出 → 源码 LCS（行级+识别注释改动）；只给新版 → 指令序列 LCS（行级）；不填 → 需要旧版 classfiles，且报告无源码页' },
+        { key: 'oldSourcefilesPath', label: '旧版源码目录（可选）', type: 'path', pick: 'dirOrGit', default: '', help: '--old-sourcefiles 与新版源码同时给出时可完全替代旧版 classfiles（纯源码比对）；单独给不生效' }
+      ],
+      build(values, env, ctx) {
+        const raw = asStr(values.reportOutDir) || path.join(ctx.workdir, 'incremental-report')
+        const out = path.isAbsolute(raw) ? raw : path.resolve(ctx.workdir || process.cwd(), raw)
+        const args = ['incremental']
+        const execDir = asStr(values.execDir)
+        if (execDir) args.push('--execdir', execDir)
+        else args.push(...ctx.execs)
+        // 新版 classfiles 沿用共享配置（当前版本），旧版由本指令参数指定
+        for (const c of splitPaths(env.classfilesPath)) args.push('--classfiles', c)
+        for (const c of splitPaths(asStr(values.oldClassfilesPath))) args.push('--old-classfiles', c)
+        for (const s of splitPaths(asStr(values.sourcefilesPath))) args.push('--sourcefiles', s)
+        for (const s of splitPaths(asStr(values.oldSourcefilesPath))) args.push('--old-sourcefiles', s)
+        args.push('--html', out)
+        return [cliStep(env, args, '生成增量覆盖率报告（只统计变更行）')]
       }
     },
     {

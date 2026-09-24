@@ -15,6 +15,48 @@ export type { PathProbe } from './projectDetect.js'
 
 export { resolveClassfiles }
 
+// ===== Git 源码供给（增量报告的源码输入；classfiles 仍需从构建侧拿） =====
+import {
+  cleanupGitSource,
+  detectGit,
+  listGitCommits,
+  listGitRefs,
+  prepareGitSource
+} from './git.js'
+export {
+  cleanupGitSource,
+  detectGit,
+  listGitCommits,
+  listGitRefs,
+  prepareGitSource
+}
+export type {
+  GitCapability,
+  GitCommit,
+  GitCredentials,
+  GitLogFn,
+  GitPrepareRequest,
+  GitPrepareResult,
+  GitRefItem,
+  GitRefQuery
+} from './git.js'
+
+export function gitCapability(force = false) {
+  return detectGit(force)
+}
+export function gitRefs(q: import('./git.js').GitRefQuery) {
+  return listGitRefs(coverageWorkDir(), q)
+}
+export function gitCommits(q: import('./git.js').GitRefQuery & { ref?: string; limit?: number; keyword?: string }, onLog?: import('./git.js').GitLogFn) {
+  return listGitCommits(coverageWorkDir(), q, onLog)
+}
+export function gitPrepare(req: import('./git.js').GitPrepareRequest, onLog?: import('./git.js').GitLogFn) {
+  return prepareGitSource(coverageWorkDir(), req, onLog)
+}
+export function gitCleanup(opts?: { all?: boolean }) {
+  return cleanupGitSource(coverageWorkDir(), opts)
+}
+
 function coverageWorkDir(): string {
   const base = (app && app.getPath) ? app.getPath('userData') : os.tmpdir()
   const dir = path.join(base, 'oat-coverage')
@@ -101,10 +143,10 @@ function inferReportDir(backendId: string, commandId: string, values: Record<str
   }
   switch (backendId) {
     case 'jacoco':
-      // ⚠️ 必须与 buildReportArgs 的输出目录解析完全一致（含自定义 reportOutDir），否则报告目录指向不存在的路径
-      return commandId === 'report'
-        ? (asReportOut(values) ?? path.join(workdir, 'report'))
-        : undefined
+      // ⚠️ 必须与 buildReportArgs / incremental.build 的输出目录解析完全一致（含自定义 reportOutDir），否则报告目录指向不存在的路径
+      if (commandId === 'report') return asReportOut(values) ?? path.join(workdir, 'report')
+      if (commandId === 'incremental') return asReportOut(values) ?? path.join(workdir, 'incremental-report')
+      return undefined
     case 'nyc':
       return commandId === 'report' ? resolveIn(values.projectDir, values.reportDir || 'coverage') : undefined
     case 'coverage-py':
@@ -164,8 +206,12 @@ export async function runCommand(config: CoverageConfig, backendId: string, comm
     const execOuts = outputs.filter((f) => f.endsWith('.exec'))
     execsInfo = execOuts.map((f) => ({ file: f, key: key || 'default', size: fileSize(f), fetchedAt: Date.now(), source: 'dump · tcpserver 远程拉取' }))
   }
+  // incremental 的入口页是 incremental-summary.html（不是 index.html），报告预览要用它
+  const reportEntry = commandId === 'incremental' ? 'incremental-summary.html' : 'index.html'
+  const hasHtml = reportDir ? fs.existsSync(path.join(reportDir, reportEntry)) : undefined
+  if (reportDir && hasHtml) injectReportI18n(reportDir)
   console.info('[覆盖率] 指令完成 %s.%s 产出=%d 个%s', backendId, commandId, outputs.length, reportDir ? ` 报告=${reportDir}` : '')
-  return { success: true, text: run.stdout || run.stderr || undefined, outputs, reportDir, hasHtml: reportDir ? fs.existsSync(path.join(reportDir, 'index.html')) : undefined, execs: execsInfo }
+  return { success: true, text: run.stdout || run.stderr || undefined, outputs, reportDir, hasHtml, reportEntry: reportDir ? reportEntry : undefined, execs: execsInfo }
 }
 
 /** 命令预览（UI 展示真实指令与参数） */

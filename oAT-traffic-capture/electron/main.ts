@@ -791,3 +791,14 @@ ipcMain.handle('coverage-pick-path', async (_event, opts: any) => {
 
 // 单路径即时校验（classfiles 数 .class；源码根验包结构可达性）
 ipcMain.handle('coverage-check-path', async (_event, opts: any) => coverage.checkPath(opts ?? {}))
+
+// ===== Git 源码供给（增量报告的源码输入：新版/旧版源码；classfiles 仍从构建侧拿） =====
+/** 进度事件：main → renderer（沿用既有 webContents.send 机制） */
+function sendGitLog(p: { phase: string; text: string; percent?: number }) {
+  try { mainWindow?.webContents.send('coverage-git-log', p) } catch { /* 窗口已关闭则忽略 */ }
+}
+ipcMain.handle('coverage-git-capability', async (_event, force?: boolean) => coverage.gitCapability(!!force))
+ipcMain.handle('coverage-git-refs', async (_event, q: any) => coverage.gitRefs(q ?? {}))
+ipcMain.handle('coverage-git-commits', async (_event, q: any) => coverage.gitCommits(q ?? {}, sendGitLog))
+ipcMain.handle('coverage-git-prepare', async (_event, req: any) => coverage.gitPrepare(req ?? {}, sendGitLog))
+ipcMain.handle('coverage-git-cleanup', async (_event, opts: any) => coverage.gitCleanup(opts ?? {}))
