@@ -536,7 +536,7 @@ table.data tr:last-child td { border-bottom: none; }
 .cp-head { font-size: 12px; color: #475569; font-weight: 600; margin-bottom: 8px; }
 .sub { font-size: 12px; color: #64748b; margin: 4px 0 14px; }
 .fold-btn { font-size: 12px; color: #6b7280; }
-.conn-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0 4px; padding: 12px; border: 1px solid var(--line, #e5e7eb); border-radius: 8px; background: #f9fafb; }
+.conn-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0 4px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
 .mount-tip { flex: 1 1 100%; font-size: 12px; }
 .mount-tip summary { cursor: pointer; color: #6b7280; }
 .mount-tip[open] summary { margin-bottom: 2px; }

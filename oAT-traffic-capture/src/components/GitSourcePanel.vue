@@ -438,50 +438,50 @@ function finish(r?: GitPrepareResult) {
 </template>
 
 <style scoped>
-.gp { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; background: var(--bg-soft, #fafafa); padding: 12px 14px; margin: 6px 0 2px; }
-.gp-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; padding-bottom: 8px; border-bottom: 1px dashed var(--border, #e5e7eb); }
+.gp { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafafa; padding: 12px 14px; margin: 6px 0 2px; }
+.gp-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; padding-bottom: 8px; border-bottom: 1px dashed #e5e7eb; }
 .gp-cap { font-size: 12px; font-weight: 400; }
 .gp-cap.ok { color: #15803d; }
 .gp-cap.warn { color: #b45309; }
 .gp-body { margin-top: 10px; }
 /* 行布局：72px 标签列 + 控件区，所有行左缘对齐 */
 .gp-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
-.gp-lb { flex: 0 0 72px; font-size: 12px; color: var(--text-soft, #6b7280); }
+.gp-lb { flex: 0 0 72px; font-size: 12px; color: #6b7280; }
 .gp-ctl { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .gp-ctl input, .gp-ctl select { flex: 1 1 160px; min-width: 0; }
-.gp-mut { font-size: 12px; color: var(--text-soft, #6b7280); }
+.gp-mut { font-size: 12px; color: #6b7280; }
 /* 来源：segmented 单选 */
-.gp-seg { display: inline-flex; border: 1px solid var(--border, #d1d5db); border-radius: 8px; overflow: hidden; background: var(--bg, #fff); }
-.gp-seg label { display: inline-flex; align-items: center; padding: 4px 16px; font-size: 12px; cursor: pointer; color: var(--text-soft, #6b7280); user-select: none; }
-.gp-seg label + label { border-left: 1px solid var(--border, #d1d5db); }
-.gp-seg label.on { background: var(--primary-soft, #e0e7ff); color: var(--primary, #3b5bdb); font-weight: 500; }
+.gp-seg { display: inline-flex; border: 1px solid #d1d5db; border-radius: 8px; overflow: hidden; background: #fff; }
+.gp-seg label { display: inline-flex; align-items: center; padding: 4px 16px; font-size: 12px; cursor: pointer; color: #6b7280; user-select: none; }
+.gp-seg label + label { border-left: 1px solid #d1d5db; }
+.gp-seg label.on { background: #e0e7ff; color: #3b5bdb; font-weight: 500; }
 .gp-seg input { display: none; }
-.gp-sep { border-top: 1px dashed var(--border, #e5e7eb); margin: 10px 0; }
+.gp-sep { border-top: 1px dashed #e5e7eb; margin: 10px 0; }
 .gp-auth { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin: 4px 0 4px 80px; }
-.gp-auth label { display: flex; align-items: center; gap: 4px; color: var(--text-soft, #6b7280); }
+.gp-auth label { display: flex; align-items: center; gap: 4px; color: #6b7280; }
 .gp-auth input { min-width: 150px; }
 .gp-secret { display: inline-flex; align-items: center; position: relative; }
 .gp-secret input { padding-right: 26px; }
-.gp-eye { position: absolute; right: 4px; display: inline-flex; align-items: center; border: none; background: none; cursor: pointer; padding: 2px; color: var(--text-soft, #6b7280); }
-.gp-eye:hover { color: var(--text, #374151); }
-.gp-chk { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: var(--text, #374151); }
+.gp-eye { position: absolute; right: 4px; display: inline-flex; align-items: center; border: none; background: none; cursor: pointer; padding: 2px; color: #6b7280; }
+.gp-eye:hover { color: #374151; }
+.gp-chk { font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; color: #374151; }
 .gp-manual { font-size: 12px; }
-.gp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 6px; background: var(--primary-soft, #e0e7ff); font-size: 12px; }
-.gp-x { border: none; background: none; cursor: pointer; font-size: 13px; color: var(--text-soft, #6b7280); padding: 0 2px; }
+.gp-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 6px; border-radius: 6px; background: #e0e7ff; font-size: 12px; }
+.gp-x { border: none; background: none; cursor: pointer; font-size: 13px; color: #6b7280; padding: 0 2px; }
 .gp-actions { margin-top: 10px; }
-.gp-land { font-size: 12px; color: var(--primary, #3b5bdb); background: var(--primary-soft, #eef2ff); border-radius: 6px; padding: 4px 8px; margin: 6px 0; word-break: break-all; }
-.gp-loading { font-size: 12px; color: var(--text-soft, #6b7280); margin: 6px 0 2px; }
-.gp-tip { font-size: 12px; color: var(--text-soft, #6b7280); line-height: 1.7; margin: 6px 0; }
+.gp-land { font-size: 12px; color: #3b5bdb; background: #eef2ff; border-radius: 6px; padding: 4px 8px; margin: 6px 0; word-break: break-all; }
+.gp-loading { font-size: 12px; color: #6b7280; margin: 6px 0 2px; }
+.gp-tip { font-size: 12px; color: #6b7280; line-height: 1.7; margin: 6px 0; }
 .gp-tip.warn { color: #b45309; }
 .gp-err { font-size: 12px; color: #b91c1c; margin: 4px 0; }
-.gp-log { font-size: 12px; color: var(--text-soft, #6b7280); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gp-log { font-size: 12px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gp-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.25); display: flex; align-items: center; justify-content: center; z-index: 20; }
-.gp-dialog { width: 620px; max-width: 92%; background: var(--bg, #fff); border-radius: 10px; padding: 12px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); }
+.gp-dialog { width: 620px; max-width: 92%; background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18); }
 .gp-dhead { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
 .gp-list { max-height: 320px; overflow: auto; margin-top: 6px; }
 .gp-citem { display: flex; gap: 10px; align-items: baseline; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 12px; }
-.gp-citem:hover { background: var(--bg-soft, #f3f4f6); }
-.gp-cau { color: var(--text-soft, #6b7280); }
-.gp-cdt { color: var(--text-soft, #6b7280); }
+.gp-citem:hover { background: #f3f4f6; }
+.gp-cau { color: #6b7280; }
+.gp-cdt { color: #6b7280; }
 .gp-cmsg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
