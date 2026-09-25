@@ -18,7 +18,7 @@
  *    裸连要占满 5 秒才释放，期间后续连接全排队 → 探针会被误判成「静默端口」。
  *    正确做法：connect 成功后立刻写头+命令，一次连接完成判定，拿到数据即刻 destroy。
  */
-import net from 'net'
+import * as net from 'net'
 import { spawn } from 'child_process'
 
 // ===== 协议常量 =====
@@ -26,7 +26,6 @@ import { spawn } from 'child_process'
 const EXEC_HEADER = Buffer.from([0x01, 0xc0, 0xc0, 0x10, 0x07])
 const BLOCK_HEADER = 0x01
 const BLOCK_SESSIONINFO = 0x10
-const BLOCK_CMDOK = 0x20
 const BLOCK_KEYS = 0x21
 const BLOCK_STATS = 0x22
 /** peruser.PerKeyProtocol：客户端请求运行期概况，payload = int limit */
@@ -256,10 +255,9 @@ function parseResponse(buf: Buffer, ms: number): HandshakeOutcome {
   let diag: ProbeDiagnostics | undefined
   let keyStats: ProbeKeyStat[] | undefined
 
-  while (r.remaining() > 0 && !r.exhausted) {
+  if (r.remaining() > 0 && !r.exhausted) {
     const type = r.byte()
-    if (r.exhausted) break
-    if (type === BLOCK_STATS) {
+    if (!r.exhausted && type === BLOCK_STATS) {
       diag = {
         classesSeen: r.long(),
         classesInstrumented: r.long(),
@@ -277,9 +275,7 @@ function parseResponse(buf: Buffer, ms: number): HandshakeOutcome {
         if (r.exhausted) break
         keyStats.push({ key, classes: r.int(), probes: r.int(), covered: r.int() })
       }
-      break
-    }
-    if (type === BLOCK_KEYS) {
+    } else if (!r.exhausted && type === BLOCK_KEYS) {
       // 兼容：若将来改用 0x42，这里也能解（不含 perKey 覆盖数）
       const keys = r.utfList(r.int())
       diag = {
@@ -293,15 +289,11 @@ function parseResponse(buf: Buffer, ms: number): HandshakeOutcome {
         suggestedIncludes: r.utfList(r.int())
       }
       keyStats = keys.map((k) => ({ key: k, classes: 0, probes: 0, covered: 0 }))
-      break
-    }
-    if (type === BLOCK_SESSIONINFO) {
+    } else if (!r.exhausted && type === BLOCK_SESSIONINFO) {
       // 只回 sessioninfo = 服务端没认出 0x43（官方 JaCoCo），按默认 dump 处理
       return { kind: 'vanilla', ms }
     }
-    if (type === BLOCK_CMDOK) break
     // 其它块（如 ExecutionData）无法在无 schema 的情况下顺序跳过，读到即收尾
-    break
   }
 
   if (!diag) {
@@ -496,7 +488,7 @@ export function parsePorts(expr: string): number[] {
     const n = Number(t)
     if (Number.isInteger(n) && n > 0 && n < 65536) out.add(n)
   }
-  return [...out].sort((x, y) => x - y)
+  return Array.from(out).sort((x, y) => x - y)
 }
 
 function ipToInt(ip: string): number | null {
