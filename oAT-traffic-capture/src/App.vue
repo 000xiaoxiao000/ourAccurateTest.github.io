@@ -12,6 +12,7 @@ import SessionHistory from './components/SessionHistory.vue'
 import TrafficStatsPanel from './components/TrafficStatsPanel.vue'
 import type { TrafficRecord } from './types/traffic'
 import type { RuntimeLogEntry } from './types/electron'
+import type { ProbeSummary } from './types/probe'
 
 const store = useTrafficStore()
 const showDetail = ref(false)
@@ -56,6 +57,36 @@ const detailRecord = computed(() => selectedRecord.value ?? store.filteredRecord
 let floatingClickTimer: number | null = null
 let unsubscribeRuntimeLog: (() => void) | undefined
 let unsubscribeRuntimeLogClear: (() => void) | undefined
+let unsubscribeProbeHeartbeat: (() => void) | undefined
+
+// ===== 在线探针：全局可见的状态（左导航角标 + 底部状态行）=====
+// 探针不是业务流程的一个阶段，它是「采集能否成立」的前置条件，所以不作为第 6 个一级导航，
+// 而是做成全局可见的状态提示 + 一行直达入口。
+const probeSummary = ref<ProbeSummary | null>(null)
+const coverageSubTab = ref<'probes' | 'tools' | 'impact'>('tools')
+/** 角标：没登记过探针时不打扰新用户（total=0 → 不显示）。语义：握手成功就算在线（含未采集的） */
+const probeBadge = computed(() => {
+  const s = probeSummary.value
+  if (!s || !s.total) return null
+  const alive = s.online + s.warning
+  if (alive > 0) return { cls: 'ok', text: String(alive) }
+  return { cls: 'off', text: String(s.offline + s.vanilla) }
+})
+const probeBadgeTitle = computed(() => {
+  const s = probeSummary.value
+  if (!s) return ''
+  const alive = s.online + s.warning
+  if (alive > 0) {
+    return s.warning > 0
+      ? `${alive} 个探针在线（其中 ${s.warning} 个还没采到归属 Key：发一次请求，并确认覆盖率采集开关已打开）`
+      : `${alive} 个探针在线，已采到 Key`
+  }
+  return '登记的探针全部离线'
+})
+function goProbes() {
+  coverageSubTab.value = 'probes'
+  activeSection.value = 'coverage'
+}
 
 onMounted(() => {
   window.electronAPI?.onTrafficCaptured((record: TrafficRecord) => {
@@ -82,6 +113,13 @@ onMounted(() => {
   unsubscribeRuntimeLogClear = window.electronAPI?.onRuntimeLogsCleared(() => {
     runtimeLogs.value = []
   })
+  // 探针状态由主进程 20s 心跳推送（不在这里发起探测，避免与面板重复握手同一个 agent）
+  unsubscribeProbeHeartbeat = window.electronAPI?.onCoverageProbeHeartbeat((p) => {
+    if (p?.summary) probeSummary.value = p.summary
+  })
+  window.electronAPI?.coverageProbeLast().then((r) => {
+    if (r?.summary) probeSummary.value = r.summary
+  })
 })
 
 watch([runtimeLogs, showRuntimeLogs], () => {
@@ -101,6 +139,7 @@ watch(() => store.proxyPort, (port) => {
 onUnmounted(() => {
   unsubscribeRuntimeLog?.()
   unsubscribeRuntimeLogClear?.()
+  unsubscribeProbeHeartbeat?.()
 })
 
 async function generateCoverageKey() {
@@ -312,7 +351,10 @@ function handleFloatingClick() {
         <button type="button" :class="{ active: activeSection === 'capture' }" @click="selectSection('capture')">采集工作台</button>
         <button type="button" :class="{ active: activeSection === 'requests' }" @click="selectSection('requests')">请求记录</button>
         <button type="button" :class="{ active: activeSection === 'sessions' }" @click="selectSection('sessions')">会话管理</button>
-        <button type="button" :class="{ active: activeSection === 'coverage' }" @click="selectSection('coverage')">覆盖率分析</button>
+        <button type="button" :class="{ active: activeSection === 'coverage' }" @click="selectSection('coverage')">
+          <span class="nav-label">覆盖率分析</span>
+          <em v-if="probeBadge" class="nav-badge" :class="'nb-' + probeBadge.cls" :title="probeBadgeTitle">{{ probeBadge.text }}</em>
+        </button>
         <button type="button" :class="{ active: activeSection === 'settings' }" @click="selectSection('settings')">系统设置</button>
       </nav>
       <div class="sidebar-status">
@@ -320,6 +362,14 @@ function handleFloatingClick() {
         <span>{{ store.isCapturing ? '捕获中' : '未捕获' }}</span>
         <strong>{{ store.capturedCount }}</strong>
         <span>条流量</span>
+      </div>
+      <!-- 探针状态：和上面的「捕获中」是同一类信息（一个工具的运行状态），全局可见但不抢导航位置 -->
+      <div v-if="probeSummary?.total" class="sidebar-probe">
+        <span class="status-dot" :class="{ 'p-ok': (probeSummary?.online ?? 0) + (probeSummary?.warning ?? 0) > 0 }"></span>
+        <span>探针 {{ (probeSummary?.online ?? 0) + (probeSummary?.warning ?? 0) }} 在线</span>
+        <strong v-if="(probeSummary?.warning ?? 0) > 0" class="sp-warn" title="探针在线但还没采到归属 Key：发一次请求并确认覆盖率采集开关已打开">{{ probeSummary?.warning }} 未采集</strong>
+        <strong v-if="(probeSummary?.offline ?? 0) + (probeSummary?.vanilla ?? 0) > 0" class="sp-off">{{ (probeSummary?.offline ?? 0) + (probeSummary?.vanilla ?? 0) }} 离线</strong>
+        <button class="sp-jump" type="button" @click="goProbes">查看 →</button>
       </div>
     </aside>
 
@@ -487,7 +537,7 @@ function handleFloatingClick() {
       </section>
 
       <section v-else-if="activeSection === 'coverage'" class="page-content single-column">
-        <CoveragePanel />
+        <CoveragePanel v-model:sub-tab="coverageSubTab" />
       </section>
 
       <section v-else class="page-content single-column settings-content">
@@ -771,7 +821,56 @@ function handleFloatingClick() {
   color: #b8c4d2;
   text-align: left;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+
+/* 「覆盖率分析」上的探针角标：复用探针四态色（绿=正常 / 黄=在线但采不到 key / 灰=离线） */
+.nav-badge {
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  text-align: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  line-height: 1.5;
+}
+.nav-badge.nb-ok { background: #22c55e; color: #06210f; }
+.nav-badge.nb-warn { background: #f59e0b; color: #2b1a02; }
+.nav-badge.nb-off { background: rgba(255, 255, 255, 0.16); color: #cbd5e1; }
+.nav button.active .nav-badge.nb-ok { background: #ffffff; color: #15803d; }
+.nav button.active .nav-badge.nb-warn { background: #ffffff; color: #b45309; }
+.nav button.active .nav-badge.nb-off { background: rgba(255, 255, 255, 0.28); color: #ffffff; }
+
+/* 底部探针状态行：一行直达，路径最短 */
+.sidebar-probe {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  font-size: 12px;
+}
+.sidebar-probe .status-dot.p-ok { background: #22c55e; }
+.sidebar-probe .status-dot.p-warn { background: #f59e0b; }
+.sidebar-probe .sp-warn { color: #fbbf24; }
+.sidebar-probe .sp-off { color: #94a3b8; }
+.sidebar-probe .sp-jump {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: #60a5fa;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.sidebar-probe .sp-jump:hover { color: #93c5fd; text-decoration: underline; }
 
 .nav button:hover,
 .nav button.active {

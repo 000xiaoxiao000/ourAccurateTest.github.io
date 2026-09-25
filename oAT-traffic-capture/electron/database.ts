@@ -125,6 +125,54 @@ export function loadCoverageKeyTraffic(opts: { since?: number } = {}): CoverageK
 
 /** 当前库里出现过的全部 coverage key（去重，按最近使用排序） */
 
+/** 已抓流量里出现过的后端主机（去重，按最近出现排序）——远端探针发现的候选来源 */
+export interface TrafficHost {
+  host: string
+  /** 该主机被请求过的端口（HTTP 端口，不是探针端口，仅作提示） */
+  ports: number[]
+  count: number
+  lastTs: number
+}
+
+export function listTrafficHosts(opts: { limit?: number } = {}): TrafficHost[] {
+  const limit = opts.limit ?? 2000
+  const rows = getDb()
+    .prepare(/* noinspection SqlResolve */ /* language=SQLite */ 'SELECT url, timestamp FROM records ORDER BY timestamp DESC LIMIT ?')
+    .all(limit) as Array<{ url: string; timestamp: number }>
+  const map = new Map<string, TrafficHost>()
+  for (const r of rows) {
+    const raw = String(r?.url ?? '').trim()
+    if (!raw) continue
+    let host = ''
+    let port = 0
+    try {
+      const u = new URL(raw)
+      host = u.hostname
+      port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
+    } catch {
+      // 非标准 URL（如 CONNECT example.com:443）：取 host[:port] 部分
+      const seg = raw.replace(/^[a-zA-Z]+:\/\//, '').split(/[/?#]/)[0]
+      const i = seg.lastIndexOf(':')
+      if (i > 0 && /^\d+$/.test(seg.slice(i + 1))) {
+        host = seg.slice(0, i)
+        port = Number(seg.slice(i + 1))
+      } else {
+        host = seg
+        port = 80
+      }
+    }
+    if (!host) continue
+    const cur = map.get(host)
+    if (cur) {
+      cur.count++
+      if (port && !cur.ports.includes(port)) cur.ports.push(port)
+    } else {
+      map.set(host, { host, ports: port ? [port] : [], count: 1, lastTs: Number(r.timestamp) || 0 })
+    }
+  }
+  return [...map.values()].sort((a, b) => b.count - a.count)
+}
+
 /** 时间窗内的抓包记录总数（影响分析自检：区分「没抓包」和「抓了但没注入 key」） */
 export function countRecords(opts: { since?: number } = {}): number {
   const row = opts.since

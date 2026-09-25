@@ -1,3 +1,8 @@
+// 探针类型的定义处在 coverage/probes.ts，这里单向 re-export：
+// 主进程与 preload 统一从 types.js 取，避免在三个文件里各抄一份接口
+import type { ProbeAgent } from './coverage/probes.js'
+export type { LocalCandidate, ProbeAgent, ProbeDiagnostics, ProbeKeyStat, ProbeResult, ProbeStatus, ProbeSummary } from './coverage/probes.js'
+
 export interface TrafficRecord {
   id: string
   caseName: string
@@ -48,6 +53,10 @@ export interface CoverageConfig {
   agentAddress: string
   backend: string
   classfilesPath: string   // 本地路径（被插桩类的字节码目录），覆盖率分母；仅本地路径
+  /** 手工登记的探针（本机扫描看不到容器/远端端口，登记后持久化并参与心跳探测） */
+  agents?: ProbeAgent[]
+  /** 扫描本机时自动登记确认是探针的地址（默认 true） */
+  probeAutoRegister?: boolean
 }
 
 export interface CoverageExecInfo {

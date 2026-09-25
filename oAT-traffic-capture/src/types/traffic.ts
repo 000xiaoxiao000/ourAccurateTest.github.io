@@ -1,4 +1,5 @@
 // Traffic record type shared between main and renderer processes
+import type { ProbeAgent } from './probe'
 export interface TrafficRecord {
   id: string
   caseName: string
@@ -55,6 +56,10 @@ export interface CoverageConfig {
   backend: string
   /** classfiles（覆盖率分母）本地路径，仅本地路径 */
   classfilesPath: string
+  /** 手工登记的探针（本机扫描看不到容器/远端端口；登记后参与心跳探测） */
+  agents?: ProbeAgent[]
+  /** 扫描本机时自动登记确认是探针的地址（默认 true） */
+  probeAutoRegister?: boolean
 }
 
 export interface CoverageExecInfo {

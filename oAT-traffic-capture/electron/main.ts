@@ -25,13 +25,14 @@ import {
   initDatabase,
   listFilterRules,
   listSessions,
+  listTrafficHosts,
   loadSessionRecords,
   saveRecord,
   saveFilterRules,
   saveSession,
   updateSessionEndTime
 } from './database.js'
-import type { CaptureProtocolConfig, CoverageConfig, TrafficFilterRule, TrafficRecord } from './types.js'
+import type { CaptureProtocolConfig, CoverageConfig, ProbeAgent, TrafficFilterRule, TrafficRecord } from './types.js'
 import * as ExcelJS from 'exceljs'
 import * as coverage from './coverage/index.js'
 
@@ -129,6 +130,12 @@ function loadCaptureConfig(): void {
       if (typeof c.agentAddress === 'string') coverageConfig.agentAddress = c.agentAddress
       if (typeof c.backend === 'string' && c.backend) coverageConfig.backend = c.backend
       if (typeof c.classfilesPath === 'string') coverageConfig.classfilesPath = c.classfilesPath
+      // 手工登记的探针：本机扫描看不到容器/远端端口，登记后要跨重启保留
+      if (Array.isArray(c.agents)) {
+        coverageConfig.agents = c.agents
+          .filter((a) => a && typeof a.host === 'string' && Number.isInteger(Number(a.port)))
+          .map((a) => ({ id: String(a.id ?? `${a.host}:${a.port}`), host: a.host, port: Number(a.port), label: a.label }))
+      }
     }
   } catch {
     configuredProxyPort = DEFAULT_PROXY_PORT
@@ -151,6 +158,105 @@ function saveProxyPortConfig(port: number): number {
   configuredProxyPort = proxyPort
   persistCaptureConfig()
   return configuredProxyPort
+}
+
+// ===== 在线探针：登记簿 + 后台心跳 =====
+// 说明：本机扫描（lsof）只能发现本机端口，容器 / 远端服务的端口看不到（用户环境 docker/k8s 且无 root），
+// 所以「手工登记」是必选项而非可选项。登记簿持久化在 capture-config.json 的 coverage.agents。
+function registeredAgents(): ProbeAgent[] {
+  return Array.isArray(coverageConfig.agents) ? coverageConfig.agents : []
+}
+
+function setRegisteredAgents(list: ProbeAgent[]): ProbeAgent[] {
+  coverageConfig.agents = list
+  try {
+    persistCaptureConfig()
+  } catch (e) {
+    console.warn('[探针登记] 持久化失败（不影响本次运行）:', e)
+  }
+  broadcastCaptureState()
+  return list
+}
+
+function parseAddress(addr: string): { host: string; port: number } | null {
+  const s = String(addr ?? '').trim()
+  if (!s) return null
+  const i = s.lastIndexOf(':')
+  if (i <= 0) return null
+  const port = Number(s.slice(i + 1))
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null
+  return { host: s.slice(0, i), port }
+}
+
+/** 参与周期性探测的目标：已登记的探针 + 当前配置的 Agent 地址（同一地址只算一次，登记项优先保留） */
+function knownProbeTargets(): Array<{ id: string; host: string; port: number; label?: string; source: 'config' | 'registered' }> {
+  const out: Array<{ id: string; host: string; port: number; label?: string; source: 'config' | 'registered' }> = []
+  const seen = new Set<string>()
+  // 登记项在前：若登记地址恰好就是当前配置地址，保留登记卡片（它带「编辑/取消登记」操作），
+  // 配置卡片消失但该地址仍在列表里且带「当前」徽标 —— 否则登记项会被配置项顶掉，失去取消登记的入口
+  for (const a of registeredAgents()) {
+    const k = `${a.host}:${a.port}`
+    if (seen.has(k)) continue
+    seen.add(k)
+    out.push({ id: a.id || k, host: a.host, port: a.port, label: a.label, source: 'registered' })
+  }
+  const cfg = parseAddress(coverageConfig.agentAddress)
+  if (cfg && !seen.has(`${cfg.host}:${cfg.port}`)) {
+    // label 不设：卡片直接以地址为主标题，来源标签「当前配置」由 UI 按 source 显示
+    out.push({ id: 'config', host: cfg.host, port: cfg.port, source: 'config' })
+  }
+  return out
+}
+
+/**
+ * 心跳事件：main → renderer。
+ * ⚠️ 推全量结果（不止摘要）：左导航角标、覆盖率页的地址框状态灯、探针列表都消费同一份，
+ *    避免每个组件各自发起一轮探测 —— agent tcpserver 是串行 handle，重复连接会互相排队。
+ */
+let lastProbeHeartbeat: { probes: coverage.ProbeResult[]; summary: coverage.ProbeSummary } | null = null
+
+function sendProbeHeartbeat(p: { probes: coverage.ProbeResult[]; summary: coverage.ProbeSummary }) {
+  lastProbeHeartbeat = p
+  try { mainWindow?.webContents.send('coverage-probe-heartbeat', p) } catch { /* 窗口已关闭则忽略 */ }
+}
+
+const PROBE_HEARTBEAT_MS = 20000
+let probeHeartbeatTimer: ReturnType<typeof setInterval> | undefined
+
+/** 上一轮心跳是否还在跑：登记很多探针时一轮可能超过心跳间隔，必须跳过而不是叠加排队 */
+let probeHeartbeatRunning = false
+
+async function probeHeartbeatOnce(): Promise<{ probes: coverage.ProbeResult[]; summary: coverage.ProbeSummary }> {
+  const targets = knownProbeTargets()
+  if (!targets.length) {
+    const empty = { probes: [], summary: { total: 0, online: 0, warning: 0, vanilla: 0, offline: 0, checkedAt: Date.now() } }
+    sendProbeHeartbeat(empty)
+    return empty
+  }
+  // 追尾保护：上一轮没结束就直接放弃本轮（下一轮 20s 后再来），否则超时目标多时会越积越多
+  if (probeHeartbeatRunning) return { probes: lastProbeHeartbeat?.probes ?? [], summary: lastProbeHeartbeat?.summary ?? { total: 0, online: 0, warning: 0, vanilla: 0, offline: 0, checkedAt: Date.now() } }
+  probeHeartbeatRunning = true
+  try {
+    // ⚠️ 心跳只能用「stats 命令」（无副作用），绝不能用 dump —— 带 --reset 会清掉用户正在攒的覆盖数据
+    const { probes, summary } = await coverage.probeAgents({ agents: targets, timeoutMs: 1500, concurrency: 12 })
+    sendProbeHeartbeat({ probes, summary })
+    return { probes, summary }
+  } finally {
+    probeHeartbeatRunning = false
+  }
+}
+
+/**
+ * 低频后台心跳，让左导航角标在任何页面都准确（探测不能只在覆盖率面板打开时才做）。
+ * 只探测「已登记 + 当前配置」，本机扫描留给用户手动点，避免后台偷偷扫端口。
+ */
+function startProbeHeartbeat(): void {
+  if (probeHeartbeatTimer) return
+  probeHeartbeatTimer = setInterval(() => {
+    probeHeartbeatOnce().catch(() => { /* 心跳失败不打扰用户 */ })
+  }, PROBE_HEARTBEAT_MS)
+  probeHeartbeatTimer.unref?.()
+  probeHeartbeatOnce().catch(() => {})
 }
 
 function getCaptureState() {
@@ -350,6 +456,7 @@ app.whenReady().then(async () => {
   loadCaptureConfig()
   await loadPlugins()
   createWindow()
+  startProbeHeartbeat()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -757,11 +864,15 @@ ipcMain.handle('coverage-preview', async (_event, opts: any) =>
 
 ipcMain.handle('coverage-keys', async () => coverage.listKeys(coverageConfig))
 
-ipcMain.handle('coverage-stats', async (_event, opts: any) => coverage.getStats(coverageConfig, opts ?? {}))
+// 探针卡片允许临时改连某个探针（opts.agentAddress），不必先把它设成当前配置
+ipcMain.handle('coverage-stats', async (_event, opts: any) =>
+  coverage.getStats(opts?.agentAddress ? { ...coverageConfig, agentAddress: opts.agentAddress } : coverageConfig, opts ?? {}))
 
-ipcMain.handle('coverage-dumpclasses', async (_event, opts: any) => coverage.dumpClasses(coverageConfig, opts ?? {}))
+ipcMain.handle('coverage-dumpclasses', async (_event, opts: any) =>
+  coverage.dumpClasses(opts?.agentAddress ? { ...coverageConfig, agentAddress: opts.agentAddress } : coverageConfig, opts ?? {}))
 
-ipcMain.handle('coverage-setkey', async (_event, opts: any) => coverage.setKey(coverageConfig, opts ?? {}))
+ipcMain.handle('coverage-setkey', async (_event, opts: any) =>
+  coverage.setKey(opts?.agentAddress ? { ...coverageConfig, agentAddress: opts.agentAddress } : coverageConfig, opts ?? {}))
 
 ipcMain.handle('coverage-run-command', async (_event, opts: any) =>
   coverage.runCommand(coverageConfig, opts?.backendId ?? coverageConfig.backend, opts?.commandId ?? '', opts?.values ?? {}, opts?.key ?? coverageConfig.key, opts?.execs ?? []))
@@ -824,5 +935,138 @@ ipcMain.handle('coverage-impact-analyze', async (_event, req: any) => {
   } catch (e: any) {
     // 绝不裸崩主进程：数据库不可用 / CLI 缺失都转成结构化错误
     return { success: false, error: String(e?.message ?? e), errorKind: 'io' }
+  }
+})
+
+// ===== 在线探针：发现 / 探活 / 登记 =====
+// 协议侧用 Node 原生 socket（1~10ms，超时可控），不用 CLI 子进程：
+// 子进程要启 JVM（几百 ms~1s）批量探测会卡死，且 CLI 的 connect() 没设超时，不可达 IP 会挂很久。
+// 渲染进程首次挂载时补一次心跳结果（避免启动瞬间推的那帧还没窗口，要白等 20s）
+ipcMain.handle('coverage-probe-last', async () => ({
+  success: true,
+  probes: lastProbeHeartbeat?.probes ?? [],
+  summary: lastProbeHeartbeat?.summary ?? null
+}))
+
+ipcMain.handle('coverage-probe-list', async (_event, opts: any) => {
+  try {
+    const targets = knownProbeTargets()
+    const { probes, summary } = await coverage.probeAgents({
+      agents: targets,
+      timeoutMs: Number(opts?.timeoutMs) || 1500
+    })
+    // 显式刷新也推一份，让左导航角标与状态灯立即跟上
+    sendProbeHeartbeat({ probes, summary })
+    return { success: true, probes, summary }
+  } catch (e: any) {
+    return { success: false, error: String(e?.message ?? e) }
+  }
+})
+
+/**
+ * 远端 / 网段发现：对「主机 × 端口区间」批量握手，只留确认是探针的。
+ * 判定靠探针协议本身（连上 → 回 exec 头），不需要对方开放任何健康检查接口，
+ * 所以 HTTP / MySQL / redis 这些普通端口会被自然淘汰。
+ */
+ipcMain.handle('coverage-probe-scan-range', async (_event, opts: any) => {
+  try {
+    let lastProgress = 0
+    const res = await coverage.scanRange({
+      hostExpr: String(opts?.hosts ?? ''),
+      portExpr: String(opts?.ports ?? ''),
+      timeoutMs: Number(opts?.timeoutMs) || 1200,
+      onProgress: (done: number, total: number) => {
+        // 限流推送：每 5% 或每 20 个推一次，避免几千个目标把 IPC 打满
+        if (done - lastProgress < Math.max(20, Math.floor(total / 20))) return
+        lastProgress = done
+        try { mainWindow?.webContents.send('coverage-probe-scan-progress', { done, total }) } catch { /* 窗口已关闭 */ }
+      }
+    })
+    try { mainWindow?.webContents.send('coverage-probe-scan-progress', { done: res.scanned, total: res.scanned, finished: true }) } catch { /* ignore */ }
+
+    // 自动登记：命中里「确认是 xiaoxiao 探针」的（online/warning）直接进登记簿。
+    // 官方 JaCoCo（vanilla）不自动收——它不是本工具能驱动的探针。
+    let autoRegistered = 0
+    if (coverageConfig.probeAutoRegister !== false) {
+      const list = registeredAgents()
+      for (const p of res.probes) {
+        if (p.status !== 'online' && p.status !== 'warning') continue
+        if (list.some((a) => a.host === p.host && a.port === p.port)) continue
+        list.push({ id: `reg-${Date.now()}-${p.port}`, host: p.host, port: p.port })
+        setRegisteredAgents(list)
+        ;(p as { source: string }).source = 'registered'
+        autoRegistered++
+      }
+    }
+    console.info('[探针发现] 扫描 %d 个目标，命中 %d 个探针，自动登记 %d 个', res.scanned, res.hits, autoRegistered)
+    return { success: true, probes: res.probes, scanned: res.scanned, hits: res.hits, truncated: res.truncated, autoRegistered, error: res.error }
+  } catch (e: any) {
+    return { success: false, error: String(e?.message ?? e) }
+  }
+})
+
+/** 已抓流量里出现过的后端主机 → 远端扫描的候选来源（用户不用手打 IP） */
+ipcMain.handle('coverage-probe-traffic-hosts', async () => {
+  try {
+    return { success: true, hosts: listTrafficHosts() }
+  } catch (e: any) {
+    return { success: false, error: String(e?.message ?? e) }
+  }
+})
+
+ipcMain.handle('coverage-probe-registry', async (_event, opts: any) => {
+  try {
+    const action = String(opts?.action ?? 'list')
+    if (action === 'list') return { success: true, agents: registeredAgents() }
+    if (action === 'add') {
+      const parsed = parseAddress(opts?.host ? `${opts.host}:${opts.port}` : String(opts?.agentAddress ?? ''))
+      if (!parsed) return { success: false, error: '地址格式应为 host:port（如 10.0.0.7:8899）' }
+      const list = registeredAgents()
+      if (list.some((a) => a.host === parsed.host && a.port === parsed.port)) {
+        return { success: false, error: '该探针已登记：' + `${parsed.host}:${parsed.port}` }
+      }
+      const agent: ProbeAgent = {
+        id: `reg-${Date.now()}`,
+        host: parsed.host,
+        port: parsed.port,
+        label: opts?.label ? String(opts.label).trim() : undefined
+      }
+      list.push(agent)
+      setRegisteredAgents(list)
+      console.info('[探针登记] 新增 %s:%d label=%s', agent.host, agent.port, agent.label ?? '(无)')
+      return { success: true, agents: list }
+    }
+    if (action === 'remove') {
+      const id = String(opts?.id ?? '')
+      const list = registeredAgents().filter((a) => a.id !== id)
+      setRegisteredAgents(list)
+      return { success: true, agents: list }
+    }
+    if (action === 'update') {
+      // 编辑已登记探针：host/port/label 都可改；地址变更要做查重（不能改成和另一条登记重复）
+      const id = String(opts?.id ?? '')
+      const list = registeredAgents()
+      const target = list.find((a) => a.id === id)
+      if (!target) return { success: false, error: '登记项不存在或已被删除' }
+      const newAddr = opts?.host != null || opts?.port != null
+        ? `${opts.host ?? target.host}:${opts.port ?? target.port}`
+        : undefined
+      let parsed: { host: string; port: number } | null = null
+      if (newAddr != null) {
+        parsed = parseAddress(newAddr)
+        if (!parsed) return { success: false, error: '地址格式应为 host:port（如 10.0.0.7:8899）' }
+        if (list.some((a) => a.id !== id && a.host === parsed!.host && a.port === parsed!.port)) {
+          return { success: false, error: '该地址已登记在另一条探针里：' + `${parsed.host}:${parsed.port}` }
+        }
+      }
+      if (parsed) { target.host = parsed.host; target.port = parsed.port }
+      if (opts?.label !== undefined) target.label = String(opts.label).trim() || undefined
+      setRegisteredAgents(list)
+      console.info('[探针登记] 更新 id=%s → %s:%d label=%s', id, target.host, target.port, target.label ?? '(无)')
+      return { success: true, agents: list }
+    }
+    return { success: false, error: '未知操作: ' + action }
+  } catch (e: any) {
+    return { success: false, error: String(e?.message ?? e) }
   }
 })

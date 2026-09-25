@@ -13,6 +13,48 @@ import type { RunStep } from './lang/types.js'
 export { checkPath } from './projectDetect.js'
 export type { PathProbe } from './projectDetect.js'
 
+// ===== 在线探针：发现（lsof）+ 探活（JaCoCo RemoteControl 二进制协议）+ 识别 =====
+import { discoverLocal, expandTargets, parsePorts, probeMany, probeOne, scanRange, sortProbes, summarize } from './probes.js'
+export type {
+  LocalCandidate,
+  ProbeAgent,
+  ProbeDiagnostics,
+  ProbeKeyStat,
+  ProbeResult,
+  ProbeStatus,
+  ProbeSummary
+} from './probes.js'
+
+export { probeOne, scanRange, expandTargets, parsePorts }
+/**
+ * 心跳/刷新用：批量探测（不同地址之间并发；单个连接一次完成判定，绝不在同一 agent 上排两次队）。
+ * 调用方需保证 list 里同一 host:port 只出现一次。
+ */
+export async function probeAgents(req: {
+  agents: Array<{ id?: string; host: string; port: number; label?: string; source?: import('./probes.js').ProbeResult['source']; pid?: string }>
+  timeoutMs?: number
+  /**
+   * 并发度。默认 12：登记几十上百个探针时，旧值 6 会让一轮心跳耗时超过 20s 心跳间隔（追尾）。
+   * ⚠️ 并发是「对不同地址」，同一地址仍只有一次握手，不会因为调高而重复排队。
+   */
+  concurrency?: number
+}) {
+  const results = await probeMany(
+    req.agents.map((a) => ({
+      id: a.id ?? `${a.host}:${a.port}`,
+      host: a.host,
+      port: a.port,
+      label: a.label,
+      source: a.source ?? 'registered',
+      pid: a.pid
+    })),
+    { timeoutMs: req.timeoutMs ?? 1500, concurrency: req.concurrency ?? 12 }
+  )
+  return { probes: sortProbes(results), summary: summarize(results) }
+}
+
+export { discoverLocal }
+
 export { resolveClassfiles }
 
 // ===== Git 源码供给（增量报告的源码输入；classfiles 仍需从构建侧拿） =====

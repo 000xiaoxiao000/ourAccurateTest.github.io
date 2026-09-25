@@ -9,6 +9,7 @@ import type {
   TrafficRecord
 } from '../types/traffic'
 import type { ImpactAnalyzeRequest, ImpactResult } from '../types/impact'
+import type { ProbeAgent, ProbeResult, ProbeSummary } from '../types/probe'
 
 export interface CoveragePathProbe {
   path: string
@@ -184,9 +185,9 @@ declare global {
       coveragePreview: (opts: { backendId?: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
       coveragePickPath: (opts: { pick?: 'file' | 'dir' | 'dirOrFile'; title?: string }) => Promise<{ success: boolean; path?: string }>
       coverageKeys: () => Promise<{ success: boolean; keys?: string[]; error?: string }>
-      coverageStats: (opts: { limit?: number }) => Promise<{ success: boolean; text?: string; error?: string }>
+      coverageStats: (opts: { limit?: number; agentAddress?: string }) => Promise<{ success: boolean; text?: string; error?: string }>
       coverageDumpclasses: (opts: { zip?: string }) => Promise<{ success: boolean; file?: string; error?: string }>
-      coverageSetkey: (opts: { key?: string; clear?: boolean }) => Promise<{ success: boolean; error?: string }>
+      coverageSetkey: (opts: { key?: string; clear?: boolean; agentAddress?: string }) => Promise<{ success: boolean; error?: string }>
       coverageRunCommand: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; key?: string; execs?: string[] }) => Promise<{ success: boolean; text?: string; outputs?: string[]; reportDir?: string; hasHtml?: boolean; execs?: CoverageExecInfo[]; error?: string; stdout?: string; stderr?: string }>
       coverageCommandPreview: (opts: { backendId?: string; commandId: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
       coverageReport: (opts: { backendId?: string; values?: Record<string, string>; execs: string[] }) => Promise<{ success: boolean; reportDir?: string; hasHtml?: boolean; error?: string }>
@@ -201,6 +202,15 @@ declare global {
       coverageGitPrepare: (req: GitPrepareRequest) => Promise<GitPrepareResult>
       coverageGitCleanup: (opts?: { all?: boolean }) => Promise<{ success: boolean; freed?: number; error?: string }>
       onCoverageGitLog: (callback: (p: { phase: string; text: string; percent?: number }) => void) => () => void
+      // ===== 在线探针 =====
+      coverageProbeLast: () => Promise<{ success: boolean; probes: ProbeResult[]; summary: ProbeSummary | null }>
+      coverageProbeList: (opts?: { timeoutMs?: number }) => Promise<{ success: boolean; probes?: ProbeResult[]; summary?: ProbeSummary; error?: string }>
+      coverageProbeScanRange: (opts?: { hosts?: string; ports?: string; timeoutMs?: number }) => Promise<{ success: boolean; probes?: ProbeResult[]; scanned?: number; hits?: number; truncated?: boolean; autoRegistered?: number; error?: string }>
+      coverageProbeTrafficHosts: () => Promise<{ success: boolean; hosts?: Array<{ host: string; ports: number[]; count: number; lastTs: number }>; error?: string }>
+      onProbeScanProgress: (callback: (p: { done: number; total: number; finished?: boolean }) => void) => () => void
+      coverageProbeRegistry: (opts: { action: 'list' | 'add' | 'remove' | 'update'; id?: string; host?: string; port?: number; agentAddress?: string; label?: string }) => Promise<{ success: boolean; agents?: ProbeAgent[]; error?: string }>
+      /** 主进程 20s 心跳推送全量结果：角标 / 状态灯 / 列表共用一份，避免各自重复探测 */
+      onCoverageProbeHeartbeat: (callback: (p: { probes: ProbeResult[]; summary: ProbeSummary }) => void) => () => void
       // ===== 影响分析 =====
       coverageImpactAnalyze: (req: ImpactAnalyzeRequest) => Promise<ImpactResult>
       onCoverageImpactLog: (callback: (p: { text: string; percent: number }) => void) => () => void

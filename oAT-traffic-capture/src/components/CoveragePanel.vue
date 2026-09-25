@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTrafficStore } from '../stores/traffic'
 import GitSourcePanel from './GitSourcePanel.vue'
 import ImpactAnalysisPanel from './ImpactAnalysisPanel.vue'
+import ProbePanel from './ProbePanel.vue'
 import type { CoverageBackendInfo, CoverageExecInfo, CoverageParamSpec } from '../types/traffic'
 import type { CoveragePathProbe, GitCapability } from '../types/electron'
+import type { ProbeResult } from '../types/probe'
+
+const props = defineProps<{ subTab?: 'probes' | 'tools' | 'impact' }>()
+const emit = defineEmits<{ (e: 'update:subTab', v: 'probes' | 'tools' | 'impact'): void }>()
 
 const store = useTrafficStore()
 const execs = ref<CoverageExecInfo[]>([])
@@ -20,8 +25,37 @@ const msg = ref('')
 
 // ===== 指令级 UI 状态：每个后端(插件)声明全部指令，每条指令有自己的参数 schema / 真实命令 / 可执行 =====
 const toolsOpen = ref(true)
-/** 本页二级页签：工具与报告（各指令） / 影响分析（跨指令组合） */
-const mainTab = ref<'tools' | 'impact'>('tools')
+/** 本页二级页签：在线探针 / 工具与报告（各指令） / 影响分析（跨指令组合） */
+// ⚠️ 需要被 App.vue 左导航的「查看 →」跨组件切换，所以做成 v-model 而不是内部 state
+const mainTab = computed({
+  get: () => props.subTab ?? 'tools',
+  set: (v: 'probes' | 'tools' | 'impact') => emit('update:subTab', v)
+})
+
+// ===== 在线探针状态灯（地址框旁）：数据来自主进程心跳，不自己发起探测 =====
+const probes = ref<ProbeResult[]>([])
+const PROBE_META: Record<string, { cls: string; text: string }> = {
+  online: { cls: 'g-online', text: '在线' },
+  // 握手成功就算在线（绿点）；「没采到 Key」只是数据还没来，不该让人误以为探针没启动
+  warning: { cls: 'g-online', text: '在线·未采集' },
+  vanilla: { cls: 'g-vanilla', text: '官方 JaCoCo' },
+  offline: { cls: 'g-offline', text: '离线' }
+}
+function probeMeta(s: string) {
+  return PROBE_META[s] ?? PROBE_META.offline
+}
+const currentProbe = computed(() => probes.value.find((p) => p.agentAddress === cfg().agentAddress.trim()))
+function pickProbe(address: string) {
+  if (!address) return
+  store.saveCoverageConfig({ agentAddress: address })
+  refreshCommandPreview()
+}
+/** 探针页「清除当前地址」：清空配置里的 agentAddress（探针列表里的配置项随之消失） */
+function clearProbe() {
+  store.saveCoverageConfig({ agentAddress: '' })
+  refreshCommandPreview()
+}
+let unsubscribeProbes: (() => void) | undefined
 /** 影响分析的默认 exec 目录：已抓取 exec 所在目录（没有则空，让用户选） */
 const defaultExecDir = computed(() => {
   const f = execs.value[0]?.file
@@ -280,7 +314,18 @@ async function copyOutput() {
   setTimeout(() => { copiedOut.value = false }, 1500)
 }
 
-onMounted(async () => { await refreshBackends(); await loadGitCap() })
+onMounted(async () => {
+  await refreshBackends()
+  await loadGitCap()
+  // 探针列表由主进程 20s 心跳推送（那里已探过了），这里不重复发起连接
+  unsubscribeProbes = window.electronAPI?.onCoverageProbeHeartbeat((p) => {
+    if (p?.probes) probes.value = p.probes
+  })
+  // 启动瞬间推的那帧可能没有窗口，先补一次已有结果，免得状态灯白等 20 秒
+  const last = await window.electronAPI?.coverageProbeLast()
+  if (last?.probes?.length) probes.value = last.probes
+})
+onUnmounted(() => unsubscribeProbes?.())
 watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) selectBackend(id) })
 </script>
 
@@ -293,11 +338,14 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       <div class="flow-step" :class="{ cur: mainTab === 'impact' }"><span class="no">4</span><div><b>④ 影响分析</b><small>变更行 ∩ 谁跑过 = 受影响接口 / 用例</small></div></div>
     </div>
 
-    <!-- 二级页签：工具与报告（各指令） / 影响分析（跨指令组合，结果形态是表格而非命令行） -->
+    <!-- 二级页签：在线探针（采集前置） / 工具与报告（各指令） / 影响分析（跨指令组合） -->
     <div class="sub-tabs">
+      <button type="button" class="sub-tab" :class="{ on: mainTab === 'probes' }" @click="mainTab = 'probes'">在线探针</button>
       <button type="button" class="sub-tab" :class="{ on: mainTab === 'tools' }" @click="mainTab = 'tools'">工具与报告</button>
       <button type="button" class="sub-tab" :class="{ on: mainTab === 'impact' }" @click="mainTab = 'impact'">影响分析</button>
     </div>
+
+    <ProbePanel v-if="mainTab === 'probes'" :agent-address="cfg().agentAddress" @use-address="pickProbe" @clear-address="clearProbe" />
 
     <ImpactAnalysisPanel
       v-if="mainTab === 'impact'"
@@ -336,6 +384,20 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       <!-- Agent 连接配置：仅当前指令需要连 Agent 时出现（dump/keys/stats/setkey/dumpclasses 等） -->
       <div v-if="cmdNeeds('agent')" class="conn-bar">
         <label class="input-group"><span>Agent 地址</span><input :value="cfg().agentAddress" style="min-width:170px" @input="store.saveCoverageConfig({ agentAddress: ($event.target as HTMLInputElement).value }); refreshCommandPreview()"></label>
+        <!-- 探针状态灯：随便在哪条指令里都能立刻知道「我要连的这个还活着吗」；数据来自主进程心跳 -->
+        <div class="input-group pg-chip" :title="currentProbe ? currentProbe.note : '还没有探测到探针，可到「在线探针」页签扫描本机或登记地址'">
+          <span>探针状态</span>
+          <div class="pg-inline">
+            <span class="pg-dot" :class="probeMeta(currentProbe?.status ?? '').cls"></span>
+            <select v-if="probes.length" class="pg-select" :value="cfg().agentAddress" @change="pickProbe(($event.target as HTMLSelectElement).value)">
+              <option value="">探针 {{ probes.length }} 个 ▾</option>
+              <option v-for="p in probes" :key="p.id" :value="p.agentAddress">
+                {{ probeMeta(p.status).text }} · {{ p.agentAddress }}{{ p.ms ? ' · ' + p.ms + 'ms' : '' }}
+              </option>
+            </select>
+            <span v-else class="pg-none">{{ currentProbe ? probeMeta(currentProbe.status).text : '未探测' }}</span>
+          </div>
+        </div>
         <label class="input-group"><span>归属 Key</span><input :value="cfg().key" style="min-width:170px" @input="store.saveCoverageConfig({ key: ($event.target as HTMLInputElement).value }); refreshCommandPreview()"></label>
         <details class="mount-tip">
           <summary>被测服务挂载探针的启动参数</summary>
@@ -566,7 +628,17 @@ table.data tr:last-child td { border-bottom: none; }
 .cp-head { font-size: 12px; color: #475569; font-weight: 600; margin-bottom: 8px; }
 .sub { font-size: 12px; color: #64748b; margin: 4px 0 14px; }
 .fold-btn { font-size: 12px; color: #6b7280; }
-.conn-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0 4px; padding: 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; }
+.conn-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin: 10px 0 4px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: #f9fafb; }
+/* Agent 地址旁的探针状态灯 */
+.pg-chip { cursor: help; }
+.pg-inline { display: flex; align-items: center; gap: 6px; }
+.pg-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: #cbd5e1; }
+.pg-dot.g-online { background: #16a34a; }
+.pg-dot.g-warning { background: #d97706; }
+.pg-dot.g-vanilla { background: #2563eb; }
+.pg-dot.g-offline { background: #cbd5e1; }
+.pg-select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 8px; font-size: 12.5px; color: #1f2937; background: #fff; max-width: 240px; }
+.pg-none { font-size: 12.5px; color: var(--text-dim); padding: 7px 0; }
 .mount-tip { flex: 1 1 100%; font-size: 12px; }
 .mount-tip summary { cursor: pointer; color: #6b7280; }
 .mount-tip[open] summary { margin-bottom: 2px; }

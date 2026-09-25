@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { CoverageConfig, TrafficFilterRule, TrafficRecord } from './types.js'
+import type { CoverageConfig, ProbeSummary, TrafficFilterRule, TrafficRecord } from './types.js'
 
 contextBridge.exposeInMainWorld('electronAPI', {
   startCapture: (caseName: string) => ipcRenderer.invoke('start-capture', caseName),
@@ -87,6 +87,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event: Electron.IpcRendererEvent, p: { phase: string; text: string; percent?: number }) => callback(p)
     ipcRenderer.on('coverage-git-log', listener)
     return () => ipcRenderer.removeListener('coverage-git-log', listener)
+  },
+  // ===== 在线探针：发现 / 探活 / 登记 =====
+  coverageProbeLast: () => ipcRenderer.invoke('coverage-probe-last'),
+  coverageProbeList: (opts?: any) => ipcRenderer.invoke('coverage-probe-list', opts),
+  coverageProbeScanRange: (opts?: any) => ipcRenderer.invoke('coverage-probe-scan-range', opts),
+  coverageProbeTrafficHosts: () => ipcRenderer.invoke('coverage-probe-traffic-hosts'),
+  onProbeScanProgress: (callback: (p: { done: number; total: number; finished?: boolean }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: any) => callback(p)
+    ipcRenderer.on('coverage-probe-scan-progress', listener)
+    return () => ipcRenderer.removeListener('coverage-probe-scan-progress', listener)
+  },
+  coverageProbeRegistry: (opts: any) => ipcRenderer.invoke('coverage-probe-registry', opts),
+  onCoverageProbeHeartbeat: (callback: (p: { probes: any[]; summary: ProbeSummary }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: { probes: any[]; summary: ProbeSummary }) => callback(p)
+    ipcRenderer.on('coverage-probe-heartbeat', listener)
+    return () => ipcRenderer.removeListener('coverage-probe-heartbeat', listener)
   },
   // ===== 影响分析 =====
   coverageImpactAnalyze: (req: any) => ipcRenderer.invoke('coverage-impact-analyze', req),
