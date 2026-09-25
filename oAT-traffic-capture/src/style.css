@@ -1,3 +1,15 @@
+/* ===== 设计令牌 =====
+   组件里一律写 var(--token) 而不是 var(--token, #fallback)：变量在这里有真实声明，
+   外部工具（IDE / 构建期）能解析，将来做深色主题也只需改这一处。 */
+:root {
+  --text-soft: #6b7280;
+  --text-dim: #9ca3af;
+  --border: #e5e7eb;
+  --border-strong: #d1d5db;
+  --border-soft: #f1f5f9;
+  --bg-soft: #f8fafc;
+}
+
 * {
   margin: 0;
   padding: 0;

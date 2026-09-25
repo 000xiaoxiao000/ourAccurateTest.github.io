@@ -125,17 +125,6 @@ export function countRecords(opts: { since?: number } = {}): number {
     : (getDb().prepare('SELECT COUNT(*) AS c FROM records').get() as Record<string, any>)
   return Number(row?.c) || 0
 }
-export function listCoverageKeysInTraffic(): string[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT coverage_key AS k, MAX(timestamp) AS t FROM records
-       WHERE coverage_key IS NOT NULL AND coverage_key <> ''
-       GROUP BY coverage_key ORDER BY t DESC`
-    )
-    .all() as Array<{ k: string }>
-  return rows.map((r) => String(r.k))
-}
-
 function ensureColumn(table: string, column: string, definition: string): void {
   const exists = getDb()
     .prepare(`PRAGMA table_info(${table})`)
