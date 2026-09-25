@@ -74,21 +74,6 @@ let enabledProtocols: CaptureProtocolConfig = {
   ws: true,
   wss: true
 }
-
-function stringifyLogArg(arg: unknown): string {
-  if (arg instanceof Error) {
-    return arg.stack || arg.message
-  }
-  if (typeof arg === 'string') {
-    return arg
-  }
-  try {
-    return JSON.stringify(arg)
-  } catch {
-    return String(arg)
-  }
-}
-
 function pushRuntimeLog(level: RuntimeLogLevel, args: unknown[]) {
   const entry = {
     id: ++runtimeLogId,

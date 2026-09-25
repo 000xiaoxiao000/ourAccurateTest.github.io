@@ -212,7 +212,7 @@ export function listSessions(): Array<{
 
 export function loadSessionRecords(sessionId: string): TrafficRecord[] {
   const rows = getDb()
-    .prepare('SELECT * FROM records WHERE session_id = ? ORDER BY timestamp ASC')
+    .prepare('SELECT * FROM records WHERE session_id = ? ORDER BY timestamp')
     .all(sessionId) as Array<Record<string, any>>
 
   return rows.map((row) => ({
@@ -246,7 +246,7 @@ export function deleteSession(sessionId: string): void {
 }
 
 export function listFilterRules(): TrafficFilterRule[] {
-  const rows = getDb().prepare('SELECT * FROM filter_rules ORDER BY rowid ASC').all() as Array<Record<string, any>>
+  const rows = getDb().prepare('SELECT * FROM filter_rules ORDER BY rowid').all() as Array<Record<string, any>>
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -265,6 +265,7 @@ export function saveFilterRules(rules: TrafficFilterRule[]): void {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
   const transaction = database.transaction((items: TrafficFilterRule[]) => {
+    // 有意的全表替换：先把规则清空再批量重插（前端整份提交），所以这里没有 WHERE
     database.prepare('DELETE FROM filter_rules').run()
     for (const rule of items) {
       insert.run(rule.id, rule.name, rule.enabled ? 1 : 0, rule.target, rule.operator, rule.value, rule.action)
