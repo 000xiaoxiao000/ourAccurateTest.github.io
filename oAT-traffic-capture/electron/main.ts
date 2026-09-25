@@ -1,8 +1,8 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
-import path from 'path'
-import util from 'util'
-import fs from 'fs'
-import { fileURLToPath, pathToFileURL } from 'url'
+import * as path from 'node:path'
+import * as util from 'node:util'
+import * as fs from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { createProxyServer } from './proxy.js'
 import { disableSystemProxy, enableSystemProxy, getSystemProxyStatus } from './systemProxy.js'
 import { generateRootCert, getCertInfo, getProxyCaDir, installCertMacOS, openCertFolder, uninstallCertMacOS } from './certificate.js'
@@ -32,11 +32,10 @@ import {
   updateSessionEndTime
 } from './database.js'
 import type { CaptureProtocolConfig, CoverageConfig, TrafficFilterRule, TrafficRecord } from './types.js'
-import ExcelJS from 'exceljs'
+import * as ExcelJS from 'exceljs'
 import * as coverage from './coverage/index.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const __dirname = path.join(app.getAppPath(), 'dist-electron')
 
 let mainWindow: BrowserWindow | null = null
 let floatingWindow: BrowserWindow | null = null
