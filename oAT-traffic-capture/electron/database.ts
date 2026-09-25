@@ -1,5 +1,5 @@
-import Database from 'better-sqlite3'
-import path from 'path'
+import * as Database from 'better-sqlite3'
+import * as path from 'node:path'
 import { app } from 'electron'
 import type { CaptureSession, TrafficFilterRule, TrafficRecord } from './types.js'
 
@@ -15,6 +15,7 @@ function getDb(): Database.Database {
 export function initDatabase(): void {
   const dbPath = path.join(app.getPath('userData'), 'traffic.db')
   db = new Database(dbPath)
+  // language=SQLite
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -89,6 +90,7 @@ export function loadCoverageKeyTraffic(opts: { since?: number } = {}): CoverageK
   const rows = opts.since
     ? getDb()
         .prepare(
+          // language=SQLite
           `SELECT r.coverage_key AS k, r.method, r.url, r.protocol, r.timestamp, r.session_id,
                   COALESCE(s.case_name, '') AS case_name
            FROM records r LEFT JOIN sessions s ON s.id = r.session_id
@@ -98,6 +100,7 @@ export function loadCoverageKeyTraffic(opts: { since?: number } = {}): CoverageK
         .all(opts.since) as Array<Record<string, any>>
     : getDb()
         .prepare(
+          // language=SQLite
           `SELECT r.coverage_key AS k, r.method, r.url, r.protocol, r.timestamp, r.session_id,
                   COALESCE(s.case_name, '') AS case_name
            FROM records r LEFT JOIN sessions s ON s.id = r.session_id
@@ -121,8 +124,8 @@ export function loadCoverageKeyTraffic(opts: { since?: number } = {}): CoverageK
 /** 时间窗内的抓包记录总数（影响分析自检：区分「没抓包」和「抓了但没注入 key」） */
 export function countRecords(opts: { since?: number } = {}): number {
   const row = opts.since
-    ? (getDb().prepare('SELECT COUNT(*) AS c FROM records WHERE timestamp >= ?').get(opts.since) as Record<string, any>)
-    : (getDb().prepare('SELECT COUNT(*) AS c FROM records').get() as Record<string, any>)
+    ? (getDb().prepare(/* language=SQLite */ 'SELECT COUNT(*) AS c FROM records WHERE timestamp >= ?').get(opts.since) as Record<string, any>)
+    : (getDb().prepare(/* language=SQLite */ 'SELECT COUNT(*) AS c FROM records').get() as Record<string, any>)
   return Number(row?.c) || 0
 }
 function ensureColumn(table: string, column: string, definition: string): void {
@@ -137,29 +140,56 @@ function ensureColumn(table: string, column: string, definition: string): void {
 
 export function saveSession(session: Omit<CaptureSession, 'records'>): void {
   getDb()
-    .prepare('INSERT OR REPLACE INTO sessions (id, case_name, start_time, end_time) VALUES (?, ?, ?, ?)')
+    .prepare(/* language=SQLite */ `
+      INSERT INTO sessions (id, case_name, start_time, end_time)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        case_name = excluded.case_name,
+        start_time = excluded.start_time,
+        end_time = excluded.end_time
+    `)
     .run(session.id, session.caseName, session.startTime, session.endTime ?? null)
 }
 
 export function updateSessionEndTime(sessionId: string, endTime: number): void {
-  getDb().prepare('UPDATE sessions SET end_time = ? WHERE id = ?').run(endTime, sessionId)
+  getDb().prepare(/* language=SQLite */ 'UPDATE sessions SET end_time = ? WHERE id = ?').run(endTime, sessionId)
 }
 
 function existingSessionId(sessionId?: string): string | null {
   if (!sessionId) return null
-  const row = getDb().prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId) as { id: string } | undefined
+  const row = getDb().prepare(/* language=SQLite */ 'SELECT id FROM sessions WHERE id = ?').get(sessionId) as { id: string } | undefined
   return row?.id ?? null
 }
 
 export function saveRecord(record: TrafficRecord, sessionId?: string): void {
   const persistedSessionId = existingSessionId(sessionId)
   getDb()
-    .prepare(`
-      INSERT OR REPLACE INTO records
+    .prepare(/* language=SQLite */ `
+      INSERT INTO records
       (id, session_id, method, url, protocol, status_code, duration, timestamp,
        request_headers, request_body, response_headers, response_body, error,
        source, replay_of, replay_status, replay_time, tags, websocket_messages, coverage_key)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        session_id = excluded.session_id,
+        method = excluded.method,
+        url = excluded.url,
+        protocol = excluded.protocol,
+        status_code = excluded.status_code,
+        duration = excluded.duration,
+        timestamp = excluded.timestamp,
+        request_headers = excluded.request_headers,
+        request_body = excluded.request_body,
+        response_headers = excluded.response_headers,
+        response_body = excluded.response_body,
+        error = excluded.error,
+        source = excluded.source,
+        replay_of = excluded.replay_of,
+        replay_status = excluded.replay_status,
+        replay_time = excluded.replay_time,
+        tags = excluded.tags,
+        websocket_messages = excluded.websocket_messages,
+        coverage_key = excluded.coverage_key
     `)
     .run(
       record.id,
@@ -193,7 +223,7 @@ export function listSessions(): Array<{
   record_count: number
 }> {
   return getDb()
-    .prepare(`
+    .prepare(/* language=SQLite */ `
       SELECT s.id, s.case_name, s.start_time, s.end_time, COUNT(r.id) AS record_count
       FROM sessions s
       LEFT JOIN records r ON r.session_id = s.id
@@ -212,7 +242,7 @@ export function listSessions(): Array<{
 
 export function loadSessionRecords(sessionId: string): TrafficRecord[] {
   const rows = getDb()
-    .prepare('SELECT * FROM records WHERE session_id = ? ORDER BY timestamp')
+    .prepare(/* language=SQLite */ 'SELECT * FROM records WHERE session_id = ? ORDER BY timestamp')
     .all(sessionId) as Array<Record<string, any>>
 
   return rows.map((row) => ({
@@ -241,12 +271,12 @@ export function loadSessionRecords(sessionId: string): TrafficRecord[] {
 
 export function deleteSession(sessionId: string): void {
   const database = getDb()
-  database.prepare('DELETE FROM records WHERE session_id = ?').run(sessionId)
-  database.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
+  database.prepare(/* language=SQLite */ 'DELETE FROM records WHERE session_id = ?').run(sessionId)
+  database.prepare(/* language=SQLite */ 'DELETE FROM sessions WHERE id = ?').run(sessionId)
 }
 
 export function listFilterRules(): TrafficFilterRule[] {
-  const rows = getDb().prepare('SELECT * FROM filter_rules ORDER BY rowid').all() as Array<Record<string, any>>
+  const rows = getDb().prepare(/* language=SQLite */ 'SELECT * FROM filter_rules ORDER BY rowid').all() as Array<Record<string, any>>
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -260,13 +290,20 @@ export function listFilterRules(): TrafficFilterRule[] {
 
 export function saveFilterRules(rules: TrafficFilterRule[]): void {
   const database = getDb()
-  const insert = database.prepare(`
-    INSERT OR REPLACE INTO filter_rules (id, name, enabled, target, operator, value, action)
+  const insert = database.prepare(/* language=SQLite */ `
+    INSERT INTO filter_rules (id, name, enabled, target, operator, value, action)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      enabled = excluded.enabled,
+      target = excluded.target,
+      operator = excluded.operator,
+      value = excluded.value,
+      action = excluded.action
   `)
   const transaction = database.transaction((items: TrafficFilterRule[]) => {
     // 有意的全表替换：先把规则清空再批量重插（前端整份提交），所以这里没有 WHERE
-    database.prepare('DELETE FROM filter_rules').run()
+    database.prepare(/* language=SQLite */ 'DELETE FROM filter_rules').run()
     for (const rule of items) {
       insert.run(rule.id, rule.name, rule.enabled ? 1 : 0, rule.target, rule.operator, rule.value, rule.action)
     }
