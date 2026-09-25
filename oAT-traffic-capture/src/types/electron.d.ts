@@ -8,6 +8,7 @@ import type {
   TrafficFilterRule,
   TrafficRecord
 } from '../types/traffic'
+import type { ImpactAnalyzeRequest, ImpactResult } from '../types/impact'
 
 export interface CoveragePathProbe {
   path: string
@@ -200,6 +201,9 @@ declare global {
       coverageGitPrepare: (req: GitPrepareRequest) => Promise<GitPrepareResult>
       coverageGitCleanup: (opts?: { all?: boolean }) => Promise<{ success: boolean; freed?: number; error?: string }>
       onCoverageGitLog: (callback: (p: { phase: string; text: string; percent?: number }) => void) => () => void
+      // ===== 影响分析 =====
+      coverageImpactAnalyze: (req: ImpactAnalyzeRequest) => Promise<ImpactResult>
+      onCoverageImpactLog: (callback: (p: { text: string; percent: number }) => void) => () => void
     }
   }
 }

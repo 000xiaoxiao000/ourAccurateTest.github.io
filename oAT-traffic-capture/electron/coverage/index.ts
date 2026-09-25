@@ -57,6 +57,50 @@ export function gitCleanup(opts?: { all?: boolean }) {
   return cleanupGitSource(coverageWorkDir(), opts)
 }
 
+// ===== 影响分析（变更行 ∩ 谁跑过 = 受影响接口 / 用例） =====
+import { analyzeImpact } from './impact.js'
+import { loadCoverageKeyTraffic, countRecords } from '../database.js'
+export type { ImpactRequest, ImpactResult } from './impact.js'
+
+/** 多路径参数按 ; 拆分（与前端「多模块用 ; 分隔」一致） */
+function splitPaths(v?: string): string[] {
+  return String(v ?? '')
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/**
+ * 影响分析。traffic（key → 接口 / 用例）在这里从流量库注入，
+ * impact.ts 本身不依赖 electron / 数据库，方便纯 Node 单测。
+ */
+export async function impactAnalyze(
+  req: {
+    execDir: string
+    classfiles: string
+    oldClassfiles?: string
+    newSources?: string
+    oldSources?: string
+    since?: number
+  },
+  onStage?: (s: { text: string; percent: number }) => void
+) {
+  return analyzeImpact(
+    {
+      workDir: coverageWorkDir(),
+      execDir: req.execDir,
+      classfiles: splitPaths(req.classfiles),
+      oldClassfiles: splitPaths(req.oldClassfiles),
+      newSources: splitPaths(req.newSources),
+      oldSources: splitPaths(req.oldSources),
+      since: req.since,
+      traffic: loadCoverageKeyTraffic({ since: req.since }),
+      trafficTotalCount: countRecords({ since: req.since })
+    },
+    onStage
+  )
+}
+
 function coverageWorkDir(): string {
   const base = (app && app.getPath) ? app.getPath('userData') : os.tmpdir()
   const dir = path.join(base, 'oat-coverage')

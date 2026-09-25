@@ -127,14 +127,36 @@ function loadCaptureConfig(): void {
   try {
     const configPath = captureConfigPath()
     if (!fs.existsSync(configPath)) return
-    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as { proxyPort?: number }
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as {
+      proxyPort?: number
+      coverage?: Partial<CoverageConfig>
+    }
     const proxyPort = Number(parsed.proxyPort)
     if (Number.isInteger(proxyPort) && proxyPort > 0 && proxyPort <= 65535) {
       configuredProxyPort = proxyPort
     }
+    // 覆盖率采集配置持久化：否则重启后 enabled=false、key=''，抓包会静默不注入
+    // X-Coverage-Key → 流量记录无归属 key，影响分析反查不到接口/用例。
+    if (parsed.coverage && typeof parsed.coverage === 'object') {
+      const c = parsed.coverage
+      coverageConfig.enabled = c.enabled === true
+      if (typeof c.key === 'string') coverageConfig.key = c.key
+      if (typeof c.headerName === 'string' && c.headerName.trim()) coverageConfig.headerName = c.headerName.trim()
+      if (typeof c.agentAddress === 'string') coverageConfig.agentAddress = c.agentAddress
+      if (typeof c.backend === 'string' && c.backend) coverageConfig.backend = c.backend
+      if (typeof c.classfilesPath === 'string') coverageConfig.classfilesPath = c.classfilesPath
+    }
   } catch {
     configuredProxyPort = DEFAULT_PROXY_PORT
   }
+}
+
+function persistCaptureConfig(): void {
+  fs.writeFileSync(
+    captureConfigPath(),
+    JSON.stringify({ proxyPort: configuredProxyPort, coverage: coverageConfig }, null, 2),
+    'utf-8'
+  )
 }
 
 function saveProxyPortConfig(port: number): number {
@@ -143,7 +165,7 @@ function saveProxyPortConfig(port: number): number {
     throw new Error('系统代理端口必须是 1-65535 的整数')
   }
   configuredProxyPort = proxyPort
-  fs.writeFileSync(captureConfigPath(), JSON.stringify({ proxyPort: configuredProxyPort }, null, 2), 'utf-8')
+  persistCaptureConfig()
   return configuredProxyPort
 }
 
@@ -723,6 +745,11 @@ ipcMain.handle('get-coverage-config', async () => coverageConfig)
 ipcMain.handle('set-coverage-config', async (_event, config: CoverageConfig) => {
   // 原地修改，保持对象引用不变（代理闭包持有该引用，需实时感知 enabled/key 变化）
   Object.assign(coverageConfig, config)
+  try {
+    persistCaptureConfig()
+  } catch (e) {
+    console.warn('[覆盖率配置] 持久化失败（不影响本次运行）:', e)
+  }
   broadcastCaptureState()
   // classfiles 只在生成报告时使用，与代理注入无关，不进这条日志
   console.info('[覆盖率配置] enabled=%s key=%s 头=%s agent=%s 后端=%s',
@@ -802,3 +829,16 @@ ipcMain.handle('coverage-git-refs', async (_event, q: any) => coverage.gitRefs(q
 ipcMain.handle('coverage-git-commits', async (_event, q: any) => coverage.gitCommits(q ?? {}, sendGitLog))
 ipcMain.handle('coverage-git-prepare', async (_event, req: any) => coverage.gitPrepare(req ?? {}, sendGitLog))
 ipcMain.handle('coverage-git-cleanup', async (_event, opts: any) => coverage.gitCleanup(opts ?? {}))
+
+// ===== 影响分析：变更行 ∩ 谁跑过 = 受影响的接口 / 用例 =====
+function sendImpactLog(p: { text: string; percent: number }) {
+  try { mainWindow?.webContents.send('coverage-impact-log', p) } catch { /* 窗口已关闭则忽略 */ }
+}
+ipcMain.handle('coverage-impact-analyze', async (_event, req: any) => {
+  try {
+    return await coverage.impactAnalyze(req ?? {}, sendImpactLog)
+  } catch (e: any) {
+    // 绝不裸崩主进程：数据库不可用 / CLI 缺失都转成结构化错误
+    return { success: false, error: String(e?.message ?? e), errorKind: 'io' }
+  }
+})

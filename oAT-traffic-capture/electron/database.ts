@@ -66,6 +66,74 @@ export function initDatabase(): void {
   ensureColumn('records', 'replay_time', 'INTEGER')
   ensureColumn('records', 'tags', 'TEXT')
   ensureColumn('records', 'websocket_messages', 'TEXT')
+  // 影响分析：key → 接口 / 用例 反查的桥梁（探针 headerkey 注入的那个值）
+  ensureColumn('records', 'coverage_key', 'TEXT')
+}
+
+/** 覆盖率 key → 该 key 期间抓到的接口与所属用例（影响分析反查用） */
+export interface CoverageKeyTraffic {
+  key: string
+  method: string
+  url: string
+  protocol: string
+  caseName: string
+  timestamp: number
+  sessionId: string | null
+}
+
+/**
+ * 拉取带 coverage_key 的流量记录。
+ * 用例名来自 sessions.case_name —— 抓包时 record.caseName 是空的，只有会话上有。
+ */
+export function loadCoverageKeyTraffic(opts: { since?: number } = {}): CoverageKeyTraffic[] {
+  const rows = opts.since
+    ? getDb()
+        .prepare(
+          `SELECT r.coverage_key AS k, r.method, r.url, r.protocol, r.timestamp, r.session_id,
+                  COALESCE(s.case_name, '') AS case_name
+           FROM records r LEFT JOIN sessions s ON s.id = r.session_id
+           WHERE r.coverage_key IS NOT NULL AND r.coverage_key <> '' AND r.timestamp >= ?
+           ORDER BY r.timestamp DESC`
+        )
+        .all(opts.since) as Array<Record<string, any>>
+    : getDb()
+        .prepare(
+          `SELECT r.coverage_key AS k, r.method, r.url, r.protocol, r.timestamp, r.session_id,
+                  COALESCE(s.case_name, '') AS case_name
+           FROM records r LEFT JOIN sessions s ON s.id = r.session_id
+           WHERE r.coverage_key IS NOT NULL AND r.coverage_key <> ''
+           ORDER BY r.timestamp DESC`
+        )
+        .all() as Array<Record<string, any>>
+  return rows.map((r) => ({
+    key: String(r.k),
+    method: r.method ?? '',
+    url: r.url ?? '',
+    protocol: r.protocol ?? '',
+    caseName: r.case_name ?? '',
+    timestamp: Number(r.timestamp) || 0,
+    sessionId: r.session_id ?? null
+  }))
+}
+
+/** 当前库里出现过的全部 coverage key（去重，按最近使用排序） */
+
+/** 时间窗内的抓包记录总数（影响分析自检：区分「没抓包」和「抓了但没注入 key」） */
+export function countRecords(opts: { since?: number } = {}): number {
+  const row = opts.since
+    ? (getDb().prepare('SELECT COUNT(*) AS c FROM records WHERE timestamp >= ?').get(opts.since) as Record<string, any>)
+    : (getDb().prepare('SELECT COUNT(*) AS c FROM records').get() as Record<string, any>)
+  return Number(row?.c) || 0
+}
+export function listCoverageKeysInTraffic(): string[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT coverage_key AS k, MAX(timestamp) AS t FROM records
+       WHERE coverage_key IS NOT NULL AND coverage_key <> ''
+       GROUP BY coverage_key ORDER BY t DESC`
+    )
+    .all() as Array<{ k: string }>
+  return rows.map((r) => String(r.k))
 }
 
 function ensureColumn(table: string, column: string, definition: string): void {
@@ -101,8 +169,8 @@ export function saveRecord(record: TrafficRecord, sessionId?: string): void {
       INSERT OR REPLACE INTO records
       (id, session_id, method, url, protocol, status_code, duration, timestamp,
        request_headers, request_body, response_headers, response_body, error,
-       source, replay_of, replay_status, replay_time, tags, websocket_messages)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       source, replay_of, replay_status, replay_time, tags, websocket_messages, coverage_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
     .run(
       record.id,
@@ -123,7 +191,8 @@ export function saveRecord(record: TrafficRecord, sessionId?: string): void {
       record.replayStatus ?? null,
       record.replayTime ?? null,
       JSON.stringify(record.tags ?? []),
-      JSON.stringify(record.websocketMessages ?? [])
+      JSON.stringify(record.websocketMessages ?? []),
+      record.coverageKey ?? null
     )
 }
 
@@ -176,7 +245,8 @@ export function loadSessionRecords(sessionId: string): TrafficRecord[] {
     replayStatus: row.replay_status ?? undefined,
     replayTime: row.replay_time ?? undefined,
     tags: JSON.parse(row.tags || '[]'),
-    websocketMessages: JSON.parse(row.websocket_messages || '[]')
+    websocketMessages: JSON.parse(row.websocket_messages || '[]'),
+    coverageKey: row.coverage_key ?? undefined
   }))
 }
 

@@ -87,5 +87,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const listener = (_event: Electron.IpcRendererEvent, p: { phase: string; text: string; percent?: number }) => callback(p)
     ipcRenderer.on('coverage-git-log', listener)
     return () => ipcRenderer.removeListener('coverage-git-log', listener)
+  },
+  // ===== 影响分析 =====
+  coverageImpactAnalyze: (req: any) => ipcRenderer.invoke('coverage-impact-analyze', req),
+  onCoverageImpactLog: (callback: (p: { text: string; percent: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: { text: string; percent: number }) => callback(p)
+    ipcRenderer.on('coverage-impact-log', listener)
+    return () => ipcRenderer.removeListener('coverage-impact-log', listener)
   }
 })

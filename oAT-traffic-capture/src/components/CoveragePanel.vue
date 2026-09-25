@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useTrafficStore } from '../stores/traffic'
 import GitSourcePanel from './GitSourcePanel.vue'
+import ImpactAnalysisPanel from './ImpactAnalysisPanel.vue'
 import type { CoverageBackendInfo, CoverageExecInfo, CoverageParamSpec } from '../types/traffic'
 import type { CoveragePathProbe, GitCapability } from '../types/electron'
 
@@ -19,6 +20,15 @@ const msg = ref('')
 
 // ===== 指令级 UI 状态：每个后端(插件)声明全部指令，每条指令有自己的参数 schema / 真实命令 / 可执行 =====
 const toolsOpen = ref(true)
+/** 本页二级页签：工具与报告（各指令） / 影响分析（跨指令组合） */
+const mainTab = ref<'tools' | 'impact'>('tools')
+/** 影响分析的默认 exec 目录：已抓取 exec 所在目录（没有则空，让用户选） */
+const defaultExecDir = computed(() => {
+  const f = execs.value[0]?.file
+  if (!f) return ''
+  const i = Math.max(f.lastIndexOf('/'), f.lastIndexOf('\\'))
+  return i > 0 ? f.slice(0, i) : ''
+})
 
 /** 当前选中指令是否依赖某项共享配置（决定配置条是否显示） */
 function cmdNeeds(what: 'agent' | 'classfiles'): boolean {
@@ -280,10 +290,25 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       <div class="flow-step done"><span class="no">✓</span><div><b>① 采集</b><small>代理注入 Key / 工具链运行期采集</small></div></div>
       <div class="flow-step" :class="{ cur: execs.length === 0 }"><span class="no">2</span><div><b>② 生成报告</b><small>按语言调用原生工具</small></div></div>
       <div class="flow-step" :class="{ cur: !!reportDir }"><span class="no">3</span><div><b>③ 查看覆盖率报告</b><small>直接打开后端生成的原生报告</small></div></div>
+      <div class="flow-step" :class="{ cur: mainTab === 'impact' }"><span class="no">4</span><div><b>④ 影响分析</b><small>变更行 ∩ 谁跑过 = 受影响接口 / 用例</small></div></div>
     </div>
 
+    <!-- 二级页签：工具与报告（各指令） / 影响分析（跨指令组合，结果形态是表格而非命令行） -->
+    <div class="sub-tabs">
+      <button type="button" class="sub-tab" :class="{ on: mainTab === 'tools' }" @click="mainTab = 'tools'">工具与报告</button>
+      <button type="button" class="sub-tab" :class="{ on: mainTab === 'impact' }" @click="mainTab = 'impact'">影响分析</button>
+    </div>
+
+    <ImpactAnalysisPanel
+      v-if="mainTab === 'impact'"
+      :classfiles-path="cfg().classfilesPath"
+      :default-exec-dir="defaultExecDir"
+      :cap="gitCap"
+      @recheck-git="loadGitCap(true)"
+    />
+
     <!-- 覆盖工具（每种支持语言一个，可收缩/展开） -->
-    <div class="card">
+    <div class="card" v-if="mainTab === 'tools'">
       <div class="card-head" style="cursor:pointer; user-select:none" @click="toolsOpen = !toolsOpen">
         <h3>覆盖工具 <span class="tag tag-blue">Coverage Tools</span><span class="muted" style="font-size:12px;margin-left:8px">每种支持语言一个工具（采集→报告），含前端（Istanbul）与后端（JaCoCo 等）</span></h3>
         <span class="fold-btn">{{ toolsOpen ? '收起 ▲' : '展开 ▼' }}</span>
@@ -301,7 +326,7 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
     </div>
 
     <!-- 全部指令：该工具声明的所有指令，逐条参数 UI 化 + 真实命令预览 + 可执行（参数与目录都对应到各指令） -->
-    <div class="card" v-if="selectedBackend && selectedBackend.commands.length">
+    <div class="card" v-if="mainTab === 'tools' && selectedBackend && selectedBackend.commands.length">
       <div class="card-head">
         <h3>{{ selectedBackend.name }} · 全部指令</h3>
         <span class="tag tag-blue">{{ selectedBackend.commands.length }} 条</span>
@@ -504,7 +529,12 @@ table.data tr:last-child td { border-bottom: none; }
 .plugin-card h4 { font-size: 14px; color: #1f2937; display: flex; align-items: center; justify-content: space-between; }
 .plugin-card p { font-size: 12px; color: #64748b; margin: 6px 0 0; }
 .plugin-card p.desc { margin-top: 6px; color: #94a3b8; line-height: 1.5; }
-.flow-strip { display: grid; grid-template-columns: repeat(3, 1fr); background: #fff; border: 1px solid #eef1f5; border-radius: 12px; overflow: hidden; }
+.flow-strip { display: grid; grid-template-columns: repeat(4, 1fr); background: #fff; border: 1px solid #eef1f5; border-radius: 12px; overflow: hidden; }
+/* 二级页签：工具与报告 / 影响分析 */
+.sub-tabs { display: flex; gap: 6px; margin: 10px 0 2px; }
+.sub-tab { border: 1px solid #d1d5db; background: #fff; color: #334155; border-radius: 8px; padding: 5px 14px; font-size: 12px; cursor: pointer; transition: all .15s; }
+.sub-tab:hover { border-color: #2563eb; color: #2563eb; }
+.sub-tab.on { background: #2563eb; border-color: #2563eb; color: #fff; }
 .flow-step { padding: 14px 18px; display: flex; gap: 12px; align-items: flex-start; border-right: 1px solid #f1f5f9; }
 .flow-step:last-child { border-right: none; }
 .flow-step .no { width: 24px; height: 24px; border-radius: 50%; background: #f1f5f9; color: #475569; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
