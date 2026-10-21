@@ -671,6 +671,9 @@ const treeExpandLimited = ref(false)
 // Lazy-loaded methods per class id (keyed by the code-tree CLASS node id).
 // Methods are no longer pre-expanded into codeTree to avoid rendering tens of thousands of nodes.
 const classMethods = ref<Record<string, CodeMethodNode[]>>({})
+// Keyword-filtered method cache used only while searching the code tree.
+// Keyed by `${classId}::${keyword}` so a search never pollutes the full (manual) list cache.
+const searchClassMethods = ref<Record<string, CodeMethodNode[]>>({})
 const loadingClassMethods = ref<Record<string, boolean>>({})
 const activeTab = ref<'trace' | 'calls'>('trace')
 const callViewMode = ref<'graph' | 'dependency' | 'control' | 'coverage'>('graph')
@@ -788,7 +791,22 @@ const traceCodeLinkedIds = computed(() => new Set(traceListNodes('code').map((no
 const traceCodeLoadingIds = computed(() => new Set(Object.keys(loadingClassMethods.value).filter((key) => loadingClassMethods.value[key])))
 
 const codeKeyword = computed(() => normalizeSearch(map.keyword.value))
-const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value).map(toTreeNode))
+// 方法级搜索：从已返回的轻量节点（map.nodes）里筛出「方法名/签名」命中关键词的类，
+// 让这些「类名本身不命中、但含命中方法」的类也出现在搜索树中，再由自动懒加载拉取方法。
+// 仅当关键词长度 >= 2 才启用，避免单字符查询把海量类全部拉进结果。
+const matchingMethodClassIds = computed(() => {
+  const kw = codeKeyword.value
+  const ids = new Set<string>()
+  if (kw.length >= 2) {
+    for (const node of map.nodes.value || []) {
+      if (node.kind === 'CODE_METHOD' && node.parentId && traceNodeSearchText(node).includes(kw)) {
+        ids.add(node.parentId)
+      }
+    }
+  }
+  return ids
+})
+const treeNodes = computed(() => filterCodeTreeNodes(map.codeTree.value || [], codeKeyword.value, matchingMethodClassIds.value).map(toTreeNode))
 const displayOpenDirs = computed(() => {
   if (!codeKeyword.value) return openDirs.value
   const dirs = new Set<string>()
@@ -800,6 +818,36 @@ const displayOpenClasses = computed(() => {
   const classes = new Set<string>()
   treeNodes.value.forEach((node) => collectTreeOpenKeys(node, new Set(), classes))
   return classes
+})
+
+// 搜索态自动懒加载方法：主搜索框有关键词时，codeTree 已截断到「类」级，
+// 这里为每一个可见 CLASS 节点自动拉取（按关键词服务端过滤后的）方法，
+// 使方法名也能被搜索命中并直接展示，不必逐一点开类。
+let searchMethodLoadTimer: number | undefined
+watch([() => codeKeyword.value, () => treeNodes.value], () => {
+  const keyword = codeKeyword.value
+  if (searchMethodLoadTimer !== undefined) {
+    window.clearTimeout(searchMethodLoadTimer)
+    searchMethodLoadTimer = undefined
+  }
+  if (!keyword) {
+    if (Object.keys(searchClassMethods.value).length) searchClassMethods.value = {}
+    return
+  }
+  searchMethodLoadTimer = window.setTimeout(() => {
+    searchMethodLoadTimer = undefined
+    const ids: string[] = []
+    const visit = (node: TreeNode) => {
+      if (node.isDir) {
+        node.children.forEach(visit)
+        return
+      }
+      if (node.file && node.file.methodCount !== undefined) ids.push(node.file.id)
+      node.children.forEach(visit)
+    }
+    treeNodes.value.forEach(visit)
+    ids.forEach((id) => ensureClassMethodsLoaded(id, keyword))
+  }, 220)
 })
 
 watch(() => normalizeSearch(traceListKeyword.value), (keyword) => {
@@ -1737,12 +1785,22 @@ function toggleClass(id: string) {
   }
 }
 
-function ensureClassMethodsLoaded(classId: string) {
+function ensureClassMethodsLoaded(classId: string, keyword?: string) {
   const appId = map.response.value?.baseline?.sourceAppId
   const className = findClassSymbol(classId)
   if (!appId || !className) return
-  if (classMethods.value[classId] !== undefined || loadingClassMethods.value[classId] === true) return
-  void loadClassMethods(classId, appId, className)
+  if (keyword) {
+    const key = searchMethodsKey(classId, keyword)
+    if (searchClassMethods.value[key] !== undefined || loadingClassMethods.value[classId] === true) return
+    void loadSearchClassMethods(classId, appId, className, keyword)
+  } else {
+    if (classMethods.value[classId] !== undefined || loadingClassMethods.value[classId] === true) return
+    void loadClassMethods(classId, appId, className)
+  }
+}
+
+function searchMethodsKey(classId: string, keyword: string) {
+  return `${classId}::${keyword}`
 }
 
 function findClassSymbol(classId: string): string | undefined {
@@ -1762,6 +1820,18 @@ async function loadClassMethods(classId: string, appId: string, className: strin
     classMethods.value = { ...classMethods.value, [classId]: res.methods || [] }
   } catch {
     classMethods.value = { ...classMethods.value, [classId]: [] }
+  } finally {
+    loadingClassMethods.value = { ...loadingClassMethods.value, [classId]: false }
+  }
+}
+
+async function loadSearchClassMethods(classId: string, appId: string, className: string, keyword: string) {
+  loadingClassMethods.value = { ...loadingClassMethods.value, [classId]: true }
+  try {
+    const res = await fetchCodeClassMethods(projectId.value, { appId, className, keyword, limit: 500 })
+    searchClassMethods.value = { ...searchClassMethods.value, [searchMethodsKey(classId, keyword)]: res.methods || [] }
+  } catch {
+    searchClassMethods.value = { ...searchClassMethods.value, [searchMethodsKey(classId, keyword)]: [] }
   } finally {
     loadingClassMethods.value = { ...loadingClassMethods.value, [classId]: false }
   }
@@ -1829,7 +1899,10 @@ function toTreeNode(node: CodeTreeNode): TreeNode {
     }
   }
   if (node.kind === 'FILE' || node.kind === 'CLASS') {
-    const loaded = classMethods.value[node.id]
+    const searchKw = codeKeyword.value
+    const loaded = searchKw
+      ? searchClassMethods.value[searchMethodsKey(node.id, searchKw)]
+      : classMethods.value[node.id]
     const loading = loadingClassMethods.value[node.id] === true
     const methodNodes = node.kind === 'CLASS'
       ? (loaded || []).map((m) => ({ nodeId: m.id, name: m.methodName, line: m.lineNumber ?? undefined }))
@@ -1864,13 +1937,15 @@ function collapseDirectoryChain(node: CodeTreeNode) {
   return { id: current.id, label: current.label, labels, children: current.children }
 }
 
-function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string): CodeTreeNode[] {
+function filterCodeTreeNodes(nodes: CodeTreeNode[], keyword: string, keepClassIds: Set<string> = new Set()): CodeTreeNode[] {
   const businessNodes = filterBusinessCodeTree(nodes as unknown as Parameters<typeof filterBusinessCodeTree>[0]) as CodeTreeNode[]
   if (!keyword) return businessNodes
   return businessNodes
     .map((node) => {
-      const children = filterCodeTreeNodes(node.children || [], keyword)
-      if (children.length || searchableCodeTreeNode(node).includes(keyword)) {
+      const children = filterCodeTreeNodes(node.children || [], keyword, keepClassIds)
+      const selfMatch = searchableCodeTreeNode(node).includes(keyword)
+      const keepByMethod = node.kind === 'CLASS' && keepClassIds.has(node.id)
+      if (children.length || selfMatch || keepByMethod) {
         return { ...node, children }
       }
       return null
