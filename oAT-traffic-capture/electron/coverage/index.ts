@@ -163,7 +163,7 @@ async function runSteps(steps: RunStep[]): Promise<{ success: boolean; stdout: s
   for (const s of steps) {
     console.info('[覆盖率] $ %s %s%s', s.cmd, s.args.join(' '), s.description ? `  # ${s.description}` : '')
     const r = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-      const p = spawn(s.cmd, s.args, { windowsHide: true, cwd: s.cwd })
+      const p = spawn(s.cmd, s.args, { windowsHide: true, cwd: s.cwd, env: { ...process.env, ...(s.env || {}) } })
       let so = ''
       let se = ''
       p.stdout.on('data', (d) => (so += d.toString()))
@@ -203,7 +203,7 @@ export async function dumpExecs(config: CoverageConfig, backendId: string, value
     key,
     size: fileSize(f),
     fetchedAt: Date.now(),
-    source: 'dump · tcpserver 远程拉取'
+    source: backendId === 'jacoco' ? 'dump · tcpserver 远程拉取' : '采集 · 工具链运行期'
   }))
   return { success: true, execs }
 }
@@ -221,11 +221,17 @@ function collectOutputPaths(steps: RunStep[]): string[] {
 }
 
 /** 推断 HTML 报告目录（iframe 按 reportDir/index.html 加载） */
-function inferReportDir(backendId: string, commandId: string, values: Record<string, string>, workdir: string): string | undefined {
+function inferReportDir(backendId: string, commandId: string, values: Record<string, string>, workdir: string, key = ''): string | undefined {
   const resolveIn = (base: string | undefined, d: string) => (path.isAbsolute(d) ? d : path.resolve(base || process.cwd(), d))
   const asReportOut = (v: Record<string, string>) => {
     const raw = (v.reportOutDir || '').trim()
     return raw ? resolveIn(workdir, raw) : undefined
+  }
+  // C/C++ 按 Key 的 HTML 目录命名：与 gcov-lcov.ts 的 outputDirFor 完全一致（仅当未显式指定 outputDir 时附加 -<key>）
+  const gcovHtmlDir = () => {
+    const k = (key || '').trim()
+    const raw = (values.outputDir || '').trim() || 'coverage_html'
+    return resolveIn(values.projectDir, k && !values.outputDir ? `${raw}-${k}` : raw)
   }
   switch (backendId) {
     case 'jacoco':
@@ -236,11 +242,14 @@ function inferReportDir(backendId: string, commandId: string, values: Record<str
     case 'nyc':
       return commandId === 'report' ? resolveIn(values.projectDir, values.reportDir || 'coverage') : undefined
     case 'coverage-py':
-      return commandId === 'html' ? resolveIn(values.projectDir, values.outputDir || 'coverage_html') : undefined
+      // HTML 生成指令 id 为 'report'（对齐 JaCoCo 的 report 指令；旧 'html' 兼容保留）
+      return commandId === 'report' || commandId === 'html' ? resolveIn(values.projectDir, values.outputDir || 'coverage_html') : undefined
     case 'go-cov':
       return commandId === 'cover' ? path.resolve(values.outputDir || process.cwd()) : undefined
     case 'gcov-lcov':
-      return commandId === 'genhtml' ? resolveIn(values.projectDir, values.outputDir || 'coverage_html') : undefined
+      // 对齐 JaCoCo：HTML 报告指令 id 为 'report'（原 'genhtml' 不触发 UI 报告卡，已统一）；incremental 也产出 HTML
+      if (commandId === 'report' || commandId === 'incremental') return gcovHtmlDir()
+      return undefined
     default:
       return undefined
   }
@@ -284,7 +293,7 @@ export async function runCommand(config: CoverageConfig, backendId: string, comm
   const run = await runSteps(steps)
   if (!run.success) return { success: false, error: run.error, stdout: run.stdout, stderr: run.stderr }
   const outputs = collectOutputPaths(steps).filter((f) => fs.existsSync(f))
-  const reportDir = inferReportDir(backendId, commandId, values ?? {}, workdir)
+  const reportDir = inferReportDir(backendId, commandId, values ?? {}, workdir, key)
   // dump 类指令把 .exec 纳入数据源列表
   let execsInfo: CoverageExecInfo[] | undefined
   if (backendId === 'jacoco' && commandId === 'dump') {
@@ -319,7 +328,7 @@ export async function previewCommand(config: CoverageConfig, backendId: string, 
 export async function generateReport(config: CoverageConfig, backendId: string, values: Record<string, string>, execs: string[]) {
   const backend = getBackend(backendId)
   if (!backend) return { success: false, error: '未知后端: ' + backendId }
-  if (backend.collect && (!execs || execs.length === 0)) {
+  if (backendId === 'jacoco' && (!execs || execs.length === 0)) {
     console.warn('[覆盖率] report 中止：后端 %s 需要 .exec 输入但列表为空', backendId)
     return { success: false, error: '请先抓取 .exec（Java 后端需要 exec 输入）' }
   }

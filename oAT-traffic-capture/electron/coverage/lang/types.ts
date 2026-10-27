@@ -14,6 +14,8 @@ export interface RunStep {
   cmd: string
   args: string[]
   cwd?: string
+  /** 传递给子进程的环境变量（合并进 process.env）；如 Go 采集需 GOCOVERDIR */
+  env?: Record<string, string>
   description: string
 }
 
@@ -69,7 +71,13 @@ export interface CoverageBackend {
   commands: CoverageCommandDef[]
 }
 
-/** 把一个步骤格式化成可读命令（供预览展示） */
+/** 把一个步骤格式化成可读命令（供预览展示），含可选的环境变量前缀 */
 export function fmtStep(step: RunStep): string {
-  return `${step.cmd} ${step.args.map(a => (/[\s"'<>]/.test(a) ? `"${a}"` : a)).join(' ')}`.trim()
+  const envPrefix =
+    step.env && Object.keys(step.env).length
+      ? Object.entries(step.env)
+        .map(([k, v]) => `${k}=${/[\s"'<>]/.test(v) ? `"${v}"` : v}`)
+        .join(' ') + ' '
+      : ''
+  return `${envPrefix}${step.cmd} ${step.args.map(a => (/[\s"'<>]/.test(a) ? `"${a}"` : a)).join(' ')}`.trim()
 }
