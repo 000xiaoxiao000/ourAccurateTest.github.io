@@ -63,7 +63,7 @@ let unsubscribeProbeHeartbeat: (() => void) | undefined
 // 探针不是业务流程的一个阶段，它是「采集能否成立」的前置条件，所以不作为第 6 个一级导航，
 // 而是做成全局可见的状态提示 + 一行直达入口。
 const probeSummary = ref<ProbeSummary | null>(null)
-const coverageSubTab = ref<'probes' | 'tools' | 'impact'>('tools')
+const coverageSubTab = ref<'probes' | 'tools' | 'impact' | 'source-impact'>('tools')
 /** 角标：没登记过探针时不打扰新用户（total=0 → 不显示）。语义：握手成功就算在线（含未采集的） */
 const probeBadge = computed(() => {
   const s = probeSummary.value

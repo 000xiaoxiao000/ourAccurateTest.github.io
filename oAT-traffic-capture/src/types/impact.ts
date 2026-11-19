@@ -95,3 +95,70 @@ export interface ImpactResult {
   /** key 粒度自检提示 */
   keyHint?: string
 }
+
+// ===== 变更影响分析（源码结构版）=====
+// 与上面的覆盖率版互补：不需要 exec，靠新旧源码差异 + 调用图回溯定位受影响接口。
+
+export interface SourceImpactRequest {
+  newSourceRoot: string
+  oldSourceRoot: string
+  since?: number
+  maxDepth?: number
+}
+
+export interface SourceEndpoint {
+  httpMethod: string
+  path: string
+  className: string
+  methodName: string
+  symbolKey: string
+  locator: string
+}
+
+export interface AffectedEndpoint {
+  endpoint: SourceEndpoint
+  confidence: number
+  seed: string
+  path: string[]
+  edgeTypes: string[]
+  cases: string[]
+  hits: number
+  evidence: string[]
+}
+
+export interface AffectedCase {
+  caseName: string
+  endpoints: string[]
+  hits: number
+  order: number
+}
+
+export interface SourceChange {
+  key: string
+  kind: 'TYPE' | 'METHOD'
+  changeType: 'ADD' | 'DELETE' | 'MODIFY'
+  qualifiedName: string
+  path: string
+  reason: string
+}
+
+export interface SourceImpactResult {
+  success: boolean
+  error?: string
+  errorKind?: 'usage' | 'io' | 'notfound'
+  stages: ImpactStage[]
+  summary: {
+    scannedFiles: number
+    changedSymbols: number
+    changedClasses: number
+    endpoints: number
+    affectedEndpoints: number
+    affectedCases: number
+    unmatchedEndpoints: number
+  }
+  changes: SourceChange[]
+  endpoints: SourceEndpoint[]
+  affected: AffectedEndpoint[]
+  cases: AffectedCase[]
+  warnings: string[]
+}

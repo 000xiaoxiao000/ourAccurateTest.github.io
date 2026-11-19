@@ -938,6 +938,18 @@ ipcMain.handle('coverage-impact-analyze', async (_event, req: any) => {
   }
 })
 
+// ===== 变更影响分析（源码结构版）：改 Service/POJO → 回溯 Controller 接口 → 流量反查用例 =====
+function sendSourceImpactLog(p: { text: string; percent: number }) {
+  try { mainWindow?.webContents.send('coverage-source-impact-log', p) } catch { /* 窗口已关闭则忽略 */ }
+}
+ipcMain.handle('coverage-source-impact-analyze', async (_event, req: any) => {
+  try {
+    return await coverage.sourceImpactAnalyze(req ?? {}, sendSourceImpactLog)
+  } catch (e: any) {
+    return { success: false, error: String(e?.message ?? e), errorKind: 'io' }
+  }
+})
+
 // ===== 在线探针：发现 / 探活 / 登记 =====
 // 协议侧用 Node 原生 socket（1~10ms，超时可控），不用 CLI 子进程：
 // 子进程要启 JVM（几百 ms~1s）批量探测会卡死，且 CLI 的 connect() 没设超时，不可达 IP 会挂很久。

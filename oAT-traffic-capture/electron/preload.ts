@@ -106,6 +106,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   // ===== 影响分析 =====
   coverageImpactAnalyze: (req: any) => ipcRenderer.invoke('coverage-impact-analyze', req),
+  // 变更影响分析（源码结构版）：不需要覆盖率，改代码即可回溯受影响接口与用例
+  coverageSourceImpactAnalyze: (req: any) => ipcRenderer.invoke('coverage-source-impact-analyze', req),
+  onCoverageSourceImpactLog: (callback: (p: { text: string; percent: number }) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, p: { text: string; percent: number }) => callback(p)
+    ipcRenderer.on('coverage-source-impact-log', listener)
+    return () => ipcRenderer.removeListener('coverage-source-impact-log', listener)
+  },
   onCoverageImpactLog: (callback: (p: { text: string; percent: number }) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, p: { text: string; percent: number }) => callback(p)
     ipcRenderer.on('coverage-impact-log', listener)

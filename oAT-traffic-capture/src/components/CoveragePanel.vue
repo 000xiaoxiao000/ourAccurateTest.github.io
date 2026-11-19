@@ -3,13 +3,15 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTrafficStore } from '../stores/traffic'
 import GitSourcePanel from './GitSourcePanel.vue'
 import ImpactAnalysisPanel from './ImpactAnalysisPanel.vue'
+import SourceImpactPanel from './SourceImpactPanel.vue'
 import ProbePanel from './ProbePanel.vue'
 import type { CoverageBackendInfo, CoverageExecInfo, CoverageParamSpec } from '../types/traffic'
 import type { CoveragePathProbe, GitCapability } from '../types/electron'
 import type { ProbeResult } from '../types/probe'
 
-const props = defineProps<{ subTab?: 'probes' | 'tools' | 'impact' }>()
-const emit = defineEmits<{ (e: 'update:subTab', v: 'probes' | 'tools' | 'impact'): void }>()
+type SubTab = 'probes' | 'tools' | 'impact' | 'source-impact'
+const props = defineProps<{ subTab?: SubTab }>()
+const emit = defineEmits<{ (e: 'update:subTab', v: SubTab): void }>()
 
 const store = useTrafficStore()
 const execs = ref<CoverageExecInfo[]>([])
@@ -29,7 +31,7 @@ const toolsOpen = ref(true)
 // ⚠️ 需要被 App.vue 左导航的「查看 →」跨组件切换，所以做成 v-model 而不是内部 state
 const mainTab = computed({
   get: () => props.subTab ?? 'tools',
-  set: (v: 'probes' | 'tools' | 'impact') => emit('update:subTab', v)
+  set: (v: SubTab) => emit('update:subTab', v)
 })
 
 // ===== 在线探针状态灯（地址框旁）：数据来自主进程心跳，不自己发起探测 =====
@@ -343,6 +345,7 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       <button type="button" class="sub-tab" :class="{ on: mainTab === 'probes' }" @click="mainTab = 'probes'">在线探针</button>
       <button type="button" class="sub-tab" :class="{ on: mainTab === 'tools' }" @click="mainTab = 'tools'">工具与报告</button>
       <button type="button" class="sub-tab" :class="{ on: mainTab === 'impact' }" @click="mainTab = 'impact'">影响分析</button>
+      <button type="button" class="sub-tab" :class="{ on: mainTab === 'source-impact' }" @click="mainTab = 'source-impact'">变更影响(源码)</button>
     </div>
 
     <ProbePanel v-if="mainTab === 'probes'" :agent-address="cfg().agentAddress" @use-address="pickProbe" @clear-address="clearProbe" />
@@ -351,6 +354,12 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
       v-if="mainTab === 'impact'"
       :classfiles-path="cfg().classfilesPath"
       :default-exec-dir="defaultExecDir"
+      :cap="gitCap"
+      @recheck-git="loadGitCap(true)"
+    />
+
+    <SourceImpactPanel
+      v-if="mainTab === 'source-impact'"
       :cap="gitCap"
       @recheck-git="loadGitCap(true)"
     />

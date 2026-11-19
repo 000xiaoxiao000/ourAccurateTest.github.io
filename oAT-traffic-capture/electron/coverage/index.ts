@@ -101,7 +101,7 @@ export function gitCleanup(opts?: { all?: boolean }) {
 
 // ===== 影响分析（变更行 ∩ 谁跑过 = 受影响接口 / 用例） =====
 import { analyzeImpact } from './impact.js'
-import { loadCoverageKeyTraffic, countRecords } from '../database.js'
+import { loadCoverageKeyTraffic, loadTrafficForImpact, countRecords } from '../database.js'
 export type { ImpactRequest, ImpactResult } from './impact.js'
 
 /** 多路径参数按 ; 拆分（与前端「多模块用 ; 分隔」一致） */
@@ -138,6 +138,34 @@ export async function impactAnalyze(
       since: req.since,
       traffic: loadCoverageKeyTraffic({ since: req.since }),
       trafficTotalCount: countRecords({ since: req.since })
+    },
+    onStage
+  )
+}
+
+/**
+ * 变更影响分析（源码结构版）：从变更符号回溯 Controller 接口，再用流量库反查用例。
+ * 与 impactAnalyze 互补：本函数不需要 exec / coverage_key，只需要新旧两份源码。
+ * 流量由这里从本地流量库注入，sourceImpact.ts 本身不依赖 electron / database。
+ */
+export async function sourceImpactAnalyze(
+  req: {
+    newSourceRoot: string
+    oldSourceRoot: string
+    since?: number
+    maxDepth?: number
+  },
+  onStage?: (s: { text: string; percent: number }) => void
+) {
+  const { analyzeSourceImpact } = await import('./sourceImpact.js')
+  return analyzeSourceImpact(
+    {
+      newSourceRoot: req.newSourceRoot,
+      oldSourceRoot: req.oldSourceRoot,
+      since: req.since,
+      maxDepth: req.maxDepth,
+      // 不要求 coverage_key：只要有抓包记录就能反查「哪个用例访问过这个接口」
+      traffic: loadTrafficForImpact({ since: req.since })
     },
     onStage
   )

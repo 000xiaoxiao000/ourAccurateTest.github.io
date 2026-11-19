@@ -8,7 +8,7 @@ import type {
   TrafficFilterRule,
   TrafficRecord
 } from '../types/traffic'
-import type { ImpactAnalyzeRequest, ImpactResult } from '../types/impact'
+import type { ImpactAnalyzeRequest, ImpactResult, SourceImpactRequest, SourceImpactResult } from '../types/impact'
 import type { ProbeAgent, ProbeResult, ProbeSummary } from '../types/probe'
 
 export interface CoveragePathProbe {
@@ -214,6 +214,9 @@ declare global {
       // ===== 影响分析 =====
       coverageImpactAnalyze: (req: ImpactAnalyzeRequest) => Promise<ImpactResult>
       onCoverageImpactLog: (callback: (p: { text: string; percent: number }) => void) => () => void
+      // 变更影响分析（源码结构版）
+      coverageSourceImpactAnalyze: (req: SourceImpactRequest) => Promise<SourceImpactResult>
+      onCoverageSourceImpactLog: (callback: (p: { text: string; percent: number }) => void) => () => void
     }
   }
 }

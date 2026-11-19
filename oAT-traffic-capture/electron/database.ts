@@ -85,6 +85,36 @@ export interface CoverageKeyTraffic {
 }
 
 /**
+ * 变更影响分析用：拉取全部抓包记录（不要求 coverage_key）。
+ * 源码结构版影响分析只需 method/url/caseName 做「接口 → 用例」反查，不需要 exec 覆盖率。
+ * 用例名来自 sessions.case_name —— 抓包时 record.caseName 是空的，只有会话上有。
+ */
+export function loadTrafficForImpact(opts: { since?: number } = {}): Array<{
+  method: string; url: string; protocol: string; caseName: string; timestamp: number
+}> {
+  const rows = opts.since
+    ? getDb().prepare(
+        // language=SQLite
+        `SELECT r.method, r.url, r.protocol, r.timestamp, COALESCE(s.case_name,'') AS case_name
+         FROM records r LEFT JOIN sessions s ON s.id = r.session_id
+         WHERE r.timestamp >= ? ORDER BY r.timestamp DESC`
+      ).all(opts.since) as Array<Record<string, any>>
+    : getDb().prepare(
+        // language=SQLite
+        `SELECT r.method, r.url, r.protocol, r.timestamp, COALESCE(s.case_name,'') AS case_name
+         FROM records r LEFT JOIN sessions s ON s.id = r.session_id
+         ORDER BY r.timestamp DESC`
+      ).all() as Array<Record<string, any>>
+  return rows.map((r) => ({
+    method: r.method ?? '',
+    url: r.url ?? '',
+    protocol: r.protocol ?? '',
+    caseName: r.case_name ?? '',
+    timestamp: Number(r.timestamp) || 0
+  }))
+}
+
+/**
  * 拉取带 coverage_key 的流量记录。
  * 用例名来自 sessions.case_name —— 抓包时 record.caseName 是空的，只有会话上有。
  */
