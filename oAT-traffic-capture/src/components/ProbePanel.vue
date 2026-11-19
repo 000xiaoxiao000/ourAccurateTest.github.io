@@ -37,6 +37,8 @@ const probes = ref<ProbeResult[]>([])
 const summary = ref<ProbeSummary | null>(null)
 const msg = ref('')
 const busy = ref(false)
+/** 首帧探测中：区分「还没探测完」与「确实没有探针」，避免冷启动先闪一下误导性的空态 */
+const loadingFirst = ref(true)
 const autoRefresh = ref<0 | 10000 | 30000>(0)
 const addOpen = ref(false)
 const newHost = ref('')
@@ -312,8 +314,8 @@ watch(autoRefresh, restartTimer)
 /** 主进程 20s 后台心跳也会推摘要：这里只更新徽标，不重排列表（避免正在看的卡片跳动） */
 let unsubscribeSummary: (() => void) | undefined
 
-onMounted(() => {
-  refresh()
+onMounted(async () => {
+  // 先订阅心跳（避免首轮探测这 1.5s 内漏掉推送）
   offProgress = window.electronAPI?.onProbeScanProgress((p) => {
     if (!p) return
     rangeProgress.value = p.finished ? '完成' : `已扫 ${p.done}/${p.total}`
@@ -323,7 +325,18 @@ onMounted(() => {
     summary.value = p.summary ?? summary.value
     // 心跳是全量结果，直接用；排序在引擎侧已按 状态→端口 稳定排序，不会造成卡片乱跳
     if (p.probes?.length || probes.value.length) probes.value = p.probes ?? []
+    loadingFirst.value = false
   })
+  // 主进程启动时已跑过一次心跳并缓存了结果：先瞬时上屏，避免冷启动先显示「还没有探针」再跳成 2 条。
+  const cached = await window.electronAPI?.coverageProbeLast().catch(() => null)
+  if (cached?.probes?.length) {
+    probes.value = cached.probes
+    summary.value = cached.summary ?? null
+    loadingFirst.value = false
+  }
+  // 再实时探测拿最新状态（离线目标每个最多 1.5s，这里不再阻塞首屏）
+  await refresh()
+  loadingFirst.value = false
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -444,8 +457,15 @@ onUnmounted(() => {
         <button v-if="keyword || statusFilter !== 'all'" class="btn btn-outline btn-sm" @click="keyword = ''; statusFilter = 'all'">清空筛选</button>
       </div>
 
+      <!-- 首帧探测中：显示进度，避免冷启动先闪一下「还没有探针」再跳成有数据 -->
+      <div v-if="loadingFirst && !probes.length" class="card">
+        <div class="pb-empty">
+          <p class="re-title">正在探测已登记的探针…</p>
+          <p class="re-sub">首次加载需要逐个小幅「敲门」确认状态，离线目标最多等待约 1.5 秒，请稍候。</p>
+        </div>
+      </div>
       <!-- 空态：给出可照抄的挂载参数，而不是干巴巴的「暂无数据」 -->
-      <div v-if="!probes.length" class="card">
+      <div v-else-if="!probes.length" class="card">
       <div class="pb-empty">
         <p class="re-title">还没有探针</p>
         <p class="re-sub">在被测服务的启动命令里挂上探针（照抄下面这行），然后点「<b>添加探针</b>」登记地址，或用「<b>远端发现</b>」按网段批量探测——目标服务不在本机时（容器 / 远端虚机）走这两条路。</p>

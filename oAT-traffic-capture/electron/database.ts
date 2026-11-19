@@ -1,9 +1,19 @@
+// noinspection SqlResolve
+// 本文件的 SQL 以字符串注入（// language=SQLite）方式传给 better-sqlite3，表结构在运行时
+// initDatabase() 里创建，IDE 的静态数据源无法解析 records / sessions / filter_rules，
+// 会对每条注入 SQL 误报「无法解析表」。文件级抑制一次解决，避免逐条注释遗漏。
 import * as Database from 'better-sqlite3'
 import * as path from 'node:path'
 import { app } from 'electron'
 import type { CaptureSession, TrafficFilterRule, TrafficRecord } from './types.js'
 
-const DatabaseConstructor = Database.default
+// better-sqlite3 用 `export =` 导出构造器。不同 tsconfig 下 `import * as Database` 的形态不同：
+//   开了 esModuleInterop   → 构造器在 Database.default
+//   没开（IDE 用根 tsconfig）→ Database 本身就是构造器，没有 .default
+// 兼容两种，避免 IDE 报 TS2339: Property 'default' does not exist。
+// 用显式可 new 的构造器类型标注，保证两种配置下都能正确推断出 Database 实例。
+type DbConstructor = new (filename?: string | Buffer, options?: Database.Options) => Database.Database
+const DatabaseConstructor = ((Database as any).default ?? Database) as DbConstructor
 let db: Database.Database | null = null
 
 function getDb(): Database.Database {
@@ -200,7 +210,8 @@ export function listTrafficHosts(opts: { limit?: number } = {}): TrafficHost[] {
       map.set(host, { host, ports: port ? [port] : [], count: 1, lastTs: Number(r.timestamp) || 0 })
     }
   }
-  return [...map.values()].sort((a, b) => b.count - a.count)
+  // 用 Array.from 而非展开运算符：展开 MapIterator 在低版本 target / 无 downlevelIteration 下会报 TS2802
+  return Array.from(map.values()).sort((a, b) => b.count - a.count)
 }
 
 /** 时间窗内的抓包记录总数（影响分析自检：区分「没抓包」和「抓了但没注入 key」） */
