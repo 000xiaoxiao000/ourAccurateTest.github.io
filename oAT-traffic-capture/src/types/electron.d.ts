@@ -183,7 +183,7 @@ declare global {
       resolveClassfiles: (localPath: string) => Promise<{ success: boolean; resolvedPath?: string; error?: string }>
       coverageDump: (opts: { backendId?: string; values?: Record<string, string>; key?: string }) => Promise<{ success: boolean; execs?: CoverageExecInfo[]; error?: string }>
       coveragePreview: (opts: { backendId?: string; values?: Record<string, string>; execs?: string[] }) => Promise<{ success: boolean; text?: string; error?: string }>
-      coveragePickPath: (opts: { pick?: 'file' | 'dir' | 'dirOrFile'; title?: string }) => Promise<{ success: boolean; path?: string }>
+      coveragePickPath: (opts: { pick?: 'file' | 'dir' | 'dirOrFile'; title?: string; multi?: boolean; extensions?: string[] }) => Promise<{ success: boolean; path?: string; paths?: string[] }>
       coverageKeys: () => Promise<{ success: boolean; keys?: string[]; error?: string }>
       coverageStats: (opts: { limit?: number; agentAddress?: string }) => Promise<{ success: boolean; text?: string; error?: string }>
       coverageDumpclasses: (opts: { zip?: string }) => Promise<{ success: boolean; file?: string; error?: string }>

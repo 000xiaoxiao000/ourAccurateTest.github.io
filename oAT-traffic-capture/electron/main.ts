@@ -902,13 +902,17 @@ ipcMain.handle('coverage-open-report', async (_event, opts: any) => {
 })
 
 ipcMain.handle('coverage-pick-path', async (_event, opts: any) => {
-  const properties: ('openFile' | 'openDirectory')[] = opts?.pick === 'dir' ? ['openDirectory'] : ['openFile']
+  const properties: ('openFile' | 'openDirectory' | 'multiSelections')[] = opts?.pick === 'dir' ? ['openDirectory'] : ['openFile']
   // 目录或归档（zip/jar）都能当 classfiles：同时允许选文件与目录
   if (opts?.pick === 'dirOrFile') properties.push('openFile')
-  const filters = opts?.pick === 'dirOrFile' ? [{ name: '构建产物', extensions: ['zip', 'jar', 'war'] }] : undefined
+  // 多选（合并 exec 一次挑多个 .exec）
+  if (opts?.multi) properties.push('multiSelections')
+  const filters = opts?.pick === 'dirOrFile'
+    ? [{ name: '构建产物', extensions: ['zip', 'jar', 'war'] }]
+    : opts?.extensions ? [{ name: '文件', extensions: opts.extensions }] : undefined
   const result = await dialog.showOpenDialog({ properties, filters, title: opts?.title ?? '选择路径' })
-  if (result.canceled || result.filePaths.length === 0) return { success: true, path: '' }
-  return { success: true, path: result.filePaths[0] }
+  if (result.canceled || result.filePaths.length === 0) return { success: true, path: '', paths: [] }
+  return { success: true, path: result.filePaths[0], paths: result.filePaths }
 })
 
 // 单路径即时校验（classfiles 数 .class；源码根验包结构可达性）

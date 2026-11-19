@@ -4,6 +4,7 @@ import { useTrafficStore } from '../stores/traffic'
 import GitSourcePanel from './GitSourcePanel.vue'
 import ImpactAnalysisPanel from './ImpactAnalysisPanel.vue'
 import SourceImpactPanel from './SourceImpactPanel.vue'
+import MergeExecPanel from './MergeExecPanel.vue'
 import ProbePanel from './ProbePanel.vue'
 import type { CoverageBackendInfo, CoverageExecInfo, CoverageParamSpec } from '../types/traffic'
 import type { CoveragePathProbe, GitCapability } from '../types/electron'
@@ -116,6 +117,21 @@ const backends = computed(() => store.coverageBackends)
 const selectedBackend = computed<CoverageBackendInfo | undefined>(
   () => backends.value.find((b) => b.id === backendId.value)
 )
+
+/** 手动合并完成后，把产出的 exec 加入列表，后续报告/影响分析可直接选用 */
+function onExecMerged(file: string) {
+  if (!file) return
+  if (!execs.value.find((x) => x.file === file)) {
+    execs.value.push({
+      file,
+      key: 'merged',
+      size: 0,
+      fetchedAt: Date.now(),
+      source: 'merge'
+    })
+  }
+  msg.value = `合并完成：${file}`
+}
 
 function cfg() {
   return store.coverageConfig
@@ -507,6 +523,9 @@ watch(() => store.coverageConfig.backend, (id) => { if (id !== backendId.value) 
           </table>
           <p class="muted" v-else style="margin-top:8px">尚无产出。切到「dump · 抓取 .exec」执行，产出会自动列到这里</p>
         </div>
+
+        <!-- 手动合并 exec：独立入口，不自动触发 -->
+        <MergeExecPanel v-if="selectedBackend.id === 'jacoco'" :execs="execs" @merged="onExecMerged" />
       </div>
     </div>
 
