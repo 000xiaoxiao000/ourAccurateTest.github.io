@@ -59,30 +59,11 @@ let unsubscribeRuntimeLog: (() => void) | undefined
 let unsubscribeRuntimeLogClear: (() => void) | undefined
 let unsubscribeProbeHeartbeat: (() => void) | undefined
 
-// ===== 在线探针：全局可见的状态（左导航角标 + 底部状态行）=====
+// ===== 在线探针：全局可见的状态（底部状态行）=====
 // 探针不是业务流程的一个阶段，它是「采集能否成立」的前置条件，所以不作为第 6 个一级导航，
-// 而是做成全局可见的状态提示 + 一行直达入口。
+// 而是做成底部状态提示 + 一行直达入口
 const probeSummary = ref<ProbeSummary | null>(null)
 const coverageSubTab = ref<'probes' | 'tools' | 'impact' | 'source-impact'>('tools')
-/** 角标：没登记过探针时不打扰新用户（total=0 → 不显示）。语义：握手成功就算在线（含未采集的） */
-const probeBadge = computed(() => {
-  const s = probeSummary.value
-  if (!s || !s.total) return null
-  const alive = s.online + s.warning
-  if (alive > 0) return { cls: 'ok', text: String(alive) }
-  return { cls: 'off', text: String(s.offline + s.vanilla) }
-})
-const probeBadgeTitle = computed(() => {
-  const s = probeSummary.value
-  if (!s) return ''
-  const alive = s.online + s.warning
-  if (alive > 0) {
-    return s.warning > 0
-      ? `${alive} 个探针在线（其中 ${s.warning} 个还没采到归属 Key：发一次请求，并确认覆盖率采集开关已打开）`
-      : `${alive} 个探针在线，已采到 Key`
-  }
-  return '登记的探针全部离线'
-})
 function goProbes() {
   coverageSubTab.value = 'probes'
   activeSection.value = 'coverage'
@@ -353,7 +334,6 @@ function handleFloatingClick() {
         <button type="button" :class="{ active: activeSection === 'sessions' }" @click="selectSection('sessions')">会话管理</button>
         <button type="button" :class="{ active: activeSection === 'coverage' }" @click="selectSection('coverage')">
           <span class="nav-label">覆盖率分析</span>
-          <em v-if="probeBadge" class="nav-badge" :class="'nb-' + probeBadge.cls" :title="probeBadgeTitle">{{ probeBadge.text }}</em>
         </button>
         <button type="button" :class="{ active: activeSection === 'settings' }" @click="selectSection('settings')">系统设置</button>
       </nav>
@@ -826,24 +806,6 @@ function handleFloatingClick() {
   justify-content: space-between;
   gap: 8px;
 }
-
-/* 「覆盖率分析」上的探针角标：复用探针四态色（绿=正常 / 黄=在线但采不到 key / 灰=离线） */
-.nav-badge {
-  font-style: normal;
-  font-size: 11px;
-  font-weight: 700;
-  min-width: 18px;
-  text-align: center;
-  padding: 1px 6px;
-  border-radius: 999px;
-  line-height: 1.5;
-}
-.nav-badge.nb-ok { background: #22c55e; color: #06210f; }
-.nav-badge.nb-warn { background: #f59e0b; color: #2b1a02; }
-.nav-badge.nb-off { background: rgba(255, 255, 255, 0.16); color: #cbd5e1; }
-.nav button.active .nav-badge.nb-ok { background: #ffffff; color: #15803d; }
-.nav button.active .nav-badge.nb-warn { background: #ffffff; color: #b45309; }
-.nav button.active .nav-badge.nb-off { background: rgba(255, 255, 255, 0.28); color: #ffffff; }
 
 /* 底部探针状态行：一行直达，路径最短 */
 .sidebar-probe {
